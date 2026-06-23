@@ -1226,45 +1226,22 @@ const BulkUpload=({user,toast})=>{
           <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em",marginBottom:3}}>IMPORTAR</div>
           <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:18,color:B.t1}}>CARGA MASIVA</div>
         </div>
-        <div style={{display:"flex",gap:9}}>
-          <Bb label="⬇ PLANTILLA EXCEL" ghost small color={B.green} onClick={async()=>{
-            try{
-              
-              const ejemplo=[
-                {ID_EXTERNO:"",TIPO_ACCION:"INSTALACION",SUB_TIPO:"",NRO_TERMINAL:"1234567",OBS_MODELO:"POS Ingenico Move 5000",RUT:"21 000001 5",RAZON_SOCIAL:"Supermercado Norte S.A.",TIER:"VIP",DEPARTAMENTO:"Montevideo",LOCALIDAD:"Pocitos",DIRECCION:"Av. Brasil 2785",TELEFONO:"099111222",RUBRO:"Supermercado",FRANJA_HORARIA:"FH2 (12-16)",PRIORIDAD:"ALTA"},
-                {ID_EXTERNO:"EXT-00123",TIPO_ACCION:"SERVICIO_TECNICO",SUB_TIPO:"CONEXION",NRO_TERMINAL:"7654321",OBS_MODELO:"Verifone V240m",RUT:"21 000002 3",RAZON_SOCIAL:"Farmacia Central",TIER:"T1a",DEPARTAMENTO:"Maldonado",LOCALIDAD:"Punta del Este",DIRECCION:"Gorlero 1234",TELEFONO:"099333444",RUBRO:"Farmacia",FRANJA_HORARIA:"FH1 (8-12)",PRIORIDAD:"CRITICA"},
-                {ID_EXTERNO:"EXT-00456",TIPO_ACCION:"SERVICIO_TECNICO",SUB_TIPO:"BATERIA",NRO_TERMINAL:"9871234",OBS_MODELO:"PAX A920",RUT:"21 000003 1",RAZON_SOCIAL:"Estación ANCAP Centro",TIER:"T1b",DEPARTAMENTO:"Salto",LOCALIDAD:"Salto",DIRECCION:"Artigas 456",TELEFONO:"099555666",RUBRO:"Combustible",FRANJA_HORARIA:"FH3 (16-19)",PRIORIDAD:"MEDIA"},
-                {ID_EXTERNO:"",TIPO_ACCION:"RETIRO",SUB_TIPO:"",NRO_TERMINAL:"1122334",OBS_MODELO:"Ingenico iCT220",RUT:"21 000004 9",RAZON_SOCIAL:"Hotel Carrasco",TIER:"VIP",DEPARTAMENTO:"Montevideo",LOCALIDAD:"Carrasco",DIRECCION:"Rambla República 5101",TELEFONO:"099777888",RUBRO:"Hotel",FRANJA_HORARIA:"FH4 (19-22)",PRIORIDAD:"BAJA"},
-                {ID_EXTERNO:"EXT-00789",TIPO_ACCION:"VISITA_PROACTIVA",SUB_TIPO:"",NRO_TERMINAL:"5566778",OBS_MODELO:"Verifone VX520",RUT:"21 000005 7",RAZON_SOCIAL:"Restaurante El Fogón",TIER:"T2",DEPARTAMENTO:"Canelones",LOCALIDAD:"Ciudad de la Costa",DIRECCION:"Av. Giannattasio km 14",TELEFONO:"099999000",RUBRO:"Restaurante",FRANJA_HORARIA:"FH2 (12-16)",PRIORIDAD:"MEDIA"},
-              ];
-              const ws=XLSX.utils.json_to_sheet(ejemplo);
-              // Anchos de columna
-              ws["!cols"]=[{wch:14},{wch:18},{wch:18},{wch:14},{wch:22},{wch:14},{wch:24},{wch:8},{wch:16},{wch:18},{wch:24},{wch:13},{wch:14},{wch:16},{wch:12}];
-              const wb=XLSX.utils.book_new();
-              XLSX.utils.book_append_sheet(wb,"CARGA_MASIVA",ws);
-              // Hoja diccionario
-              const dict=[
-                {CAMPO:"ID_EXTERNO",REQUERIDO:"NO",DESCRIPCION:"ID del sistema externo. Si vacío Boolean asigna BN-XXXXXX",VALORES:"EXT-00123 · MAX-456"},
-                {CAMPO:"TIPO_ACCION",REQUERIDO:"SÍ",DESCRIPCION:"Tipo de trabajo a realizar",VALORES:"INSTALACION | SERVICIO_TECNICO | RETIRO | VISITA_PROACTIVA"},
-                {CAMPO:"SUB_TIPO",REQUERIDO:"NO",DESCRIPCION:"Solo para SERVICIO_TECNICO",VALORES:"FISICO | CONEXION | CONFIGURACION | BATERIA | CARGADOR | OTRO"},
-                {CAMPO:"NRO_TERMINAL",REQUERIDO:"SÍ",DESCRIPCION:"Número de terminal — SOLO NUMÉRICO",VALORES:"1234567 · 9871234"},
-                {CAMPO:"OBS_MODELO",REQUERIDO:"NO",DESCRIPCION:"Observación del modelo del equipo",VALORES:"POS Ingenico Move 5000 · PAX A920"},
-                {CAMPO:"RUT",REQUERIDO:"SÍ",DESCRIPCION:"RUT del comercio con dígito verificador",VALORES:"21 000001 5"},
-                {CAMPO:"RAZON_SOCIAL",REQUERIDO:"SÍ",DESCRIPCION:"Nombre legal del comercio",VALORES:"Supermercado Norte S.A."},
-                {CAMPO:"TIER",REQUERIDO:"SÍ",DESCRIPCION:"VIP=2h · T1a=4h · T1b=6h · T2=8h de SLA",VALORES:"VIP | T1a | T1b | T2"},
-                {CAMPO:"DEPARTAMENTO",REQUERIDO:"SÍ",DESCRIPCION:"Departamento de Uruguay",VALORES:"Montevideo | Maldonado | Salto..."},
-                {CAMPO:"LOCALIDAD",REQUERIDO:"SÍ",DESCRIPCION:"Ciudad o localidad exacta",VALORES:"Pocitos · Punta del Este · Melo"},
-                {CAMPO:"DIRECCION",REQUERIDO:"SÍ",DESCRIPCION:"Dirección completa del comercio",VALORES:"Av. Brasil 2785 esq. Dr. Jiménez"},
-                {CAMPO:"TELEFONO",REQUERIDO:"NO",DESCRIPCION:"Teléfono de contacto",VALORES:"099111222 · 2XXX XXXX"},
-                {CAMPO:"RUBRO",REQUERIDO:"NO",DESCRIPCION:"Rubro comercial",VALORES:"Supermercado | Farmacia | Combustible | Restaurante | Hotel | Retail | Banco | Otro"},
-                {CAMPO:"FRANJA_HORARIA",REQUERIDO:"SÍ",DESCRIPCION:"Ventana horaria — 8am a 22hs en 4 franjas",VALORES:"FH1 (8-12) | FH2 (12-16) | FH3 (16-19) | FH4 (19-22)"},
-                {CAMPO:"PRIORIDAD",REQUERIDO:"SÍ",DESCRIPCION:"Nivel de prioridad del caso",VALORES:"CRITICA | ALTA | MEDIA | BAJA"},
-              ];
-              const ws2=XLSX.utils.json_to_sheet(dict);
-              ws2["!cols"]=[{wch:16},{wch:10},{wch:40},{wch:46}];
-              XLSX.utils.book_append_sheet(wb,"DICCIONARIO",ws2);
-              XLSX.writeFile(wb,"BOOLEAN_plantilla_carga_masiva.xlsx");
-            }catch(e){alert("Error generando plantilla: "+e.message);}
+          <Bb label="⬇ PLANTILLA CSV" ghost small color={B.green} onClick={()=>{
+            const headers="ID_EXTERNO,TIPO_ACCION,SUB_TIPO,NRO_TERMINAL,OBS_MODELO,RUT,RAZON_SOCIAL,TIER,DEPARTAMENTO,LOCALIDAD,DIRECCION,TELEFONO,RUBRO,FRANJA_HORARIA,PRIORIDAD";
+            const rows=[
+              ",INSTALACION,,1234567,POS Ingenico Move 5000,21 000001 5,Supermercado Norte SA,VIP,Montevideo,Pocitos,Av Brasil 2785,099111222,Supermercado,FH2 (12-16),ALTA",
+              "EXT-00123,SERVICIO_TECNICO,CONEXION,7654321,Verifone V240m,21 000002 3,Farmacia Central,T1a,Maldonado,Punta del Este,Gorlero 1234,099333444,Farmacia,FH1 (8-12),CRITICA",
+              "EXT-00456,SERVICIO_TECNICO,BATERIA,9871234,PAX A920,21 000003 1,Estacion ANCAP,T1b,Salto,Salto,Artigas 456,099555666,Combustible,FH3 (16-19),MEDIA",
+              ",RETIRO,,1122334,Ingenico iCT220,21 000004 9,Hotel Carrasco,VIP,Montevideo,Carrasco,Rambla Republica 5101,099777888,Hotel,FH4 (19-22),BAJA",
+              "EXT-00789,VISITA_PROACTIVA,,5566778,Verifone VX520,21 000005 7,Restaurante El Fogon,T2,Canelones,Ciudad de la Costa,Av Giannattasio km 14,099999000,Restaurante,FH2 (12-16),MEDIA",
+            ];
+            const csv=[headers,...rows].join("\n");
+            const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"});
+            const url=URL.createObjectURL(blob);
+            const a=document.createElement("a");
+            a.href=url; a.download="BOOLEAN_plantilla_carga_masiva.csv";
+            document.body.appendChild(a); a.click();
+            document.body.removeChild(a); URL.revokeObjectURL(url);
           }}/>
           {step>1&&<Bb label="↺ NUEVA CARGA" onClick={reset} ghost small color={B.t2}/>}
         </div>
