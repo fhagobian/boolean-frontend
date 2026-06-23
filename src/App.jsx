@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
+import * as XLSX from "xlsx";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -1160,7 +1161,7 @@ const BulkUpload=({user,toast})=>{
 
   const parseFile=async(f)=>{
     try{
-      const XLSX=await import("xlsx");
+      
       const buf=await f.arrayBuffer();
       const wb=XLSX.read(buf,{type:"array"});
       // busca primera hoja que no sea diccionario/encuesta
@@ -1228,7 +1229,7 @@ const BulkUpload=({user,toast})=>{
         <div style={{display:"flex",gap:9}}>
           <Bb label="⬇ PLANTILLA EXCEL" ghost small color={B.green} onClick={async()=>{
             try{
-              const XLSX=await import("xlsx");
+              
               const ejemplo=[
                 {ID_EXTERNO:"",TIPO_ACCION:"INSTALACION",SUB_TIPO:"",NRO_TERMINAL:"1234567",OBS_MODELO:"POS Ingenico Move 5000",RUT:"21 000001 5",RAZON_SOCIAL:"Supermercado Norte S.A.",TIER:"VIP",DEPARTAMENTO:"Montevideo",LOCALIDAD:"Pocitos",DIRECCION:"Av. Brasil 2785",TELEFONO:"099111222",RUBRO:"Supermercado",FRANJA_HORARIA:"FH2 (12-16)",PRIORIDAD:"ALTA"},
                 {ID_EXTERNO:"EXT-00123",TIPO_ACCION:"SERVICIO_TECNICO",SUB_TIPO:"CONEXION",NRO_TERMINAL:"7654321",OBS_MODELO:"Verifone V240m",RUT:"21 000002 3",RAZON_SOCIAL:"Farmacia Central",TIER:"T1a",DEPARTAMENTO:"Maldonado",LOCALIDAD:"Punta del Este",DIRECCION:"Gorlero 1234",TELEFONO:"099333444",RUBRO:"Farmacia",FRANJA_HORARIA:"FH1 (8-12)",PRIORIDAD:"CRITICA"},
