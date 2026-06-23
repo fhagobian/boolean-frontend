@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-import * as XLSX from "xlsx";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -1159,22 +1158,74 @@ const BulkUpload=({user,toast})=>{
     return errs;
   };
 
-  const parseFile=async(f)=>{
-    try{
-      
-      const buf=await f.arrayBuffer();
-      const wb=XLSX.read(buf,{type:"array"});
-      // busca primera hoja que no sea diccionario/encuesta
-      const sheetName=wb.SheetNames.find(n=>!["DICCIONARIO","FRANJAS","ENCUESTAS","INCIDENTES"].includes(n))||wb.SheetNames[0];
-      const ws=wb.Sheets[sheetName];
-      const raw=XLSX.utils.sheet_to_json(ws,{defval:""});
-      const normalized=raw.map(normalize).filter(r=>Object.values(r).some(v=>v&&v.length>0&&!v.startsWith("BN-")));
-      setRows(normalized);
-      const allErrs=normalized.flatMap((r,i)=>validateRow(r,i));
-      setErrors(allErrs);
-      if(allErrs.length===0) setStep(2);
-    }catch(e){
-      toast("Error al leer el archivo: "+e.message);
+  const parseCSV = (text) => {
+    const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g,"").toLowerCase()
+      .replace(/\s*★\s*/g,"").replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,""));
+    return lines.slice(1).map(line => {
+      // maneja campos con comas dentro de comillas
+      const vals = []; let cur = ""; let inQ = false;
+      for (let ch of line) {
+        if (ch === '"') { inQ = !inQ; }
+        else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ""; }
+        else { cur += ch; }
+      }
+      vals.push(cur.trim());
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = (vals[i] || "").replace(/^"|"$/g, ""); });
+      return obj;
+    }).filter(r => Object.values(r).some(v => v));
+  };
+
+  const parseFile = async (f) => {
+    try {
+      const ext = f.name.split(".").pop().toLowerCase();
+      if (ext === "csv") {
+        // CSV nativo — sin dependencias
+        const text = await f.text();
+        const data = parseCSV(text);
+        const normalized = data.map(normalize).filter(r =>
+          Object.values(r).some(v => v && v.length > 0 && !v.startsWith("BN-"))
+        );
+        setRows(normalized);
+        const allErrs = normalized.flatMap((r, i) => validateRow(r, i));
+        setErrors(allErrs);
+        if (allErrs.length === 0) setStep(2);
+      } else if (ext === "xlsx" || ext === "xls") {
+        // Excel — carga SheetJS desde CDN solo cuando se necesita
+        toast("Leyendo Excel...");
+        await new Promise((resolve, reject) => {
+          if (window.XLSX) { resolve(); return; }
+          const s = document.createElement("script");
+          s.src = "https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js";
+          s.onload = resolve;
+          s.onerror = () => reject(new Error("No se pudo cargar el lector de Excel"));
+          document.head.appendChild(s);
+        });
+        const buf = await f.arrayBuffer();
+        const wb  = window.XLSX.read(buf, { type: "array" });
+        const sheetName = wb.SheetNames.find(n =>
+          !["DICCIONARIO","REFERENCIA","REFERENCIA_RÁPIDA","ENCUESTAS","INCIDENTES"].includes(n)
+        ) || wb.SheetNames[0];
+        const ws  = wb.Sheets[sheetName];
+        const raw = window.XLSX.utils.sheet_to_json(ws, { defval: "" });
+        const normalized = raw.map(r => {
+          const nr = {};
+          Object.entries(r).forEach(([k, v]) => {
+            nr[k.toLowerCase().replace(/\s*★\s*/g,"").replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,"")] = String(v);
+          });
+          return nr;
+        }).map(normalize).filter(r => Object.values(r).some(v => v && v.length > 0 && !v.startsWith("BN-")));
+        setRows(normalized);
+        const allErrs = normalized.flatMap((r, i) => validateRow(r, i));
+        setErrors(allErrs);
+        if (allErrs.length === 0) setStep(2);
+      } else {
+        toast("Formato no soportado. Usá .xlsx o .csv");
+      }
+    } catch (e) {
+      toast("Error al leer el archivo: " + e.message);
     }
   };
 
