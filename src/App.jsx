@@ -1824,7 +1824,7 @@ const MiRutaDelDia = ({ user, toast }) => {
       if (tecs?.length > 0) await cargarCasosTecnico(tecs[0], hoyInicio, hoyFin);
     } else {
       // Técnico: carga sus propios casos del día
-      const { data: perfil } = await supabase.from("usuarios").select("*").eq("auth_id", user.id).single();
+      const { data: perfil } = await supabase.from("usuarios").select("*").eq("auth_id", user.id).maybeSingle();
       if (perfil?.base_operativa) {
         setBaseTxt(perfil.base_operativa);
         const coords = await geocodificarDireccion(perfil.base_operativa, "", "");
@@ -2258,7 +2258,7 @@ const Logros=({user,toast})=>{
   useEffect(()=>{
     (async()=>{
       const[{data:xp},{data:lg}]=await Promise.all([
-        supabase.from("usuario_xp").select("*").eq("usuario_id",user.id).single(),
+        supabase.from("usuario_xp").select("*").eq("usuario_id",user.id).maybeSingle(),
         supabase.from("logros_config").select("*").order("rareza")
       ]);
       setXpData(xp);setLogros(lg||[]);setLoading(false);
@@ -2930,7 +2930,7 @@ export default function App(){
       const{data}=await supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(200);
       setCasos(data||[]);
       // Cargar minutos de recordatorio del perfil del usuario
-      const{data:perfil}=await supabase.from("usuarios").select("minutos_recordatorio").eq("auth_id",session.user.id).single();
+      const{data:perfil}=await supabase.from("usuarios").select("minutos_recordatorio").eq("auth_id",session.user.id).maybeSingle();
       if(perfil?.minutos_recordatorio) setMinutosAntes(perfil.minutos_recordatorio);
     })();
   },[session]);
