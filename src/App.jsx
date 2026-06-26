@@ -1149,7 +1149,7 @@ const BulkUpload=({user,toast})=>{
     if(!r.rut) errs.push(`Fila ${i+2}: RUT es requerido`);
     if(!r.razon_social) errs.push(`Fila ${i+2}: RAZON_SOCIAL es requerida`);
     if(!r.tier) errs.push(`Fila ${i+2}: TIER es requerido`);
-    else if(!TIERS.includes(r.tier.toUpperCase())) errs.push(`Fila ${i+2}: TIER inválido ('${r.tier}') — usá VIP/T1a/T1b/T2`);
+    else if(!TIERS.map(t=>t.toLowerCase()).includes(r.tier.toLowerCase())) errs.push(`Fila ${i+2}: TIER inválido ('${r.tier}') — usá VIP/T1a/T1b/T2`);
     if(!r.departamento) errs.push(`Fila ${i+2}: DEPARTAMENTO es requerido`);
     if(!r.localidad) errs.push(`Fila ${i+2}: LOCALIDAD es requerida`);
     if(!r.direccion) errs.push(`Fila ${i+2}: DIRECCION es requerida`);
@@ -1233,7 +1233,8 @@ const BulkUpload=({user,toast})=>{
     if(rows.length===0)return;
     setLoading(true); let ok=0;
     for(const r of rows){
-      const tier=(r.tier||"T2").toUpperCase();
+      const tierRaw=r.tier||"T2";
+      const tier=TIERS.find(t=>t.toLowerCase()===tierRaw.toLowerCase())||"T2";
       const slaH=TIER_SLA[tier]||8;
       const tipo=(r.tipo_accion||"SERVICIO_TECNICO").toUpperCase();
       const prio=(r.prioridad||"MEDIA").toUpperCase();
