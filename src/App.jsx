@@ -442,55 +442,194 @@ const Mision = ({casos,setView}) => {
     </div>
   );
 };
-const CasosList = ({casos,onSelect,onNew}) => {
-  const [search,setSearch]=useState(""); const [fT,setFT]=useState("ALL"); const [fE,setFE]=useState("ALL"); const [fP,setFP]=useState("ALL"); const [fEmp,setFEmp]=useState("ALL");
-  const fil=casos.filter(c=>{
+const CasosList = ({casos,onSelect,onNew,user,onRecargar}) => {
+  const [search,  setSearch]  = useState("");
+  const [fT,      setFT]      = useState("ALL");
+  const [fE,      setFE]      = useState("ALL");
+  const [fP,      setFP]      = useState("ALL");
+  const [fEmp,    setFEmp]    = useState("ALL");
+  const [fTier,   setFTier]   = useState("ALL");
+  const [fAsig,   setFAsig]   = useState("ALL");
+  const [sortCol, setSortCol] = useState("created_at");
+  const [sortDir, setSortDir] = useState("desc");
+  const [selIds,  setSelIds]  = useState(new Set());
+  const [tecnicos,setTecnicos]= useState([]);
+  const [tecSel,  setTecSel]  = useState("");
+  const [asignando,setAsig]   = useState(false);
+  const [showAsigBar,setBar]  = useState(false);
+
+  useEffect(()=>{
+    supabase.from("usuarios").select("*").eq("rol","TECNICO").eq("activo",true)
+      .then(({data})=>setTecnicos(data||[]));
+  },[]);
+
+  useEffect(()=>{ setBar(selIds.size>0); },[selIds]);
+
+  const fil = casos.filter(c=>{
     if(fT!=="ALL"&&c.tipo_proceso!==fT) return false;
     if(fE!=="ALL"&&c.estado!==fE) return false;
     if(fP!=="ALL"&&c.prioridad!==fP) return false;
     if(fEmp!=="ALL"&&c.empresa_id!==fEmp) return false;
-    if(search){const q=search.toLowerCase();if(!(c.numero||"").toLowerCase().includes(q)&&!(c.descripcion||"").toLowerCase().includes(q)&&!(c.rut||"").toLowerCase().includes(q)&&!(c.razon_social||"").toLowerCase().includes(q)) return false;}
+    if(fTier!=="ALL"&&c.tier!==fTier) return false;
+    if(fAsig==="ASIGNADO"&&!c.tecnico_id) return false;
+    if(fAsig==="SIN_ASIGNAR"&&c.tecnico_id) return false;
+    if(search){
+      const q=search.toLowerCase();
+      if(!(c.numero||"").toLowerCase().includes(q)&&
+         !(c.descripcion||"").toLowerCase().includes(q)&&
+         !(c.rut||"").toLowerCase().includes(q)&&
+         !(c.razon_social||"").toLowerCase().includes(q)&&
+         !(c.departamento||"").toLowerCase().includes(q)) return false;
+    }
     return true;
+  }).sort((a,b)=>{
+    let va=a[sortCol]||""; let vb=b[sortCol]||"";
+    if(sortDir==="asc") return va>vb?1:-1;
+    return va<vb?1:-1;
   });
-  const Sel=({v,onChange,opts,ph})=>(<select className="field" style={{flex:1,minWidth:100}} value={v} onChange={e=>onChange(e.target.value)}><option value="ALL">{ph}</option>{opts.map(([a,b])=><option key={a} value={a}>{b}</option>)}</select>);
+
+  const toggleSort=(col)=>{
+    if(sortCol===col) setSortDir(d=>d==="asc"?"desc":"asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  };
+
+  const toggleSel=(id,e)=>{
+    e.stopPropagation();
+    setSelIds(prev=>{ const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
+  };
+
+  const toggleAll=()=>{
+    if(selIds.size===fil.length) setSelIds(new Set());
+    else setSelIds(new Set(fil.map(c=>c.id)));
+  };
+
+  const asignarMasivo=async()=>{
+    if(!tecSel||selIds.size===0) return;
+    setAsig(true);
+    const tec=tecnicos.find(t=>t.id===tecSel);
+    const ts=new Date().toISOString();
+    let ok=0;
+    for(const id of selIds){
+      const caso=casos.find(c=>c.id===id);
+      if(!caso) continue;
+      const h=[...(caso.historial||[]),{id:Date.now()+ok,tipo:"ASIGNACION",
+        texto:`Asignado a ${tec?.nombre||""} ${tec?.apellido||""} por ${user?.email}`,
+        usuario:user?.email,ts}];
+      const{error}=await supabase.from("casos").update({
+        tecnico_id:tec.auth_id||tec.id,
+        estado:caso.estado==="ABIERTO"||!caso.estado?"PENDIENTE":caso.estado,
+        historial:h,updated_at:ts
+      }).eq("id",id);
+      if(!error) ok++;
+    }
+    setAsig(false); setSelIds(new Set()); setTecSel("");
+    if(onRecargar) await onRecargar();
+  };
+
+  const SortTh=({col,label})=>(
+    <th onClick={()=>toggleSort(col)} style={{cursor:"pointer",userSelect:"none",whiteSpace:"nowrap"}}>
+      {label}{sortCol===col?(sortDir==="asc"?" ▲":" ▼"):""}
+    </th>
+  );
+
+  const Sel=({v,onChange,opts,ph})=>(
+    <select className="field" style={{flex:1,minWidth:100}} value={v} onChange={e=>onChange(e.target.value)}>
+      <option value="ALL">{ph}</option>
+      {opts.map(([a,b])=><option key={a} value={a}>{b}</option>)}
+    </select>
+  );
+
+  const empresasSeleccionadas=selIds.size>0
+    ?[...new Set([...selIds].map(id=>casos.find(c=>c.id===id)?.empresa_id).filter(Boolean))]
+    :[];
+  const tecnicosFiltrados=tecnicos.filter(t=>
+    empresasSeleccionadas.length===0||
+    empresasSeleccionadas.every(emp=>t.empresa_codigo===emp)
+  );
+  const TIER_C_L={VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green};
+
   return (
-    <div style={{padding:20,height:"100%",overflowY:"auto"}}>
+    <div style={{padding:20,height:"100%",overflowY:"auto",paddingBottom:selIds.size>0?100:20}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
         <div>
           <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em",marginBottom:3}}>GESTIÓN DE</div>
           <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>CASOS OPERATIVOS</h1>
-          <div style={{fontSize:11,color:B.t2,marginTop:2}}>{fil.length} de {casos.length} casos</div>
+          <div style={{fontSize:11,color:B.t2,marginTop:2}}>
+            {fil.length} de {casos.length} casos
+            {selIds.size>0&&<span style={{color:B.orange,marginLeft:10,fontWeight:700}}>· {selIds.size} seleccionados</span>}
+          </div>
         </div>
-        <Bb label="+ NUEVO CASO" onClick={onNew}/>
+        <div style={{display:"flex",gap:9}}>
+          {selIds.size>0&&<Bb label="✕ LIMPIAR" onClick={()=>setSelIds(new Set())} ghost small color={B.t2}/>}
+          <Bb label="+ NUEVO CASO" onClick={onNew}/>
+        </div>
       </div>
       <div className="card" style={{padding:12,marginBottom:12}}>
-        <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-          <input className="field" placeholder="🔍  Número, descripción, RUT, razón social..." style={{flex:2,minWidth:200}} value={search} onChange={e=>setSearch(e.target.value)}/>
-          <Sel v={fT} onChange={setFT} ph="Todos los tipos" opts={TIPOS_PROCESO.map(t=>[t.codigo,`${t.icono} ${t.nombre}`])}/>
-          <Sel v={fE} onChange={setFE} ph="Todos los estados" opts={ESTADOS.map(s=>[s,s])}/>
-          <Sel v={fP} onChange={setFP} ph="Todas las prioridades" opts={PRIORS.map(p=>[p,p])}/>
+        <div style={{display:"flex",gap:9,flexWrap:"wrap",marginBottom:8}}>
+          <input className="field" placeholder="🔍  Número, RUT, razón social, departamento..." style={{flex:2,minWidth:200}} value={search} onChange={e=>setSearch(e.target.value)}/>
+          <select className="field" style={{flex:1,minWidth:120}} value={fAsig} onChange={e=>setFAsig(e.target.value)}>
+            <option value="ALL">Todos</option>
+            <option value="ASIGNADO">✓ Asignados</option>
+            <option value="SIN_ASIGNAR">○ Sin asignar</option>
+          </select>
           <Sel v={fEmp} onChange={setFEmp} ph="Todas las empresas" opts={EMPRESAS.map(e=>[e.codigo,e.nombre])}/>
+        </div>
+        <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+          <Sel v={fT}    onChange={setFT}    ph="Todos los tipos"       opts={TIPOS_PROCESO.map(t=>[t.codigo,`${t.icono} ${t.nombre}`])}/>
+          <Sel v={fE}    onChange={setFE}    ph="Todos los estados"     opts={ESTADOS.map(s=>[s,s])}/>
+          <Sel v={fP}    onChange={setFP}    ph="Todas las prioridades" opts={PRIORS.map(p=>[p,p])}/>
+          <Sel v={fTier} onChange={setFTier} ph="Todos los tiers"       opts={["VIP","T1a","T1b","T2"].map(t=>[t,t])}/>
         </div>
       </div>
       <div className="card" style={{overflow:"hidden"}}>
         <table>
-          <thead><tr>{["NÚMERO","TIPO","RUT / RAZÓN SOCIAL","DPTO","ESTADO","PRIOR.","SLA","EMPRESA","FECHA"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+          <thead><tr>
+            <th style={{width:36}}>
+              <input type="checkbox" checked={selIds.size===fil.length&&fil.length>0} onChange={toggleAll}
+                style={{width:14,height:14,accentColor:B.orange,cursor:"pointer"}}/>
+            </th>
+            <SortTh col="numero" label="NÚMERO"/>
+            <SortTh col="tipo_proceso" label="TIPO"/>
+            <SortTh col="razon_social" label="RUT / RAZÓN SOCIAL"/>
+            <SortTh col="departamento" label="DPTO"/>
+            <SortTh col="tier" label="TIER"/>
+            <SortTh col="estado" label="ESTADO"/>
+            <SortTh col="prioridad" label="PRIOR."/>
+            <SortTh col="franja_horaria" label="FRANJA"/>
+            <th>SLA</th>
+            <th>TÉCNICO</th>
+            <SortTh col="empresa_id" label="EMPRESA"/>
+          </tr></thead>
           <tbody>
             {fil.map(c=>{
               const tp=TIPOS_PROCESO.find(t=>t.codigo===c.tipo_proceso);
               const sl=slaInfo(c.sla_deadline,c.estado);
               const emp=EMPRESAS.find(e=>e.codigo===c.empresa_id);
+              const tec=tecnicos.find(t=>(t.auth_id||t.id)===c.tecnico_id);
+              const sel=selIds.has(c.id);
               return (
-                <tr key={c.id} style={{cursor:"pointer"}} onClick={()=>onSelect(c)}>
-                  <td><div style={{display:"flex",alignItems:"center",gap:6}}><span className="mono" style={{fontSize:11,color:B.orange,fontWeight:700}}>{c.numero}</span>{c.es_incidente&&<span style={{fontSize:8,background:B.redDim,color:B.red,padding:"1px 5px",fontWeight:700}}>INC</span>}</div></td>
+                <tr key={c.id} style={{cursor:"pointer",background:sel?B.orangeDim:"transparent"}} onClick={()=>onSelect(c)}>
+                  <td onClick={e=>toggleSel(c.id,e)}>
+                    <input type="checkbox" checked={sel} onChange={()=>{}}
+                      style={{width:14,height:14,accentColor:B.orange,cursor:"pointer"}}/>
+                  </td>
+                  <td><div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span className="mono" style={{fontSize:11,color:B.orange,fontWeight:700}}>{c.numero||c.id_externo}</span>
+                    {c.es_incidente&&<span style={{fontSize:8,background:B.redDim,color:B.red,padding:"1px 5px",fontWeight:700}}>INC</span>}
+                  </div></td>
                   <td><div style={{display:"flex",alignItems:"center",gap:5}}><span>{tp?.icono||"◈"}</span><span style={{fontSize:11}}>{tp?.nombre||c.tipo_proceso}</span></div></td>
                   <td><div style={{fontSize:11,fontWeight:600}}>{c.razon_social||"—"}</div><div className="mono" style={{fontSize:9,color:B.t3}}>{c.rut||"—"}</div></td>
                   <td style={{fontSize:11,color:B.t2}}>{c.departamento||"—"}</td>
+                  <td><span style={{fontSize:10,fontWeight:700,color:TIER_C_L[c.tier]||B.t3}}>{c.tier||"—"}</span></td>
                   <td><Tg label={c.estado||"ABIERTO"} color={EC[c.estado]||B.t3}/></td>
-                  <td><Tg label={c.prioridad||"MEDIUM"} color={PC[c.prioridad]||B.t2}/></td>
+                  <td><Tg label={c.prioridad||"—"} color={PC[c.prioridad]||B.t2}/></td>
+                  <td style={{fontSize:10,color:"#CC7700"}}>{c.franja_horaria||c.rango_horario||"—"}</td>
                   <td><span className="mono" style={{fontSize:11,fontWeight:700,color:sl.color}}>{sl.label}</span></td>
+                  <td>{tec
+                    ?<span style={{fontSize:10,color:B.green,fontWeight:700}}>{tec.nombre} {tec.apellido}</span>
+                    :<span style={{fontSize:10,color:B.t3}}>Sin asignar</span>}
+                  </td>
                   <td>{emp?<span style={{fontSize:11,color:emp.color,fontWeight:700}}>{emp.nombre}</span>:<span style={{color:B.t3}}>—</span>}</td>
-                  <td style={{fontSize:10,color:B.t3}}>{fmtD(c.created_at)}</td>
                 </tr>
               );
             })}
@@ -498,6 +637,30 @@ const CasosList = ({casos,onSelect,onNew}) => {
         </table>
         {fil.length===0&&<div style={{padding:40,textAlign:"center",color:B.t3}}><div style={{fontSize:28,marginBottom:10}}>◎</div>Sin casos</div>}
       </div>
+      {showAsigBar&&(
+        <div style={{position:"fixed",bottom:0,left:210,right:0,background:B.panel,
+          borderTop:`2px solid ${B.orange}`,padding:"12px 24px",
+          display:"flex",alignItems:"center",gap:14,zIndex:100,
+          boxShadow:`0 -8px 32px ${B.orange}22`}}>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,color:B.orange,flexShrink:0}}>
+            {selIds.size} CASO{selIds.size>1?"S":""} SEL.
+          </div>
+          {empresasSeleccionadas.length>1&&(
+            <div style={{fontSize:10,color:B.yellow,background:B.yellowDim,padding:"3px 10px",border:`1px solid ${B.yellow}33`}}>
+              ⚠ {empresasSeleccionadas.length} empresas distintas
+            </div>
+          )}
+          <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)} style={{flex:1,maxWidth:300}}>
+            <option value="">Seleccioná un técnico...</option>
+            {(tecnicosFiltrados.length>0?tecnicosFiltrados:tecnicos).map(t=>{
+              const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["CERRADO","RESUELTO"].includes(c.estado||"")).length;
+              return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} ({t.empresa_codigo}) — {carga} casos activos</option>;
+            })}
+          </select>
+          <Bb label={asignando?"ASIGNANDO...":"⚡ ASIGNAR"} onClick={asignarMasivo} disabled={!tecSel||asignando}/>
+          <Bb label="CANCELAR" onClick={()=>setSelIds(new Set())} ghost small color={B.t2}/>
+        </div>
+      )}
     </div>
   );
 };
@@ -2969,7 +3132,7 @@ export default function App(){
         <main style={{flex:1,overflowY:"auto",padding:"24px 28px"}}>
           {view==="mision"&&<Mision casos={casos} setView={setView}/>}
           {view==="ruta"&&<MiRutaDelDia user={user} toast={toast}/>}
-          {view==="casos"&&!casoDetalle&&<CasosList casos={casos} onSelect={c=>{setCasoDetalle(c);setView("detalle");}} onNew={()=>setView("nuevo")}/>}
+          {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);setView("detalle");}} onNew={()=>setView("nuevo")}/>}
           {view==="nuevo"&&<NuevoCaso onCancel={()=>setView("casos")} loading={false} onSave={async(f)=>{
             const tp=TIPOS_PROCESO.find(t=>t.codigo===f.tipo_proceso);
             const instrEsp = f.tiene_instrucciones && f.instrucciones_texto?.trim()
