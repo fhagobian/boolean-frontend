@@ -1277,6 +1277,7 @@ const BulkUpload=({user,toast})=>{
           <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em",marginBottom:3}}>IMPORTAR</div>
           <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:18,color:B.t1}}>CARGA MASIVA</div>
         </div>
+        <div style={{display:"flex",gap:9}}>
           <Bb label="⬇ PLANTILLA CSV" ghost small color={B.green} onClick={()=>{
             const headers="ID_EXTERNO,TIPO_ACCION,SUB_TIPO,NRO_TERMINAL,OBS_MODELO,RUT,RAZON_SOCIAL,TIER,DEPARTAMENTO,LOCALIDAD,DIRECCION,TELEFONO,RUBRO,FRANJA_HORARIA,PRIORIDAD";
             const rows=[
