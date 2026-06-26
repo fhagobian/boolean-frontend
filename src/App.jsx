@@ -240,7 +240,7 @@ const Login = ({onLogin}) => {
   );
 };
 
-const Sidebar = ({view,setView,user,onLogout,casos}) => {
+const Sidebar = ({view,setView,user,onLogout,casos,perfil}) => {
   const breach=casos.filter(c=>!["RESUELTO","CERRADO"].includes(c.estado||"")&&c.sla_deadline&&new Date(c.sla_deadline)<new Date()).length;
   const abiertos=casos.filter(c=>c.estado!=="CERRADO").length;
   const menu=[
@@ -282,8 +282,10 @@ const Sidebar = ({view,setView,user,onLogout,casos}) => {
         <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:9}}>
           <div style={{width:32,height:32,borderRadius:"50%",background:`linear-gradient(135deg,${B.orange},${B.amber})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,fontFamily:"'Orbitron',sans-serif",color:"#050507",flexShrink:0}}>{initials}</div>
           <div style={{minWidth:0}}>
-            <div style={{fontSize:11,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user?.email||""}</div>
-            <div style={{fontSize:9,color:B.orange,fontWeight:700,letterSpacing:".06em",marginTop:1}}>DIRECTOR OPERATIVO</div>
+            <div style={{fontSize:11,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{perfil?.nombre||user?.email||""}</div>
+            <div style={{fontSize:9,color:B.orange,fontWeight:700,letterSpacing:".06em",marginTop:1}}>
+              {perfil?.rol==="REGIONAL"?"REPRESENTANTE REGIONAL":perfil?.rol==="SUPERVISOR"?"SUPERVISOR":perfil?.rol==="TECNICO"?"TÉCNICO DE CAMPO":"DIRECTOR OPERATIVO"}
+            </div>
           </div>
         </div>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
@@ -1041,7 +1043,7 @@ const ModalEncuesta = ({caso,onClose,onSave})=>{
 const ESTADOS_FLUJO = ["PENDIENTE","EN_PROCESO","EN_ESPERA","RESUELTO","CERRADO"];
 const EST_COLOR={PENDIENTE:B=>B.orange,EN_PROCESO:B=>B.blue,EN_ESPERA:B=>B.purple,RESUELTO:B=>B.green,CERRADO:B=>B.t3};
 
-const CasoDetalle=({caso:casoInit,user,onBack,toast})=>{
+const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil})=>{
   const [caso,setCaso]=useState(casoInit);
   const [loading,setLoading]=useState(false);
   const [nota,setNota]=useState("");
@@ -1053,8 +1055,7 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast})=>{
   const pct=caso.sla_deadline?Math.max(0,Math.min(100,100-(Date.now()-new Date(caso.created_at))/(new Date(caso.sla_deadline)-new Date(caso.created_at))*100)):100;
   const vencido=caso.sla_deadline&&new Date(caso.sla_deadline)<new Date();
 
-  // rol simulado — en producción viene del perfil del usuario
-  const esRolTecnico = user?.email?.includes("tecnico") || user?.user_metadata?.rol === "tecnico";
+  const esRolTecnico = perfil?.rol==="TECNICO";
   const esRolSupervisorOSuperior = !esRolTecnico;
 
   // ¿Tiene instrucciones y el técnico ya las confirmó?
@@ -1951,7 +1952,7 @@ const MapaRuta = ({ base, paradas, polyline }) => {
 };
 
 // ─── COMPONENTE PRINCIPAL ──────────────────────────────────────
-const MiRutaDelDia = ({ user, toast }) => {
+const MiRutaDelDia = ({ user, toast, perfil }) => {
   const [casos,      setCasos]      = useState([]);
   const [tecnicoSel, setTecnicoSel] = useState(null);  // para supervisor
   const [tecnicos,   setTecnicos]   = useState([]);
@@ -1966,8 +1967,8 @@ const MiRutaDelDia = ({ user, toast }) => {
   const [orden,      setOrden]      = useState([]);  // índices ordenados
   const [dragging,   setDragging]   = useState(null);
 
-  const esRolTecnico = user?.user_metadata?.rol === "tecnico" || user?.email?.includes("tecnico");
-  const esRolSupervisor = !esRolTecnico;
+  const esRolTecnico = perfil?.rol==="TECNICO";
+  const esRolSupervisor = perfil?.rol==="SUPERVISOR"||perfil?.rol==="REGIONAL"||perfil?.rol==="DIRECTOR";
 
   // Carga inicial
   useEffect(() => { cargarDatos(); }, []);
@@ -3081,7 +3082,8 @@ export default function App(){
   const [toastMsg,setToastMsg]=useState(null);
   const [casoDetalle,setCasoDetalle]=useState(null);
   const [casos,setCasos]=useState([]);
-  const [minutosAntes,setMinutosAntes]=useState(30); // default 30 min
+  const [minutosAntes,setMinutosAntes]=useState(30);
+  const [perfil,setPerfil]=useState(null);
 
   useEffect(()=>{
     supabase.auth.getSession().then(({data:{session}})=>{setSession(session);setLoading(false);});
@@ -3094,9 +3096,9 @@ export default function App(){
     (async()=>{
       const{data}=await supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(200);
       setCasos(data||[]);
-      // Cargar minutos de recordatorio del perfil del usuario
-      const{data:perfil}=await supabase.from("usuarios").select("minutos_recordatorio").eq("auth_id",session.user.id).maybeSingle();
-      if(perfil?.minutos_recordatorio) setMinutosAntes(perfil.minutos_recordatorio);
+      // Cargar perfil completo del usuario
+      const{data:p}=await supabase.from("usuarios").select("*").eq("auth_id",session.user.id).maybeSingle();
+      if(p){ setPerfil(p); if(p.minutos_recordatorio) setMinutosAntes(p.minutos_recordatorio); }
     })();
   },[session]);
 
@@ -3128,10 +3130,10 @@ export default function App(){
     <div style={{minHeight:"100vh",background:B.bg,color:B.t1,fontFamily:"'Rajdhani',sans-serif",display:"flex",flexDirection:"column"}}>
       <Ticker casos={casos}/>
       <div style={{display:"flex",flex:1,overflow:"hidden",height:"calc(100vh - 24px)"}}>
-        <Sidebar view={view} setView={v=>{setView(v);setCasoDetalle(null);}} user={user} onLogout={()=>supabase.auth.signOut()} casos={casos}/>
+        <Sidebar view={view} setView={v=>{setView(v);setCasoDetalle(null);}} user={user} onLogout={()=>supabase.auth.signOut()} casos={casos} perfil={perfil}/>
         <main style={{flex:1,overflowY:"auto",padding:"24px 28px"}}>
           {view==="mision"&&<Mision casos={casos} setView={setView}/>}
-          {view==="ruta"&&<MiRutaDelDia user={user} toast={toast}/>}
+          {view==="ruta"&&<MiRutaDelDia user={user} toast={toast} perfil={perfil}/>}
           {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);setView("detalle");}} onNew={()=>setView("nuevo")}/>}
           {view==="nuevo"&&<NuevoCaso onCancel={()=>setView("casos")} loading={false} onSave={async(f)=>{
             const tp=TIPOS_PROCESO.find(t=>t.codigo===f.tipo_proceso);
@@ -3153,7 +3155,7 @@ export default function App(){
             if(error){toast("Error: "+error.message);}
             else{toast(`✓ Caso creado · +${tp?.xp||50} XP`);await recargarCasos();setView("casos");}
           }}/>}
-          {view==="detalle"&&casoDetalle&&<CasoDetalle caso={casoDetalle} user={user} toast={toast} onBack={()=>{setCasoDetalle(null);setView("casos");}}/>}
+          {view==="detalle"&&casoDetalle&&<CasoDetalle caso={casoDetalle} user={user} toast={toast} perfil={perfil} onBack={()=>{setCasoDetalle(null);setView("casos");}}/>}
           {view==="bulk"&&<BulkUpload user={user} toast={async(m)=>{toast(m);await recargarCasos();}}/>}
           {view==="analitica"&&<Analitica user={user} toast={toast}/>}
           {view==="comunicaciones"&&<Comunicaciones user={user} toast={toast}/>}
