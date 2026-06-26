@@ -1971,7 +1971,7 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
   const esRolSupervisor = perfil?.rol==="SUPERVISOR"||perfil?.rol==="REGIONAL"||perfil?.rol==="DIRECTOR";
 
   // Carga inicial
-  useEffect(() => { cargarDatos(); }, []);
+  useEffect(() => { if(perfil) cargarDatos(); }, [perfil]);
 
   // Recalcular cuando cambian casos (caso nuevo agregado en el día)
   useEffect(() => {
@@ -1980,33 +1980,31 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
 
   const cargarDatos = async () => {
     setLoadingPage(true);
-    const hoyInicio = new Date(); hoyInicio.setHours(0, 0, 0, 0);
-    const hoyFin    = new Date(); hoyFin.setHours(23, 59, 59, 999);
 
     if (esRolSupervisor) {
-      // Supervisor: carga todos los técnicos de su equipo
-      const { data: tecs } = await supabase.from("usuarios").select("*").eq("rol", "tecnico");
+      // Supervisor/Director/Regional: carga todos los técnicos
+      const { data: tecs } = await supabase.from("usuarios").select("*").eq("rol","TECNICO").eq("activo",true);
       setTecnicos(tecs || []);
-      if (tecs?.length > 0) await cargarCasosTecnico(tecs[0], hoyInicio, hoyFin);
+      if (tecs?.length > 0) await cargarCasosTecnico(tecs[0]);
     } else {
-      // Técnico: carga sus propios casos del día
-      const { data: perfil } = await supabase.from("usuarios").select("*").eq("auth_id", user.id).maybeSingle();
+      // Técnico: usa el perfil ya cargado
       if (perfil?.base_operativa) {
         setBaseTxt(perfil.base_operativa);
         const coords = await geocodificarDireccion(perfil.base_operativa, "", "");
         setBase({ ...coords, direccion: perfil.base_operativa });
       }
+      const tecId = perfil?.auth_id || perfil?.id || user.id;
       const { data: c } = await supabase.from("casos").select("*")
-        .eq("tecnico_id", user.id)
+        .eq("tecnico_id", tecId)
         .not("estado", "in", "(CERRADO,RESUELTO)")
         .order("created_at", { ascending: true });
       setCasos(c || []);
-      if (c?.length) await geocodificarYOrdenar(c, base);
+      if (c?.length) await geocodificarYOrdenar(c, { lat: null, lng: null });
     }
     setLoadingPage(false);
   };
 
-  const cargarCasosTecnico = async (tec, hoyInicio, hoyFin) => {
+  const cargarCasosTecnico = async (tec) => {
     setTecnicoSel(tec);
     if (tec.base_operativa) {
       setBaseTxt(tec.base_operativa);
