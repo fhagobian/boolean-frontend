@@ -1879,35 +1879,36 @@ const MapaRuta = ({ base, paradas, polyline }) => {
   const mapRef    = useRef(null);
   const mapObj    = useRef(null);
   const leafletOk = useLeaflet();
+  // Usar Montevideo como centro por defecto si no hay base
+  const centerLat = base?.lat || -34.9011;
+  const centerLng = base?.lng || -56.1645;
 
   useEffect(() => {
-    if (!leafletOk || !mapRef.current || !base?.lat) return;
+    if (!leafletOk || !mapRef.current) return;
     const L = window.L;
 
-    // Inicializar o reusar mapa
     if (!mapObj.current) {
-      mapObj.current = L.map(mapRef.current, { zoomControl: true }).setView([base.lat, base.lng], 12);
+      mapObj.current = L.map(mapRef.current, { zoomControl: true }).setView([centerLat, centerLng], 12);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap",
-        maxZoom: 18
+        attribution: "© OpenStreetMap", maxZoom: 18
       }).addTo(mapObj.current);
     } else {
-      // limpiar capas anteriores
       mapObj.current.eachLayer(l => { if (l._url) return; mapObj.current.removeLayer(l); });
     }
 
     const map = mapObj.current;
     const bounds = [];
 
-    // Marcador base
-    const iconBase = L.divIcon({
-      className: "",
-      html: `<div style="width:32px;height:32px;background:#FF6B00;border:3px solid #FFA500;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 0 12px #FF6B0088;color:#050507;font-weight:900">🏠</div>`,
-      iconSize: [32, 32], iconAnchor: [16, 16]
-    });
-    L.marker([base.lat, base.lng], { icon: iconBase })
-      .addTo(map).bindPopup("<b>BASE OPERATIVA</b>");
-    bounds.push([base.lat, base.lng]);
+    // Marcador base (solo si tiene coordenadas)
+    if (base?.lat) {
+      const iconBase = L.divIcon({
+        className: "",
+        html: `<div style="width:32px;height:32px;background:#FF6B00;border:3px solid #FFA500;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 0 12px #FF6B0088;color:#050507;font-weight:900">🏠</div>`,
+        iconSize: [32, 32], iconAnchor: [16, 16]
+      });
+      L.marker([base.lat, base.lng], { icon: iconBase }).addTo(map).bindPopup("<b>BASE OPERATIVA</b>");
+      bounds.push([base.lat, base.lng]);
+    }
 
     // Marcadores de paradas
     const PRIO_C_MAP = { CRITICA: "#FF2040", ALTA: "#FF6B00", MEDIA: "#00A8FF", BAJA: "#00E87A" };
@@ -1925,22 +1926,27 @@ const MapaRuta = ({ base, paradas, polyline }) => {
       bounds.push([p.lat, p.lng]);
     });
 
-    // Trazar ruta si hay polyline
+    // Trazar ruta
     if (polyline?.length > 1) {
-      L.polyline(polyline, { color: "#FF6B00", weight: 4, opacity: 0.85, dashArray: null }).addTo(map);
+      L.polyline(polyline, { color: "#FF6B00", weight: 4, opacity: 0.85 }).addTo(map);
     } else if (bounds.length > 1) {
-      // Sin ruta ORS: línea recta entre puntos
       L.polyline(bounds, { color: "#FF6B0066", weight: 2, dashArray: "6 4" }).addTo(map);
     }
 
     if (bounds.length > 1) {
       map.fitBounds(bounds, { padding: [30, 30] });
+    } else {
+      map.setView([centerLat, centerLng], 12);
     }
+
+    // Forzar resize para que se dibuje correctamente
+    setTimeout(() => map.invalidateSize(), 100);
+
   }, [leafletOk, base, paradas, polyline]);
 
   return (
     <div style={{ position: "relative" }}>
-      <div ref={mapRef} style={{ width: "100%", height: 340, background: B.deep, borderRadius: 2 }}/>
+      <div ref={mapRef} style={{ width: "100%", height: 360, background: B.deep, borderRadius: 2 }}/>
       {!leafletOk && (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center",
           justifyContent: "center", background: B.deep, flexDirection: "column", gap: 10 }}>
