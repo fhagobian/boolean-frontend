@@ -243,18 +243,21 @@ const Login = ({onLogin}) => {
 const Sidebar = ({view,setView,user,onLogout,casos,perfil}) => {
   const breach=casos.filter(c=>!["RESUELTO","CERRADO"].includes(c.estado||"")&&c.sla_deadline&&new Date(c.sla_deadline)<new Date()).length;
   const abiertos=casos.filter(c=>c.estado!=="CERRADO").length;
-  const menu=[
-    {id:"mision",icon:"◎",label:"MISIÓN"},
-    {id:"ruta",icon:"🗺",label:"MI RUTA DEL DÍA"},
-    {id:"casos",icon:"≣",label:"CASOS",badge:abiertos},
-    {id:"nuevo",icon:"+",label:"NUEVO CASO"},
-    {id:"bulk",icon:"⬆",label:"CARGA MASIVA"},
-    {id:"analitica",icon:"◑",label:"ANALÍTICA"},
-    {id:"comunicaciones",icon:"💬",label:"COMUNICACIONES"},
-    {id:"logros",icon:"★",label:"LOGROS"},
-    {id:"usuarios",icon:"👥",label:"USUARIOS"},
-    {id:"config",icon:"⟲",label:"CONFIGURACIÓN"},
+  const rol=perfil?.rol||"DIRECTOR";
+
+  const MENU_COMPLETO=[
+    {id:"mision",       icon:"◎",  label:"MISIÓN",          roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
+    {id:"ruta",         icon:"🗺", label:"MI RUTA DEL DÍA", roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
+    {id:"casos",        icon:"≣",  label:"CASOS",            roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"], badge:abiertos},
+    {id:"nuevo",        icon:"+",  label:"NUEVO CASO",       roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
+    {id:"bulk",         icon:"⬆", label:"CARGA MASIVA",     roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
+    {id:"analitica",    icon:"◑",  label:"ANALÍTICA",        roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
+    {id:"comunicaciones",icon:"💬",label:"COMUNICACIONES",   roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
+    {id:"logros",       icon:"★",  label:"LOGROS",           roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
+    {id:"usuarios",     icon:"👥", label:"USUARIOS",         roles:["DIRECTOR","REGIONAL"]},
+    {id:"config",       icon:"⟲", label:"CONFIGURACIÓN",    roles:["DIRECTOR"]},
   ];
+  const menu=MENU_COMPLETO.filter(m=>m.roles.includes(rol));
   const initials=(user?.email||"U").substring(0,2).toUpperCase();
   return (
     <div style={{width:210,background:B.panel,borderRight:`1px solid ${B.border}`,display:"flex",flexDirection:"column",height:"100%",flexShrink:0}}>
@@ -1043,7 +1046,7 @@ const ModalEncuesta = ({caso,onClose,onSave})=>{
 const ESTADOS_FLUJO = ["PENDIENTE","EN_PROCESO","EN_ESPERA","RESUELTO","CERRADO"];
 const EST_COLOR={PENDIENTE:B=>B.orange,EN_PROCESO:B=>B.blue,EN_ESPERA:B=>B.purple,RESUELTO:B=>B.green,CERRADO:B=>B.t3};
 
-const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil})=>{
+const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   const [caso,setCaso]=useState(casoInit);
   const [loading,setLoading]=useState(false);
   const [nota,setNota]=useState("");
@@ -1098,13 +1101,15 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil})=>{
 
   const cambiarEstado=async()=>{
     if(nuevoEstado===caso.estado)return;
-    if(bloqueado){toast("⚠ Debés confirmar las instrucciones antes de cambiar el estado","error");return;}
+    if(bloqueado){toast("⚠ Debés confirmar las instrucciones antes de cambiar el estado");return;}
     setLoading(true);
-    const updates={estado:nuevoEstado};
+    const updates={estado:nuevoEstado,updated_at:new Date().toISOString()};
     if(nuevoEstado==="CERRADO"){updates.fecha_cierre=new Date().toISOString();}
     await supabase.from("casos").update(updates).eq("id",caso.id);
     await addHistorial("ESTADO",`Estado cambiado a ${nuevoEstado}`);
-    setCaso(c=>({...c,...updates}));
+    const casActualizado={...caso,...updates};
+    setCaso(casActualizado);
+    if(onUpdate) onUpdate(casActualizado);
     toast(`Estado actualizado: ${nuevoEstado}`);
     setLoading(false);
   };
@@ -3129,6 +3134,21 @@ export default function App(){
   if(!session)return<Login onLogin={()=>{}}/>;
 
   const user=session.user;
+  const rol=perfil?.rol||"DIRECTOR";
+
+  // Permisos por rol
+  const PERMISOS={
+    DIRECTOR:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","config","detalle"],
+    REGIONAL:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","detalle"],
+    SUPERVISOR: ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","detalle"],
+    TECNICO:    ["mision","ruta","casos","comunicaciones","logros","detalle"],
+  };
+  const puedeVer=(v)=>(PERMISOS[rol]||PERMISOS.DIRECTOR).includes(v);
+
+  // Redirigir si intenta acceder a vista no permitida
+  useEffect(()=>{
+    if(perfil&&!puedeVer(view)) setView("mision");
+  },[perfil,view]);
 
   return(
     <div style={{minHeight:"100vh",background:B.bg,color:B.t1,fontFamily:"'Rajdhani',sans-serif",display:"flex",flexDirection:"column"}}>
@@ -3159,7 +3179,17 @@ export default function App(){
             if(error){toast("Error: "+error.message);}
             else{toast(`✓ Caso creado · +${tp?.xp||50} XP`);await recargarCasos();setView("casos");}
           }}/>}
-          {view==="detalle"&&casoDetalle&&<CasoDetalle caso={casoDetalle} user={user} toast={toast} perfil={perfil} onBack={()=>{setCasoDetalle(null);setView("casos");}}/>}
+          {view==="detalle"&&casoDetalle&&<CasoDetalle
+            caso={casoDetalle}
+            user={user}
+            toast={toast}
+            perfil={perfil}
+            onBack={()=>{setCasoDetalle(null);setView("casos");}}
+            onUpdate={(casoActualizado)=>{
+              setCasoDetalle(casoActualizado);
+              setCasos(prev=>prev.map(c=>c.id===casoActualizado.id?casoActualizado:c));
+            }}
+          />}
           {view==="bulk"&&<BulkUpload user={user} toast={async(m)=>{toast(m);await recargarCasos();}}/>}
           {view==="analitica"&&<Analitica user={user} toast={toast}/>}
           {view==="comunicaciones"&&<Comunicaciones user={user} toast={toast}/>}
