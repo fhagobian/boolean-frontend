@@ -39,8 +39,11 @@ const TIPOS_PROCESO = [
   {codigo:"PROACTIVO",  nombre:"Servicio Técnico Proactivo", icono:"👁",color:"#9B6DFF",sla:48},
 ];
 
-const ESTADOS = ["ABIERTO","EN_PROGRESO","PENDIENTE","DERIVADO","RESUELTO","CERRADO"];
-const EC = {ABIERTO:"#00A8FF",EN_PROGRESO:"#FFD020",PENDIENTE:"#FF6B00",DERIVADO:"#9B6DFF",RESUELTO:"#00E87A",CERRADO:"#6868A0"};
+const ESTADOS = ["PENDIENTE","ASIGNADO","EN_PROCESO","PAUSADO","FINALIZADO","CANCELADO","RECOORDINADO"];
+const EC = {
+  PENDIENTE:"#FF6B00",ASIGNADO:"#00A8FF",EN_PROCESO:"#FFD020",
+  PAUSADO:"#9B6DFF",FINALIZADO:"#00E87A",CANCELADO:"#FF2040",RECOORDINADO:"#00D4B4"
+};
 const PRIORS = ["CRITICAL","HIGH","MEDIUM","LOW"];
 const PC = {CRITICAL:"#FF2040",HIGH:"#FF6B00",MEDIUM:"#FFD020",LOW:"#00E87A"};
 const CRITICIDADES = ["NORMAL","ALTA","MUY_ALTA","CRITICA"];
@@ -545,7 +548,7 @@ const CasosList = ({casos,onSelect,onNew,user,onRecargar}) => {
         usuario:user?.email,ts}];
       const{error}=await supabase.from("casos").update({
         tecnico_id:tec.auth_id||tec.id,
-        estado:caso.estado==="ABIERTO"||!caso.estado?"PENDIENTE":caso.estado,
+        estado:"ASIGNADO",
         historial:h,updated_at:ts
       }).eq("id",id);
       if(!error) ok++;
@@ -1482,104 +1485,152 @@ const GestorEncuestas = ({ user, toast }) => {
 };
 
 
-const ESTADOS_FLUJO = ["PENDIENTE","EN_PROCESO","EN_ESPERA","RESUELTO","CERRADO"];
-const EST_COLOR={PENDIENTE:B=>B.orange,EN_PROCESO:B=>B.blue,EN_ESPERA:B=>B.purple,RESUELTO:B=>B.green,CERRADO:B=>B.t3};
+const ESTADOS_FLUJO = ["PENDIENTE","ASIGNADO","EN_PROCESO","PAUSADO","FINALIZADO","CANCELADO","RECOORDINADO"];
+const EST_COLOR={
+  PENDIENTE:B=>B.orange, ASIGNADO:B=>B.blue, EN_PROCESO:B=>B.yellow,
+  PAUSADO:B=>B.purple, FINALIZADO:B=>B.green, CANCELADO:B=>B.red, RECOORDINADO:B=>B.teal
+};
 
 const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
-  const [caso,setCaso]=useState(casoInit);
-  const [loading,setLoading]=useState(false);
-  const [nota,setNota]=useState("");
-  const [nuevoEstado,setNuevoEstado]=useState(casoInit.estado);
-  const [showEnc,setShowEnc]=useState(false);
-  const [showInstr,setShowInstr]=useState(false);
-  const [showCierre,setShowCierre]=useState(false);
-  const [encuestaActiva,setEncuestaActiva]=useState(null);
-  const [encuestasDelCaso,setEncuestasDelCaso]=useState([]);
-  const [encuestasCompletadas,setEncuestasCompletadas]=useState([]);
-  const tp=TIPOS_PROCESO.find(t=>t.codigo===caso.tipo_proceso);
-  const emp=EMPRESAS.find(e=>e.codigo===caso.empresa_id);
-  const pct=caso.sla_deadline?Math.max(0,Math.min(100,100-(Date.now()-new Date(caso.created_at))/(new Date(caso.sla_deadline)-new Date(caso.created_at))*100)):100;
-  const vencido=caso.sla_deadline&&new Date(caso.sla_deadline)<new Date();
+  const [caso,setCaso]        = useState(casoInit);
+  const [loading,setLoading]  = useState(false);
+  const [nota,setNota]        = useState("");
+  const [showInstr,setShowInstr] = useState(false);
+  const [showCierre,setShowCierre] = useState(false);
+  const [encuestaActiva,setEncuestaActiva] = useState(null);
+  const [encuestasDelCaso,setEncuestasDelCaso] = useState([]);
+  // Modales de acción
+  const [showPausar,setShowPausar]     = useState(false);
+  const [showCancelar,setShowCancelar] = useState(false);
+  const [showFinalizar,setShowFinalizar] = useState(false);
+  const [showRecoord,setShowRecoord]   = useState(false);
+  // Contador de tiempo
+  const [tiempoSegundos,setTiempoSeg] = useState(caso.tiempo_total_seg||0);
+  const timerRef = useRef(null);
+
+  const tp  = TIPOS_PROCESO.find(t=>t.codigo===caso.tipo_proceso);
+  const emp = EMPRESAS.find(e=>e.codigo===caso.empresa_id);
+  const vencido = caso.sla_deadline&&new Date(caso.sla_deadline)<new Date();
+  const pct = caso.sla_deadline?Math.max(0,Math.min(100,100-(Date.now()-new Date(caso.created_at))/(new Date(caso.sla_deadline)-new Date(caso.created_at))*100)):100;
 
   const esRolTecnico = perfil?.rol==="TECNICO";
-  const esRolSupervisorOSuperior = !esRolTecnico;
-
-  // Es servicio técnico
+  const esRolSuperior = !esRolTecnico;
   const esServicioTecnico = caso.tipo_proceso==="SERVICIO_TECNICO";
+  const tieneInstr = !!(caso.instrucciones_especiales?.texto||caso.instrucciones_especiales?.adjuntos?.length);
+  const yaConfirmado = !!caso.instrucciones_especiales?.confirmado_por;
 
   // Cargar encuestas del caso
   useEffect(()=>{
-    (async()=>{
-      const{data}=await supabase.from("casos_encuestas")
-        .select("*, encuesta:encuesta_id(*)")
-        .eq("caso_id",caso.id);
-      if(data){
-        setEncuestasDelCaso(data);
-        setEncuestasCompletadas(data.filter(e=>e.completada));
-      }
-    })();
+    supabase.from("casos_encuestas").select("*, encuesta:encuesta_id(*)")
+      .eq("caso_id",caso.id)
+      .then(({data})=>setEncuestasDelCaso(data||[]));
   },[caso.id]);
 
-  // Para pasar a RESUELTO siendo técnico en ST necesita cierre completo
-  const necesitaCierre = esRolTecnico && esServicioTecnico &&
-    nuevoEstado==="RESUELTO" && !caso.cierre_completado;
+  // Arrancar contador si está EN PROCESO
+  useEffect(()=>{
+    if(caso.estado==="EN_PROCESO"){
+      timerRef.current=setInterval(()=>setTiempoSeg(s=>s+1),1000);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return()=>clearInterval(timerRef.current);
+  },[caso.estado]);
 
-  // Encuestas pendientes
-  const encuestasPendientes = encuestasDelCaso.filter(e=>!e.completada);
+  // Cuando técnico abre el caso y está ASIGNADO → pasa a EN PROCESO automáticamente
+  useEffect(()=>{
+    if(esRolTecnico && caso.estado==="ASIGNADO"){
+      // Verificar instrucciones primero
+      if(tieneInstr && !yaConfirmado) return; // espera confirmación
+      (async()=>{
+        await cambiarEstadoDirecto("EN_PROCESO","Técnico inició la atención del caso");
+      })();
+    }
+  },[]);
 
-  // ¿Tiene instrucciones y el técnico ya las confirmó?
-  const tieneInstr = !!(caso.instrucciones_especiales?.texto || caso.instrucciones_especiales?.adjuntos?.length);
-  const yaConfirmado = !!caso.instrucciones_especiales?.confirmado_por;
-  // Bloqueo: técnico no puede pasar a EN_PROGRESO sin confirmar
-  const bloqueado = esRolTecnico && tieneInstr && !yaConfirmado && nuevoEstado === "EN_PROCESO";
+  const fmtTiempo=(s)=>{
+    const h=Math.floor(s/3600);
+    const m=Math.floor((s%3600)/60);
+    const sg=s%60;
+    return `${h>0?h+"h ":""}${m}min ${sg}seg`;
+  };
 
   const addHistorial=async(tipo,texto)=>{
     const entrada={id:Date.now(),tipo,texto,usuario:user.email,ts:new Date().toISOString()};
     const nuevo=[...(caso.historial||[]),entrada];
     await supabase.from("casos").update({historial:nuevo}).eq("id",caso.id);
     setCaso(c=>({...c,historial:nuevo}));
+    return nuevo;
   };
+
+  const actualizarCaso=async(updates,msgHistorial,tipoHistorial="ESTADO")=>{
+    setLoading(true);
+    const h=[...(caso.historial||[]),{id:Date.now(),tipo:tipoHistorial,texto:msgHistorial,usuario:user.email,ts:new Date().toISOString()}];
+    const payload={...updates,historial:h,updated_at:new Date().toISOString()};
+    await supabase.from("casos").update(payload).eq("id",caso.id);
+    const casActualizado={...caso,...payload};
+    setCaso(casActualizado);
+    if(onUpdate) onUpdate(casActualizado);
+    setLoading(false);
+    return casActualizado;
+  };
+
+  const cambiarEstadoDirecto=async(nuevoEstado,msg)=>{
+    await actualizarCaso({estado:nuevoEstado,tiempo_total_seg:tiempoSegundos},msg);
+    toast(`Estado: ${nuevoEstado}`);
+  };
+
+  // ── ACCIONES ──────────────────────────────────────────────
 
   const confirmarInstrucciones=async()=>{
     setLoading(true);
-    const instrActualizadas={
-      ...caso.instrucciones_especiales,
-      confirmado_por: user.email,
-      confirmado_ts:  new Date().toISOString(),
-    };
+    const instrActualizadas={...caso.instrucciones_especiales,confirmado_por:user.email,confirmado_ts:new Date().toISOString()};
     await supabase.from("casos").update({instrucciones_especiales:instrActualizadas}).eq("id",caso.id);
     await addHistorial("INSTRUCCIONES","✓ Técnico confirmó lectura de instrucciones especiales");
     setCaso(c=>({...c,instrucciones_especiales:instrActualizadas}));
-    toast("✓ Instrucciones confirmadas — podés cambiar el estado");
+    toast("✓ Instrucciones confirmadas");
     setLoading(false);
+    // Ahora sí pasa a EN PROCESO
+    if(caso.estado==="ASIGNADO") await cambiarEstadoDirecto("EN_PROCESO","Técnico inició la atención del caso");
   };
 
   const guardarInstrucciones=async(payload)=>{
     setLoading(true);
-    // Si había instrucciones anteriores, guardar versión en historial
-    const accion = caso.instrucciones_especiales?.texto ? "INSTRUCCIONES EDITADAS" : "INSTRUCCIONES CARGADAS";
+    const accion=caso.instrucciones_especiales?.texto?"INSTRUCCIONES EDITADAS":"INSTRUCCIONES CARGADAS";
     await supabase.from("casos").update({instrucciones_especiales:payload}).eq("id",caso.id);
-    await addHistorial("INSTRUCCIONES", accion + " por " + user.email);
+    await addHistorial("INSTRUCCIONES",accion+" por "+user.email);
     setCaso(c=>({...c,instrucciones_especiales:payload}));
     toast("✓ Instrucciones guardadas");
     setLoading(false);
   };
 
-  const cambiarEstado=async()=>{
-    if(nuevoEstado===caso.estado)return;
-    if(bloqueado){toast("⚠ Debés confirmar las instrucciones antes de cambiar el estado");return;}
-    // Si técnico quiere resolver ST sin cierre completado, mostrar formulario
-    if(necesitaCierre){ setShowCierre(true); return; }
-    setLoading(true);
-    const updates={estado:nuevoEstado,updated_at:new Date().toISOString()};
-    if(nuevoEstado==="CERRADO"){updates.fecha_cierre=new Date().toISOString();}
-    await supabase.from("casos").update(updates).eq("id",caso.id);
-    await addHistorial("ESTADO",`Estado cambiado a ${nuevoEstado}`);
-    const casActualizado={...caso,...updates};
-    setCaso(casActualizado);
-    if(onUpdate) onUpdate(casActualizado);
-    toast(`Estado actualizado: ${nuevoEstado}`);
-    setLoading(false);
+  const pausar=async(motivo)=>{
+    await actualizarCaso({estado:"PAUSADO",tiempo_total_seg:tiempoSegundos},`PAUSADO — Motivo: ${motivo}`,"PAUSA");
+    toast("Caso pausado");
+  };
+
+  const reanudar=async()=>{
+    await cambiarEstadoDirecto("EN_PROCESO","Caso reanudado");
+    toast("Caso reanudado — contador reiniciado");
+  };
+
+  const cancelar=async(motivo)=>{
+    await actualizarCaso({estado:"CANCELADO",tiempo_total_seg:tiempoSegundos},`CANCELADO — Motivo: ${motivo}`,"CANCELACION");
+    toast("Caso cancelado");
+  };
+
+  const finalizar=async(resolvio)=>{
+    if(resolvio && esServicioTecnico && !caso.cierre_completado){
+      setShowFinalizar(false); setShowCierre(true); return;
+    }
+    await actualizarCaso(
+      {estado:"FINALIZADO",tiempo_total_seg:tiempoSegundos,resolvio},
+      `FINALIZADO — ${resolvio?"Problema resuelto":"No resuelto"}`,
+      "FINALIZACION"
+    );
+    toast(resolvio?"✓ Caso finalizado — problema resuelto":"Caso finalizado — no resuelto");
+    // Mostrar encuestas pendientes
+    const pendientes=encuestasDelCaso.filter(e=>!e.completada);
+    if(pendientes.length>0) setEncuestaActiva(pendientes[0]);
   };
 
   const guardarCierre=async(formCierre)=>{
@@ -1592,102 +1643,172 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
       cierre_requirio_n2:          formCierre.requirio_n2,
       cierre_completado:           true,
       cierre_at:                   new Date().toISOString(),
-      estado:                      "RESUELTO",
-      updated_at:                  new Date().toISOString(),
+      estado:                      "FINALIZADO",
+      resolvio:                    true,
+      tiempo_total_seg:            tiempoSegundos,
     };
-    await supabase.from("casos").update(updates).eq("id",caso.id);
-    await addHistorial("CIERRE",`Caso resuelto · Modelo: ${formCierre.modelo_terminal} · N2: ${formCierre.requirio_n2?"Sí":"No"}`);
-    const casActualizado={...caso,...updates};
+    const h=[...(caso.historial||[]),{id:Date.now(),tipo:"CIERRE",
+      texto:`Caso resuelto · Modelo: ${formCierre.modelo_terminal} · N2: ${formCierre.requirio_n2?"Sí":"No"}`,
+      usuario:user.email,ts:new Date().toISOString()}];
+    await supabase.from("casos").update({...updates,historial:h}).eq("id",caso.id);
+    const casActualizado={...caso,...updates,historial:h};
     setCaso(casActualizado);
     if(onUpdate) onUpdate(casActualizado);
     setShowCierre(false);
-    setNuevoEstado("RESUELTO");
-    toast("✓ Caso resuelto correctamente");
-    // Si hay encuestas pendientes, mostrar la primera
-    if(encuestasPendientes.length>0) setEncuestaActiva(encuestasPendientes[0]);
+    toast("✓ Caso finalizado correctamente");
+    const pendientes=encuestasDelCaso.filter(e=>!e.completada);
+    if(pendientes.length>0) setEncuestaActiva(pendientes[0]);
     setLoading(false);
+  };
+
+  const recoordinar=async({nuevaFecha,nuevaFranja,motivo})=>{
+    const updates={
+      estado:"ASIGNADO", // reasigna al mismo técnico
+      franja_horaria:nuevaFranja,
+      fecha_recoordinacion:nuevaFecha,
+      tiempo_total_seg:tiempoSegundos,
+    };
+    await actualizarCaso(updates,
+      `RECOORDINADO — Nueva fecha: ${nuevaFecha} · Franja: ${nuevaFranja} · Motivo: ${motivo}`,
+      "RECOORDINACION");
+    toast("✓ Caso recoordinado — el técnico mantiene la asignación");
+  };
+
+  const agregarNota=async()=>{
+    if(!nota.trim()) return;
+    setLoading(true);
+    await addHistorial("NOTA",nota.trim());
+    setNota(""); setLoading(false);
+    toast("Nota registrada");
   };
 
   const guardarEncuestaConfig=async(encuestaId,respuestas)=>{
     await supabase.from("casos_encuestas").update({
-      completada:true, respuestas,
-      completada_at:new Date().toISOString()
+      completada:true,respuestas,completada_at:new Date().toISOString()
     }).eq("caso_id",caso.id).eq("encuesta_id",encuestaId);
     await addHistorial("ENCUESTA","Encuesta completada por el técnico");
-    setEncuestasCompletadas(prev=>[...prev,{encuesta_id:encuestaId}]);
-    // Siguiente encuesta pendiente
-    const restantes=encuestasPendientes.filter(e=>e.encuesta_id!==encuestaId);
-    setEncuestaActiva(restantes.length>0?restantes[0]:null);
+    const pendientes=encuestasDelCaso.filter(e=>!e.completada&&e.encuesta_id!==encuestaId);
+    setEncuestasDelCaso(prev=>prev.map(e=>e.encuesta_id===encuestaId?{...e,completada:true}:e));
+    setEncuestaActiva(pendientes.length>0?pendientes[0]:null);
     toast("+20 XP · Encuesta completada ✓");
   };
 
-  const agregarNota=async()=>{
-    if(!nota.trim())return;
-    setLoading(true);
-    await addHistorial("NOTA",nota.trim());
-    setNota("");
-    toast("Nota agregada");
-    setLoading(false);
-  };
-
   const historial=caso.historial||[];
-  const HIST_ICON={ESTADO:"⚡",NOTA:"📝",ENCUESTA:"📊",CREACION:"🆕",SISTEMA:"🔧",INSTRUCCIONES:"⚠",CIERRE:"✅",ASIGNACION:"👤"};
-  const HIST_COL={ESTADO:B=>B.orange,NOTA:B=>B.blue,ENCUESTA:B=>B.green,CREACION:B=>B.purple,SISTEMA:B=>B.t3,INSTRUCCIONES:B=>B.red,CIERRE:B=>B.green,ASIGNACION:B=>B.blue};
+  const HIST_ICON={ESTADO:"⚡",NOTA:"📝",ENCUESTA:"📊",CREACION:"🆕",SISTEMA:"🔧",
+    INSTRUCCIONES:"⚠",CIERRE:"✅",ASIGNACION:"👤",PAUSA:"⏸",CANCELACION:"✗",FINALIZACION:"🏁",RECOORDINACION:"📅"};
+  const HIST_COL={ESTADO:B=>B.orange,NOTA:B=>B.blue,ENCUESTA:B=>B.green,CREACION:B=>B.purple,
+    INSTRUCCIONES:B=>B.orange,CIERRE:B=>B.green,ASIGNACION:B=>B.blue,
+    PAUSA:B=>B.purple,CANCELACION:B=>B.red,FINALIZACION:B=>B.green,RECOORDINACION:B=>B.teal};
+
+  const estadoColor = EST_COLOR[caso.estado]?.(B)||B.t3;
 
   return(
     <div style={{padding:"0 0 40px"}}>
-      {showEnc&&<ModalEncuestaConfig encuesta={{preguntas:[]}} caso={caso} user={user} onClose={()=>setShowEnc(false)} onSave={guardarEncuestaConfig}/>}
+      {/* Modales */}
       {showInstr&&<ModalInstrucciones caso={caso} user={user} onClose={()=>setShowInstr(false)} onSave={guardarInstrucciones}/>}
       {showCierre&&<ModalCierre caso={caso} user={user} onClose={()=>setShowCierre(false)} onGuardar={guardarCierre}/>}
       {encuestaActiva&&<ModalEncuestaConfig encuesta={encuestaActiva.encuesta} caso={caso} user={user} onClose={()=>setEncuestaActiva(null)} onSave={guardarEncuestaConfig}/>}
 
-      {/* ── INSTRUCCIONES ESPECIALES — siempre arriba del todo ── */}
-      <BloqueInstrucciones
-        instrucciones={caso.instrucciones_especiales}
-        onConfirmar={confirmarInstrucciones}
-        yaConfirmado={yaConfirmado}
-        esRolTecnico={esRolTecnico}
-      />
+      {/* Modal Pausar */}
+      {showPausar&&<ModalTextoLibre titulo="⏸ PAUSAR CASO" label="Motivo de la pausa" placeholder="Explicá por qué pausás el caso..." onClose={()=>setShowPausar(false)} onGuardar={async(txt)=>{await pausar(txt);setShowPausar(false);}}/>}
+      {/* Modal Cancelar */}
+      {showCancelar&&<ModalTextoLibre titulo="✗ CANCELAR CASO" label="Motivo de la cancelación" placeholder="Explicá por qué cancelás el caso..." color={B.red} onClose={()=>setShowCancelar(false)} onGuardar={async(txt)=>{await cancelar(txt);setShowCancelar(false);}}/>}
+      {/* Modal Finalizar */}
+      {showFinalizar&&<ModalFinalizar onClose={()=>setShowFinalizar(false)} onGuardar={finalizar}/>}
+      {/* Modal Recoordinar */}
+      {showRecoord&&<ModalRecoordinar onClose={()=>setShowRecoord(false)} onGuardar={async(data)=>{await recoordinar(data);setShowRecoord(false);}}/>}
+
+      {/* ── INSTRUCCIONES ESPECIALES — siempre arriba ── */}
+      <BloqueInstrucciones instrucciones={caso.instrucciones_especiales} onConfirmar={confirmarInstrucciones} yaConfirmado={yaConfirmado} esRolTecnico={esRolTecnico}/>
 
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
         <button onClick={onBack} style={{background:"none",border:`1px solid ${B.border}`,color:B.t2,cursor:"pointer",padding:"6px 12px",fontSize:11,fontFamily:"'Orbitron',sans-serif"}}>← VOLVER</button>
         <div style={{flex:1}}>
           <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-            <span style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:18,color:B.t1}}>#{caso.numero}</span>
+            <span style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:18,color:B.t1}}>#{caso.numero||caso.id_externo}</span>
             <Tg label={caso.tipo_proceso} color={tp?.color||B.orange}/>
-            <Tg label={caso.prioridad} color={caso.prioridad==="CRITICA"?B.red:caso.prioridad==="ALTA"?B.orange:B.blue}/>
-            <Tg label={caso.estado} color={EST_COLOR[caso.estado]?.(B)||B.t3}/>
+            {caso.tier&&<Tg label={caso.tier} color={{VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green}[caso.tier]||B.t2}/>}
+            <Tg label={caso.estado} color={estadoColor}/>
             {caso.es_incidente&&<Tg label={`INC ${caso.incidente_id||""}`} color={B.red}/>}
             {tieneInstr&&<Tg label={yaConfirmado?"⚠ LEÍDAS":"⚠ INSTRUCCIONES"} color={yaConfirmado?B.green:B.orange}/>}
           </div>
-          <div style={{fontSize:12,color:B.t2,marginTop:4}}>{caso.descripcion?.substring(0,80)}{caso.descripcion?.length>80?"...":""}</div>
+          <div style={{fontSize:12,color:B.t2,marginTop:4}}>{caso.razon_social} {caso.rut?`· RUT: ${caso.rut}`:""}</div>
         </div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {esRolSupervisorOSuperior&&(
-            <Bb label={tieneInstr?"✎ EDITAR INSTRUCCIONES":"+ INSTRUCCIONES ESPECIALES"}
-              onClick={()=>setShowInstr(true)} small ghost color={B.orange}/>
-          )}
-          {(caso.estado==="RESUELTO"||caso.estado==="EN_PROCESO")&&!caso.respuestas_encuesta&&(
-            <Bb label="📊 ENCUESTA CLIENTE" onClick={()=>setShowEnc(true)} small/>
-          )}
+        {/* Contador de tiempo */}
+        <div style={{textAlign:"right",background:B.card,border:`1px solid ${caso.estado==="EN_PROCESO"?B.yellow:B.border}`,padding:"8px 14px"}}>
+          <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>TIEMPO EN CAMPO</div>
+          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:16,fontWeight:700,
+            color:caso.estado==="EN_PROCESO"?B.yellow:B.t2}}>
+            {fmtTiempo(tiempoSegundos)}
+          </div>
+          {caso.estado==="EN_PROCESO"&&<div style={{fontSize:8,color:B.yellow}} className="live">● CONTANDO</div>}
         </div>
       </div>
 
+      {/* ── PANEL DE ACCIONES DEL TÉCNICO ── */}
+      {(esRolTecnico||esRolSuperior)&&(
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ ACCIONES</div>
+          <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+            {/* EN PROCESO */}
+            {caso.estado==="PAUSADO"&&(
+              <Bb label="▶ REANUDAR" onClick={reanudar} color={B.blue}/>
+            )}
+            {/* PAUSAR */}
+            {caso.estado==="EN_PROCESO"&&(
+              <Bb label="⏸ PAUSAR" onClick={()=>setShowPausar(true)} color={B.purple} ghost/>
+            )}
+            {/* FINALIZAR */}
+            {["EN_PROCESO","PAUSADO"].includes(caso.estado)&&(
+              <Bb label="🏁 FINALIZAR" onClick={()=>setShowFinalizar(true)} color={B.green}/>
+            )}
+            {/* RECOORDINAR */}
+            {["EN_PROCESO","PAUSADO","ASIGNADO"].includes(caso.estado)&&(
+              <Bb label="📅 RECOORDINAR" onClick={()=>setShowRecoord(true)} color={B.teal} ghost/>
+            )}
+            {/* CANCELAR */}
+            {["EN_PROCESO","PAUSADO","ASIGNADO"].includes(caso.estado)&&(
+              <Bb label="✗ CANCELAR" onClick={()=>setShowCancelar(true)} color={B.red} ghost/>
+            )}
+            {/* INSTRUCCIONES (supervisor/director) */}
+            {esRolSuperior&&(
+              <Bb label={tieneInstr?"✎ INSTRUCCIONES":"+ INSTRUCCIONES"} onClick={()=>setShowInstr(true)} ghost small color={B.orange}/>
+            )}
+          </div>
+          {caso.estado==="EN_PROCESO"&&(
+            <div style={{marginTop:12}}>
+              <div style={{display:"flex",gap:8}}>
+                <input className="field" style={{flex:1}} placeholder="Agregar nota al historial..."
+                  value={nota} onChange={e=>setNota(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&agregarNota()}/>
+                <Bb label="NOTA" onClick={agregarNota} disabled={!nota.trim()||loading} small ghost/>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── DATOS DEL CASO ── */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
         <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
           <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ DATOS DEL CLIENTE</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[["Terminal",caso.numero_serie],["RUT",caso.rut],["Razón Social",caso.razon_social],["Teléfono",caso.telefono],["Rubro",caso.rubro]].map(([l,v])=>v&&(
-              <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div><div style={{fontSize:12,color:B.t1,marginTop:2}}>{v}</div></div>
+            {[["Terminal",caso.numero_serie],["RUT",caso.rut],["Razón Social",caso.razon_social],
+              ["Teléfono",caso.telefono],["Rubro",caso.rubro],["Dirección",caso.direccion]].map(([l,v])=>v&&(
+              <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
+              <div style={{fontSize:12,color:B.t1,marginTop:2}}>{v}</div></div>
             ))}
           </div>
         </div>
         <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
           <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ DATOS OPERATIVOS</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[["Empresa",emp?.nombre||caso.empresa_id],["Departamento",caso.departamento],["Localidad",caso.localidad],["Dirección",caso.direccion],["Rango Horario",caso.rango_horario],["Creado",fmtD(caso.created_at)]].map(([l,v])=>v&&(
-              <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div><div style={{fontSize:12,color:B.t1,marginTop:2}}>{v}</div></div>
+            {[["Empresa",emp?.nombre||caso.empresa_id],["Departamento",caso.departamento],
+              ["Localidad",caso.localidad],["Franja",caso.franja_horaria||caso.rango_horario],
+              ["Prioridad",caso.prioridad],["Creado",fmtD(caso.created_at)]].map(([l,v])=>v&&(
+              <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
+              <div style={{fontSize:12,color:B.t1,marginTop:2}}>{v}</div></div>
             ))}
           </div>
           {caso.sla_deadline&&(
@@ -1696,7 +1817,7 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
                 <span style={{fontSize:10,color:B.t3}}>SLA</span>
                 <span style={{fontSize:10,color:vencido?B.red:B.green,fontWeight:700}}>{vencido?"⚠ VENCIDO":"✓ EN TIEMPO"}</span>
               </div>
-              <div style={{height:4,background:B.bg,borderRadius:2}}>
+              <div style={{height:4,background:B.deep,borderRadius:2}}>
                 <div style={{height:4,width:`${pct}%`,background:vencido?B.red:pct<30?B.orange:B.green,borderRadius:2,transition:"width .3s"}}/>
               </div>
               <div style={{fontSize:10,color:B.t3,marginTop:4}}>Vence: {fmtD(caso.sla_deadline)}</div>
@@ -1705,41 +1826,45 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
         </div>
       </div>
 
-      {/* Gestión */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
-        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ GESTIÓN</div>
-        {bloqueado&&(
-          <div style={{background:B.redDim,border:`1px solid ${B.red}33`,borderLeft:`3px solid ${B.red}`,padding:"9px 14px",marginBottom:12,fontSize:12,color:B.red,fontWeight:700}}>
-            ⚠ Debés confirmar las instrucciones especiales antes de cambiar el estado a EN PROGRESO
+      {/* Datos de cierre técnico */}
+      {caso.cierre_completado&&(
+        <div style={{background:`${B.green}11`,border:`1px solid ${B.green}33`,borderLeft:`3px solid ${B.green}`,padding:"12px 16px",marginBottom:16}}>
+          <div style={{fontSize:10,color:B.green,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>✅ CIERRE TÉCNICO</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {[["Problema",caso.cierre_descripcion_problema],["Solución",caso.cierre_como_resolvio],
+              ["Modelo",caso.cierre_modelo_terminal],["Serie",caso.cierre_serie_terminal],
+              ["Soporte N2",caso.cierre_requirio_n2?"✓ SÍ REQUIRIÓ":"✗ NO REQUIRIÓ"]].map(([l,v])=>v&&(
+              <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
+              <div style={{fontSize:12,color:l==="Soporte N2"&&caso.cierre_requirio_n2?B.red:B.t1,fontWeight:l==="Soporte N2"?700:400,marginTop:2}}>{v}</div></div>
+            ))}
           </div>
-        )}
-        <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
-          <div style={{flex:1,minWidth:200}}>
-            <FL label="Cambiar Estado"/>
-            <select className="field" value={nuevoEstado} onChange={e=>setNuevoEstado(e.target.value)}>
-              {ESTADOS_FLUJO.map(e=><option key={e} value={e}>{e}</option>)}
-            </select>
-          </div>
-          <Bb label={loading?"...":"APLICAR ESTADO"} onClick={cambiarEstado}
-            disabled={nuevoEstado===caso.estado||loading||bloqueado} small
-            color={bloqueado?B.t3:B.orange}/>
         </div>
-        <div style={{marginTop:12,display:"flex",gap:8}}>
-          <input className="field" style={{flex:1}} placeholder="Agregar nota al historial..."
-            value={nota} onChange={e=>setNota(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&agregarNota()}/>
-          <Bb label="AGREGAR NOTA" onClick={agregarNota} disabled={!nota.trim()||loading} small ghost/>
+      )}
+
+      {/* Encuestas */}
+      {encuestasDelCaso.length>0&&(
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:"12px 16px",marginBottom:16}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>📋 ENCUESTAS</div>
+          {encuestasDelCaso.map(e=>(
+            <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:`1px solid ${B.border}22`}}>
+              <Tg label={e.completada?"✓ COMPLETADA":"PENDIENTE"} color={e.completada?B.green:B.orange}/>
+              <span style={{fontSize:12,flex:1}}>{e.encuesta?.nombre||"Encuesta"}</span>
+              {!e.completada&&esRolTecnico&&caso.estado==="FINALIZADO"&&(
+                <Bb label="COMPLETAR" onClick={()=>setEncuestaActiva(e)} small ghost color={B.orange}/>
+              )}
+            </div>
+          ))}
         </div>
-      </div>
+      )}
 
       {/* Historial */}
       <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
         <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ HISTORIAL ({historial.length})</div>
-        {historial.length===0&&<div style={{color:B.t3,fontSize:12,textAlign:"center",padding:20}}>Sin entradas en el historial</div>}
+        {historial.length===0&&<div style={{color:B.t3,fontSize:12,textAlign:"center",padding:20}}>Sin entradas</div>}
         <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:320,overflowY:"auto"}}>
           {[...historial].reverse().map(h=>(
-            <div key={h.id} style={{display:"flex",gap:10,padding:"8px 10px",background:B.bg,border:`1px solid ${B.border}`,
-              borderLeft:h.tipo==="INSTRUCCIONES"?`3px solid ${B.orange}`:`1px solid ${B.border}`}}>
+            <div key={h.id} style={{display:"flex",gap:10,padding:"8px 10px",background:B.deep,border:`1px solid ${B.border}`,
+              borderLeft:`3px solid ${HIST_COL[h.tipo]?.(B)||B.t3}`}}>
               <span style={{fontSize:16,flexShrink:0}}>{HIST_ICON[h.tipo]||"📌"}</span>
               <div style={{flex:1}}>
                 <div style={{fontSize:12,color:HIST_COL[h.tipo]?.(B)||B.t1,fontWeight:600}}>{h.texto}</div>
@@ -1748,47 +1873,91 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
             </div>
           ))}
         </div>
-        {/* Datos de cierre técnico (solo ST) */}
-        {caso.cierre_completado&&(
-          <div style={{marginTop:12,padding:"12px 14px",background:`${B.green}11`,border:`1px solid ${B.green}33`,borderLeft:`3px solid ${B.green}`}}>
-            <div style={{fontSize:10,color:B.green,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>✅ CIERRE TÉCNICO COMPLETADO</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {[
-                ["Problema",caso.cierre_descripcion_problema],
-                ["Solución",caso.cierre_como_resolvio],
-                ["Modelo",caso.cierre_modelo_terminal],
-                ["Serie",caso.cierre_serie_terminal],
-                ["Soporte N2",caso.cierre_requirio_n2?"✓ SÍ":"✗ NO"],
-              ].map(([l,v])=>v&&(
-                <div key={l}>
-                  <div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
-                  <div style={{fontSize:12,color:caso.cierre_requirio_n2&&l==="Soporte N2"?B.red:B.t1,fontWeight:l==="Soporte N2"?700:400,marginTop:2}}>{v}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {/* Encuestas del caso */}
-        {encuestasDelCaso.length>0&&(
-          <div style={{marginTop:12,padding:"12px 14px",background:B.deep,border:`1px solid ${B.border}`}}>
-            <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>📋 ENCUESTAS DEL CASO</div>
-            {encuestasDelCaso.map(e=>(
-              <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:`1px solid ${B.border}22`}}>
-                <Tg label={e.completada?"✓ COMPLETADA":"PENDIENTE"} color={e.completada?B.green:B.orange}/>
-                <span style={{fontSize:12,flex:1}}>{e.encuesta?.nombre||"Encuesta"}</span>
-                {!e.completada&&esRolTecnico&&(
-                  <Bb label="COMPLETAR" onClick={()=>setEncuestaActiva(e)} small ghost color={B.orange}/>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
 };
-// ═══════════════════════════════════════════════════════════
-// PART 7 — BulkUpload + Analitica
+
+// ─── MODAL TEXTO LIBRE (pausar / cancelar) ──────────────────
+const ModalTextoLibre=({titulo,label,placeholder,color=B.orange,onClose,onGuardar})=>{
+  const [texto,setTexto]=useState(""); const [saving,setSaving]=useState(false);
+  return(
+    <Modal title={titulo} onClose={onClose} width={480}>
+      <div style={{marginBottom:14}}><FL label={label} req/>
+        <textarea className="field" rows={4} placeholder={placeholder}
+          value={texto} onChange={e=>setTexto(e.target.value)} style={{resize:"vertical"}}/></div>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:10,paddingTop:14,borderTop:`1px solid ${B.border}`}}>
+        <Bb label="CANCELAR" onClick={onClose} ghost small color={B.t2}/>
+        <Bb label={saving?"GUARDANDO...":"CONFIRMAR"} color={color}
+          onClick={async()=>{setSaving(true);await onGuardar(texto);setSaving(false);}}
+          disabled={!texto.trim()||saving}/>
+      </div>
+    </Modal>
+  );
+};
+
+// ─── MODAL FINALIZAR ────────────────────────────────────────
+const ModalFinalizar=({onClose,onGuardar})=>{
+  const [resolvio,setResolvio]=useState(null); const [saving,setSaving]=useState(false);
+  return(
+    <Modal title="🏁 FINALIZAR CASO" onClose={onClose} width={440}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:13,color:B.t1,fontWeight:700,marginBottom:14}}>¿Se resolvió el problema?</div>
+        <div style={{display:"flex",gap:12}}>
+          {[["✓ SÍ, se resolvió",true,B.green],["✗ NO se resolvió",false,B.red]].map(([label,val,color])=>(
+            <button key={String(val)} onClick={()=>setResolvio(val)}
+              style={{flex:1,padding:"16px 10px",border:`2px solid ${resolvio===val?color:B.border}`,
+                background:resolvio===val?color+"22":"transparent",color:resolvio===val?color:B.t2,
+                cursor:"pointer",fontSize:13,fontWeight:700,transition:"all .15s"}}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:10,paddingTop:14,borderTop:`1px solid ${B.border}`}}>
+        <Bb label="CANCELAR" onClick={onClose} ghost small color={B.t2}/>
+        <Bb label={saving?"GUARDANDO...":"CONFIRMAR"}
+          onClick={async()=>{setSaving(true);await onGuardar(resolvio);setSaving(false);}}
+          disabled={resolvio===null||saving}
+          color={resolvio===true?B.green:resolvio===false?B.red:B.t3}/>
+      </div>
+    </Modal>
+  );
+};
+
+// ─── MODAL RECOORDINAR ──────────────────────────────────────
+const ModalRecoordinar=({onClose,onGuardar})=>{
+  const [fecha,setFecha]=useState(""); const [franja,setFranja]=useState("");
+  const [motivo,setMotivo]=useState(""); const [saving,setSaving]=useState(false);
+  const completo=fecha&&franja&&motivo.trim();
+  return(
+    <Modal title="📅 RECOORDINAR CASO" onClose={onClose} width={500}>
+      <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:16}}>
+        <div><FL label="Nueva fecha" req/>
+          <input className="field" type="date" value={fecha} onChange={e=>setFecha(e.target.value)}
+            min={new Date().toISOString().split("T")[0]}/></div>
+        <div><FL label="Franja horaria" req/>
+          <select className="field" value={franja} onChange={e=>setFranja(e.target.value)}>
+            <option value="">Seleccionar...</option>
+            {["FH1 (8-12)","FH2 (12-16)","FH3 (16-19)","FH4 (19-22)"].map(f=><option key={f} value={f}>{f}</option>)}
+          </select></div>
+        <div><FL label="Motivo de la recoordinación" req/>
+          <textarea className="field" rows={3} placeholder="Explicá por qué recoordinás el caso..."
+            value={motivo} onChange={e=>setMotivo(e.target.value)} style={{resize:"vertical"}}/></div>
+      </div>
+      <div style={{padding:"10px 14px",background:B.teal+"11",border:`1px solid ${B.teal}33`,fontSize:11,color:B.t2,marginBottom:14}}>
+        💡 El caso quedará reasignado al mismo técnico para la nueva fecha y franja seleccionadas.
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:10,paddingTop:14,borderTop:`1px solid ${B.border}`}}>
+        <Bb label="CANCELAR" onClick={onClose} ghost small color={B.t2}/>
+        <Bb label={saving?"GUARDANDO...":"CONFIRMAR RECOORDINACIÓN"} color={B.teal}
+          onClick={async()=>{setSaving(true);await onGuardar({nuevaFecha:fecha,nuevaFranja:franja,motivo});setSaving(false);}}
+          disabled={!completo||saving}/>
+      </div>
+    </Modal>
+  );
+};
+
 // ═══════════════════════════════════════════════════════════
 // ─── CONSTANTES NUEVOS CAMPOS ─────────────────────────────────
 const TIERS=["VIP","T1a","T1b","T2"];
