@@ -3114,6 +3114,19 @@ export default function App(){
   // ── Motor de recordatorios activo siempre que haya sesión ──
   useRecordatorios(casos, session?.user, minutosAntes);
 
+  // ── Redirección por rol — debe estar antes de cualquier return condicional ──
+  useEffect(()=>{
+    if(!perfil) return;
+    const PERMISOS={
+      DIRECTOR:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","config","detalle"],
+      REGIONAL:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","detalle"],
+      SUPERVISOR: ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","detalle"],
+      TECNICO:    ["mision","ruta","casos","comunicaciones","logros","detalle"],
+    };
+    const permitidos=PERMISOS[perfil.rol]||PERMISOS.DIRECTOR;
+    if(!permitidos.includes(view)) setView("mision");
+  },[perfil,view]);
+
   const toast=(msg,dur=3000)=>{
     setToastMsg(msg);
     setTimeout(()=>setToastMsg(null),dur);
@@ -3135,8 +3148,6 @@ export default function App(){
 
   const user=session.user;
   const rol=perfil?.rol||"DIRECTOR";
-
-  // Permisos por rol
   const PERMISOS={
     DIRECTOR:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","config","detalle"],
     REGIONAL:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","detalle"],
@@ -3144,11 +3155,6 @@ export default function App(){
     TECNICO:    ["mision","ruta","casos","comunicaciones","logros","detalle"],
   };
   const puedeVer=(v)=>(PERMISOS[rol]||PERMISOS.DIRECTOR).includes(v);
-
-  // Redirigir si intenta acceder a vista no permitida
-  useEffect(()=>{
-    if(perfil&&!puedeVer(view)) setView("mision");
-  },[perfil,view]);
 
   return(
     <div style={{minHeight:"100vh",background:B.bg,color:B.t1,fontFamily:"'Rajdhani',sans-serif",display:"flex",flexDirection:"column"}}>
