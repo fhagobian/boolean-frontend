@@ -453,6 +453,9 @@ const CasosList = ({casos,onSelect,onNew,user,onRecargar}) => {
   const [fE,      setFE]      = useState("ALL");
   const [fP,      setFP]      = useState("ALL");
   const [fEmp,    setFEmp]    = useState("ALL");
+  const [encuestasMasivo, setEncuestasMasivo] = useState([]);
+  const [encuestaSel, setEncuestaSel] = useState("");
+  const [activandoEnc, setActivandoEnc] = useState(false);
   const [fTier,   setFTier]   = useState("ALL");
   const [fAsig,   setFAsig]   = useState("ALL");
   const [sortCol, setSortCol] = useState("created_at");
@@ -466,6 +469,9 @@ const CasosList = ({casos,onSelect,onNew,user,onRecargar}) => {
   useEffect(()=>{
     supabase.from("usuarios").select("*").eq("rol","TECNICO").eq("activo",true)
       .then(({data})=>setTecnicos(data||[]));
+    // Cargar encuestas activas para activación masiva
+    supabase.from("encuestas_config").select("*").eq("activa",true)
+      .then(({data})=>setEncuestasMasivo(data||[]));
   },[]);
 
   useEffect(()=>{ setBar(selIds.size>0); },[selIds]);
@@ -506,6 +512,23 @@ const CasosList = ({casos,onSelect,onNew,user,onRecargar}) => {
   const toggleAll=()=>{
     if(selIds.size===fil.length) setSelIds(new Set());
     else setSelIds(new Set(fil.map(c=>c.id)));
+  };
+
+  const activarEncuestaMasivo=async()=>{
+    if(!encuestaSel||selIds.size===0) return;
+    setActivandoEnc(true);
+    let ok=0;
+    for(const id of selIds){
+      const{error}=await supabase.from("casos_encuestas").insert({
+        caso_id:id, encuesta_id:encuestaSel,
+        activada_por:user?.email, activada_at:new Date().toISOString()
+      });
+      if(!error) ok++;
+    }
+    setActivandoEnc(false);
+    setEncuestaSel("");
+    setSelIds(new Set());
+    if(onRecargar) await onRecargar();
   };
 
   const asignarMasivo=async()=>{
@@ -646,7 +669,7 @@ const CasosList = ({casos,onSelect,onNew,user,onRecargar}) => {
         <div style={{position:"fixed",bottom:0,left:210,right:0,background:B.panel,
           borderTop:`2px solid ${B.orange}`,padding:"12px 24px",
           display:"flex",alignItems:"center",gap:14,zIndex:100,
-          boxShadow:`0 -8px 32px ${B.orange}22`}}>
+          boxShadow:`0 -8px 32px ${B.orange}22`,flexWrap:"wrap"}}>
           <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,color:B.orange,flexShrink:0}}>
             {selIds.size} CASO{selIds.size>1?"S":""} SEL.
           </div>
@@ -655,15 +678,23 @@ const CasosList = ({casos,onSelect,onNew,user,onRecargar}) => {
               ⚠ {empresasSeleccionadas.length} empresas distintas
             </div>
           )}
-          <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)} style={{flex:1,maxWidth:300}}>
-            <option value="">Seleccioná un técnico...</option>
+          {/* Asignación de técnico */}
+          <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)} style={{flex:1,maxWidth:260}}>
+            <option value="">👤 Asignar técnico...</option>
             {(tecnicosFiltrados.length>0?tecnicosFiltrados:tecnicos).map(t=>{
               const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["CERRADO","RESUELTO"].includes(c.estado||"")).length;
-              return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} ({t.empresa_codigo}) — {carga} casos activos</option>;
+              return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} ({t.empresa_codigo}) — {carga} casos</option>;
             })}
           </select>
-          <Bb label={asignando?"ASIGNANDO...":"⚡ ASIGNAR"} onClick={asignarMasivo} disabled={!tecSel||asignando}/>
-          <Bb label="CANCELAR" onClick={()=>setSelIds(new Set())} ghost small color={B.t2}/>
+          <Bb label={asignando?"ASIGNANDO...":"⚡ ASIGNAR"} onClick={asignarMasivo} disabled={!tecSel||asignando} small/>
+          {/* Activar encuesta */}
+          <div style={{width:1,height:30,background:B.border,flexShrink:0}}/>
+          <select className="field" value={encuestaSel} onChange={e=>setEncuestaSel(e.target.value)} style={{flex:1,maxWidth:220}}>
+            <option value="">📋 Activar encuesta...</option>
+            {encuestasMasivo.map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}
+          </select>
+          <Bb label={activandoEnc?"ACTIVANDO...":"📋 ACTIVAR"} onClick={activarEncuestaMasivo} disabled={!encuestaSel||activandoEnc} small ghost color={B.purple}/>
+          <Bb label="✕" onClick={()=>setSelIds(new Set())} ghost small color={B.t2}/>
         </div>
       )}
     </div>
@@ -975,73 +1006,481 @@ const ModalInstrucciones = ({ caso, user, onClose, onSave }) => {
 // ═══════════════════════════════════════════════════════════
 // PART 6 — CasoDetalle + Modal Encuesta
 // ═══════════════════════════════════════════════════════════
-const ENCUESTAS = {
-  INSTALACION:[
-    {id:"sat_inst",label:"¿Cómo calificarías la instalación?",opts:["Excelente","Buena","Regular","Mala"]},
-    {id:"tiempo",label:"¿El tiempo de instalación fue adecuado?",opts:["Muy rápido","Adecuado","Un poco lento","Muy lento"]},
-    {id:"tecnico",label:"¿Cómo fue la atención del técnico?",opts:["Excelente","Buena","Regular","Mala"]},
-    {id:"equipo",label:"¿El equipo quedó funcionando correctamente?",opts:["Sí, perfectamente","Sí, con observaciones","No del todo","No funcionó"]},
-  ],
-  SOPORTE:[
-    {id:"resolucion",label:"¿Se resolvió el problema?",opts:["Sí, completamente","Sí, parcialmente","No se resolvió","Requiere revisita"]},
-    {id:"sat_soporte",label:"¿Cómo calificarías el soporte?",opts:["Excelente","Bueno","Regular","Malo"]},
-    {id:"tiempo_resp",label:"¿El tiempo de respuesta fue aceptable?",opts:["Muy rápido","Adecuado","Demoró mucho","Inaceptable"]},
-    {id:"tecnico",label:"¿Cómo fue la atención del técnico?",opts:["Excelente","Buena","Regular","Mala"]},
-  ],
-  RETIRO:[
-    {id:"sat_retiro",label:"¿Cómo calificarías el proceso de retiro?",opts:["Excelente","Bueno","Regular","Malo"]},
-    {id:"coordinacion",label:"¿La coordinación previa fue adecuada?",opts:["Muy buena","Buena","Regular","Mala"]},
-    {id:"tecnico",label:"¿Cómo fue la atención del técnico?",opts:["Excelente","Buena","Regular","Mala"]},
-  ],
-  PROACTIVO:[
-    {id:"sat_visita",label:"¿Cómo calificarías la visita proactiva?",opts:["Excelente","Buena","Regular","Mala"]},
-    {id:"utilidad",label:"¿La visita resultó útil?",opts:["Muy útil","Útil","Poco útil","Sin valor"]},
-    {id:"tecnico",label:"¿Cómo fue la atención del técnico?",opts:["Excelente","Buena","Regular","Mala"]},
-    {id:"seguimiento",label:"¿Necesita seguimiento adicional?",opts:["No, todo OK","Sí, menor","Sí, importante","Urgente"]},
-  ],
-};
+// ═══════════════════════════════════════════════════════════════
+// ESCÁNER DE CÓDIGO DE BARRAS — usa cámara del celular
+// ═══════════════════════════════════════════════════════════════
+const MODELOS_TERMINAL = [
+  "Move 2500","Move 5000","Lane 3000","Lane 7000",
+  "Dx 8000","RX 5000","RX 7000"
+];
 
-const ModalEncuesta = ({caso,onClose,onSave})=>{
-  const preguntas = ENCUESTAS[caso.tipo_proceso]||ENCUESTAS.SOPORTE;
-  const [resp,setResp] = useState(caso.respuestas_encuesta||{});
-  const [saving,setSaving] = useState(false);
-  const complete = preguntas.every(p=>resp[p.id]);
-  const handleSave = async()=>{
-    setSaving(true);
-    await onSave(resp);
-    setSaving(false);
+const EscanerBarras = ({ onScan, onClose }) => {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    iniciarCamara();
+    return () => detenerCamara();
+  }, []);
+
+  const iniciarCamara = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+        setScanning(true);
+        escanearLoop();
+      }
+    } catch (e) {
+      setError("No se pudo acceder a la cámara. Ingresá la serie manualmente.");
+    }
   };
-  return(
-    <Modal title="◈ ENCUESTA DE SATISFACCIÓN" onClose={onClose} width={520}>
-      <div style={{marginBottom:16,padding:"10px 14px",background:B.orangeDim,border:`1px solid ${B.orange}22`,display:"flex",gap:12,alignItems:"center"}}>
-        <span style={{fontSize:20}}>{TIPOS_PROCESO.find(t=>t.codigo===caso.tipo_proceso)?.icono||"📋"}</span>
-        <div>
-          <div style={{fontSize:11,fontWeight:700,color:B.orange}}>{caso.tipo_proceso} · #{caso.numero}</div>
-          <div style={{fontSize:12,color:B.t2}}>{caso.razon_social||caso.numero_serie}</div>
-        </div>
-      </div>
-      <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:20}}>
-        {preguntas.map((p,i)=>(
-          <div key={p.id}>
-            <div style={{fontSize:11,color:B.t2,marginBottom:6,fontWeight:600}}>{i+1}. {p.label}</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-              {p.opts.map(opt=>(
-                <button key={opt} onClick={()=>setResp(r=>({...r,[p.id]:opt}))}
-                  style={{padding:"8px 10px",border:`1px solid ${resp[p.id]===opt?B.orange:B.border}`,background:resp[p.id]===opt?B.orangeDim:"transparent",color:resp[p.id]===opt?B.orange:B.t2,cursor:"pointer",fontSize:11,fontWeight:resp[p.id]===opt?700:400,transition:"all .15s",textAlign:"left"}}>
-                  {resp[p.id]===opt?"◉ ":"○ "}{opt}
-                </button>
-              ))}
+
+  const detenerCamara = () => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    setScanning(false);
+  };
+
+  const escanearLoop = () => {
+    // Usa BarcodeDetector API nativa del browser (Chrome Android, iOS 17+)
+    if (!("BarcodeDetector" in window)) {
+      setError("Tu browser no soporta escaneo automático. Ingresá la serie manualmente.");
+      return;
+    }
+    const detector = new window.BarcodeDetector({ formats: ["code_128","code_39","ean_13","ean_8","qr_code","data_matrix"] });
+    const scan = async () => {
+      if (!videoRef.current || !scanning) return;
+      try {
+        const barcodes = await detector.detect(videoRef.current);
+        if (barcodes.length > 0) {
+          detenerCamara();
+          onScan(barcodes[0].rawValue);
+          return;
+        }
+      } catch {}
+      requestAnimationFrame(scan);
+    };
+    requestAnimationFrame(scan);
+  };
+
+  return (
+    <Modal title="📷 ESCANEAR SERIE DEL EQUIPO" onClose={()=>{ detenerCamara(); onClose(); }} width={480}>
+      <div style={{ textAlign: "center" }}>
+        {error ? (
+          <div style={{ padding: 20, color: B.red, fontSize: 13 }}>{error}</div>
+        ) : (
+          <>
+            <div style={{ position: "relative", background: B.deep, marginBottom: 14 }}>
+              <video ref={videoRef} style={{ width: "100%", maxHeight: 300, objectFit: "cover" }} muted playsInline/>
+              {/* Visor de escaneo */}
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+                <div style={{ width: 260, height: 80, border: `2px solid ${B.orange}`, boxShadow: `0 0 0 2000px rgba(0,0,0,0.5)` }}>
+                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: B.orange, animation: "fadeIn 1s ease infinite alternate" }}/>
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
-      <div style={{display:"flex",justifyContent:"flex-end",gap:10,paddingTop:14,borderTop:`1px solid ${B.border}`}}>
-        <Bb label="CANCELAR" onClick={onClose} ghost small color={B.t2}/>
-        <Bb label={saving?"GUARDANDO...":"GUARDAR ENCUESTA"} onClick={handleSave} disabled={!complete||saving}/>
+            <div style={{ fontSize: 12, color: B.t2, marginBottom: 14 }}>
+              Apuntá la cámara al código de barras del equipo
+            </div>
+          </>
+        )}
+        <Bb label="CANCELAR — INGRESAR MANUALMENTE" onClick={()=>{ detenerCamara(); onClose(); }} ghost small color={B.t2}/>
       </div>
     </Modal>
   );
 };
+
+// ═══════════════════════════════════════════════════════════════
+// FORMULARIO DE CIERRE — Solo Servicio Técnico
+// ═══════════════════════════════════════════════════════════════
+const ModalCierre = ({ caso, user, onClose, onGuardar }) => {
+  const [form, setForm] = useState({
+    descripcion_problema: caso.cierre_descripcion_problema || "",
+    como_resolvio:        caso.cierre_como_resolvio || "",
+    modelo_terminal:      caso.cierre_modelo_terminal || "",
+    serie_terminal:       caso.cierre_serie_terminal || "",
+    requirio_n2:          caso.cierre_requirio_n2 ?? null,
+  });
+  const [saving,    setSaving]    = useState(false);
+  const [showScan,  setShowScan]  = useState(false);
+  const s = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const completo = form.descripcion_problema.trim() &&
+                   form.como_resolvio.trim() &&
+                   form.modelo_terminal &&
+                   form.serie_terminal.trim() &&
+                   form.requirio_n2 !== null;
+
+  const guardar = async () => {
+    setSaving(true);
+    await onGuardar(form);
+    setSaving(false);
+  };
+
+  return (
+    <>
+      {showScan && (
+        <EscanerBarras
+          onScan={v => { s("serie_terminal", v); setShowScan(false); }}
+          onClose={() => setShowScan(false)}
+        />
+      )}
+      <Modal title="🔧 FORMULARIO DE CIERRE — SERVICIO TÉCNICO" onClose={onClose} width={600}>
+        <div style={{ marginBottom: 14, padding: "10px 14px", background: B.orangeDim,
+          border: `1px solid ${B.orange}22`, display: "flex", gap: 12, alignItems: "center" }}>
+          <span style={{ fontSize: 20 }}>🔧</span>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: B.orange }}>{caso.numero} · {caso.razon_social}</div>
+            <div style={{ fontSize: 10, color: B.t2 }}>Todos los campos son obligatorios para resolver el caso</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Descripción del problema */}
+          <div>
+            <FL label="Descripción del problema" req/>
+            <textarea className="field" rows={3} style={{ resize: "vertical" }}
+              placeholder="Describí el problema que presentaba el equipo..."
+              value={form.descripcion_problema} onChange={e => s("descripcion_problema", e.target.value)}/>
+          </div>
+
+          {/* Cómo lo resolvió */}
+          <div>
+            <FL label="Cómo lo resolvió" req/>
+            <textarea className="field" rows={3} style={{ resize: "vertical" }}
+              placeholder="Describí la solución aplicada..."
+              value={form.como_resolvio} onChange={e => s("como_resolvio", e.target.value)}/>
+          </div>
+
+          {/* Modelo de terminal */}
+          <div>
+            <FL label="Modelo de terminal" req/>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {MODELOS_TERMINAL.map(m => (
+                <button key={m} onClick={() => s("modelo_terminal", m)}
+                  style={{ padding: "8px 14px", border: `1px solid ${form.modelo_terminal === m ? B.orange : B.border}`,
+                    background: form.modelo_terminal === m ? B.orangeDim : B.deep,
+                    color: form.modelo_terminal === m ? B.orange : B.t2,
+                    cursor: "pointer", fontSize: 12, fontWeight: form.modelo_terminal === m ? 700 : 400,
+                    transition: "all .15s" }}>
+                  {form.modelo_terminal === m ? "◉ " : "○ "}{m}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Serie del equipo */}
+          <div>
+            <FL label="Serie del equipo del cliente" req/>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input className="field" style={{ flex: 1 }}
+                placeholder="Ingresá o escaneá la serie del equipo..."
+                value={form.serie_terminal} onChange={e => s("serie_terminal", e.target.value)}/>
+              <Bb label="📷 ESCANEAR" onClick={() => setShowScan(true)} ghost small color={B.blue}/>
+            </div>
+          </div>
+
+          {/* Soporte N2 */}
+          <div>
+            <FL label="¿Requirió soporte N2?" req/>
+            <div style={{ display: "flex", gap: 10 }}>
+              {[["Sí", true], ["No", false]].map(([label, val]) => (
+                <button key={label} onClick={() => s("requirio_n2", val)}
+                  style={{ flex: 1, padding: "10px 0", border: `1px solid ${form.requirio_n2 === val ? (val ? B.red : B.green) : B.border}`,
+                    background: form.requirio_n2 === val ? (val ? B.redDim : B.greenDim) : B.deep,
+                    color: form.requirio_n2 === val ? (val ? B.red : B.green) : B.t2,
+                    cursor: "pointer", fontSize: 13, fontWeight: 700, transition: "all .15s" }}>
+                  {form.requirio_n2 === val ? "◉ " : "○ "}{label}
+                </button>
+              ))}
+            </div>
+            {form.requirio_n2 === true && (
+              <div style={{ marginTop: 8, padding: "8px 12px", background: B.redDim,
+                border: `1px solid ${B.red}33`, fontSize: 11, color: B.red }}>
+                ⚠ Este caso quedará registrado con soporte N2 para análisis posterior
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10,
+          paddingTop: 16, marginTop: 16, borderTop: `1px solid ${B.border}` }}>
+          <Bb label="CANCELAR" onClick={onClose} ghost small color={B.t2}/>
+          <Bb label={saving ? "GUARDANDO..." : "GUARDAR Y CONTINUAR →"}
+            onClick={guardar} disabled={!completo || saving} color={B.green}/>
+        </div>
+      </Modal>
+    </>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
+// MODAL ENCUESTA CONFIGURABLE — nueva versión
+// ═══════════════════════════════════════════════════════════════
+const ModalEncuestaConfig = ({ encuesta, caso, user, onClose, onSave }) => {
+  const preguntas = encuesta.preguntas || [];
+  const [resp, setResp] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const completo = preguntas.filter(p => p.obligatoria).every(p => resp[p.id]?.trim());
+
+  const guardar = async () => {
+    setSaving(true);
+    await onSave(encuesta.id, resp);
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <Modal title={`📋 ${encuesta.nombre}`} onClose={onClose} width={560}>
+      {encuesta.descripcion && (
+        <div style={{ marginBottom: 14, fontSize: 11, color: B.t2, padding: "8px 12px",
+          background: B.deep, border: `1px solid ${B.border}` }}>
+          {encuesta.descripcion}
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 20 }}>
+        {preguntas.map((p, i) => (
+          <div key={p.id}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: B.t1, marginBottom: 8 }}>
+              {i + 1}. {p.pregunta}
+              {p.obligatoria && <span style={{ color: B.orange, marginLeft: 4 }}>*</span>}
+            </div>
+            {p.tipo === "texto_libre" ? (
+              <textarea className="field" rows={3} style={{ resize: "vertical" }}
+                placeholder="Escribí tu respuesta..."
+                value={resp[p.id] || ""}
+                onChange={e => setResp(r => ({ ...r, [p.id]: e.target.value }))}/>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {p.opciones?.map(opt => (
+                  <button key={opt} onClick={() => setResp(r => ({ ...r, [p.id]: opt }))}
+                    style={{ padding: "8px 10px", textAlign: "left", cursor: "pointer",
+                      border: `1px solid ${resp[p.id] === opt ? B.orange : B.border}`,
+                      background: resp[p.id] === opt ? B.orangeDim : "transparent",
+                      color: resp[p.id] === opt ? B.orange : B.t2,
+                      fontSize: 11, fontWeight: resp[p.id] === opt ? 700 : 400, transition: "all .15s" }}>
+                    {resp[p.id] === opt ? "◉ " : "○ "}{opt}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10,
+        paddingTop: 14, borderTop: `1px solid ${B.border}` }}>
+        <Bb label="CANCELAR" onClick={onClose} ghost small color={B.t2}/>
+        <Bb label={saving ? "GUARDANDO..." : "GUARDAR ENCUESTA"}
+          onClick={guardar} disabled={!completo || saving}/>
+      </div>
+    </Modal>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
+// GESTIÓN DE ENCUESTAS — en Configuración
+// ═══════════════════════════════════════════════════════════════
+const GestorEncuestas = ({ user, toast }) => {
+  const [encuestas, setEncuestas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editando, setEditando] = useState(null); // null | "nueva" | encuesta
+  const [form, setForm] = useState({ nombre: "", descripcion: "", preguntas: [] });
+
+  useEffect(() => { cargar(); }, []);
+
+  const cargar = async () => {
+    const { data } = await supabase.from("encuestas_config").select("*").order("created_at");
+    setEncuestas(data || []); setLoading(false);
+  };
+
+  const guardar = async () => {
+    if (editando === "nueva") {
+      await supabase.from("encuestas_config").insert({ ...form, created_at: new Date().toISOString() });
+    } else {
+      await supabase.from("encuestas_config").update({ ...form, updated_at: new Date().toISOString() }).eq("id", editando.id);
+    }
+    await cargar();
+    setEditando(null);
+    toast("✓ Encuesta guardada");
+  };
+
+  const toggleActiva = async (enc) => {
+    await supabase.from("encuestas_config").update({ activa: !enc.activa }).eq("id", enc.id);
+    await cargar();
+  };
+
+  const eliminar = async (id) => {
+    if (!window.confirm("¿Eliminár esta encuesta?")) return;
+    await supabase.from("encuestas_config").delete().eq("id", id);
+    await cargar();
+    toast("Encuesta eliminada");
+  };
+
+  const agregarPregunta = () => {
+    setForm(f => ({ ...f, preguntas: [...f.preguntas, {
+      id: `p${Date.now()}`, pregunta: "", tipo: "opcion_multiple",
+      opciones: ["Excelente","Bueno","Regular","Malo"], obligatoria: true
+    }]}));
+  };
+
+  const editarPregunta = (idx, campo, valor) => {
+    setForm(f => {
+      const ps = [...f.preguntas];
+      ps[idx] = { ...ps[idx], [campo]: valor };
+      return { ...f, preguntas: ps };
+    });
+  };
+
+  const editarOpcion = (pidx, oidx, valor) => {
+    setForm(f => {
+      const ps = [...f.preguntas];
+      const opts = [...(ps[pidx].opciones || [])];
+      opts[oidx] = valor;
+      ps[pidx] = { ...ps[pidx], opciones: opts };
+      return { ...f, preguntas: ps };
+    });
+  };
+
+  const quitarPregunta = (idx) => {
+    setForm(f => ({ ...f, preguntas: f.preguntas.filter((_, i) => i !== idx) }));
+  };
+
+  const abrirNueva = () => {
+    setForm({ nombre: "", descripcion: "", preguntas: [] });
+    setEditando("nueva");
+  };
+
+  const abrirEditar = (enc) => {
+    setForm({ nombre: enc.nombre, descripcion: enc.descripcion || "", preguntas: enc.preguntas || [] });
+    setEditando(enc);
+  };
+
+  if (editando) return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+        <button onClick={() => setEditando(null)}
+          style={{ background: "none", border: `1px solid ${B.border}`, color: B.t2, cursor: "pointer", padding: "6px 12px", fontSize: 11 }}>
+          ← VOLVER
+        </button>
+        <div style={{ fontFamily: "'Orbitron',sans-serif", fontSize: 14, fontWeight: 900, color: B.t1 }}>
+          {editando === "nueva" ? "NUEVA ENCUESTA" : `EDITANDO: ${editando.nombre}`}
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 700 }}>
+        <div><FL label="Nombre de la encuesta" req/>
+          <input className="field" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Ej: Satisfacción General"/></div>
+        <div><FL label="Descripción (opcional)"/>
+          <input className="field" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} placeholder="Descripción breve de la encuesta"/></div>
+
+        <div style={{ fontSize: 10, color: B.orange, fontWeight: 700, letterSpacing: ".1em", marginTop: 8 }}>◈ PREGUNTAS</div>
+
+        {form.preguntas.map((p, pidx) => (
+          <div key={p.id} style={{ background: B.card, border: `1px solid ${B.border}`, padding: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ fontSize: 11, color: B.orange, fontWeight: 700 }}>Pregunta {pidx + 1}</span>
+              <button onClick={() => quitarPregunta(pidx)}
+                style={{ background: "none", border: "none", color: B.red, cursor: "pointer", fontSize: 16 }}>×</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input className="field" value={p.pregunta}
+                onChange={e => editarPregunta(pidx, "pregunta", e.target.value)}
+                placeholder="Escribí la pregunta..."/>
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <FL label="Tipo"/>
+                  <select className="field" value={p.tipo}
+                    onChange={e => editarPregunta(pidx, "tipo", e.target.value)}>
+                    <option value="opcion_multiple">Opción múltiple</option>
+                    <option value="texto_libre">Texto libre</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1, display: "flex", alignItems: "flex-end", paddingBottom: 2 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: B.t2 }}>
+                    <input type="checkbox" checked={p.obligatoria}
+                      onChange={e => editarPregunta(pidx, "obligatoria", e.target.checked)}
+                      style={{ width: 14, height: 14, accentColor: B.orange }}/>
+                    Obligatoria
+                  </label>
+                </div>
+              </div>
+              {p.tipo === "opcion_multiple" && (
+                <div>
+                  <FL label="Opciones"/>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {(p.opciones || []).map((opt, oidx) => (
+                      <div key={oidx} style={{ display: "flex", gap: 8 }}>
+                        <input className="field" value={opt}
+                          onChange={e => editarOpcion(pidx, oidx, e.target.value)}
+                          placeholder={`Opción ${oidx + 1}`} style={{ flex: 1 }}/>
+                        <button onClick={() => {
+                          const opts = p.opciones.filter((_, i) => i !== oidx);
+                          editarPregunta(pidx, "opciones", opts);
+                        }} style={{ background: "none", border: "none", color: B.red, cursor: "pointer", fontSize: 16 }}>×</button>
+                      </div>
+                    ))}
+                    <Bb label="+ AGREGAR OPCIÓN" onClick={() => editarPregunta(pidx, "opciones", [...(p.opciones || []), ""])}
+                      ghost small color={B.blue}/>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        <Bb label="+ AGREGAR PREGUNTA" onClick={agregarPregunta} ghost color={B.orange}/>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <Bb label="CANCELAR" onClick={() => setEditando(null)} ghost small color={B.t2}/>
+          <Bb label="GUARDAR ENCUESTA" onClick={guardar} disabled={!form.nombre.trim() || form.preguntas.length === 0}/>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: B.orange, fontWeight: 700, letterSpacing: ".1em" }}>◈ ENCUESTAS CONFIGURADAS</div>
+        <Bb label="+ NUEVA ENCUESTA" onClick={abrirNueva} small/>
+      </div>
+      {loading ? <Spin/> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {encuestas.map(enc => (
+            <div key={enc.id} style={{ background: B.card, border: `1px solid ${enc.activa ? B.green + "44" : B.border}`,
+              borderLeft: `3px solid ${enc.activa ? B.green : B.t3}`, padding: "12px 16px",
+              display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: B.t1 }}>{enc.nombre}</div>
+                <div style={{ fontSize: 10, color: B.t3, marginTop: 2 }}>
+                  {enc.preguntas?.length || 0} preguntas · {enc.descripcion || "Sin descripción"}
+                </div>
+              </div>
+              <Tg label={enc.activa ? "ACTIVA" : "INACTIVA"} color={enc.activa ? B.green : B.t3}/>
+              <button onClick={() => toggleActiva(enc)}
+                style={{ background: "none", border: `1px solid ${B.border}`, color: B.t2,
+                  cursor: "pointer", padding: "4px 10px", fontSize: 10 }}>
+                {enc.activa ? "DESACTIVAR" : "ACTIVAR"}
+              </button>
+              <Bb label="✎ EDITAR" onClick={() => abrirEditar(enc)} ghost small color={B.blue}/>
+              <Bb label="✗" onClick={() => eliminar(enc.id)} ghost small color={B.red}/>
+            </div>
+          ))}
+          {encuestas.length === 0 && (
+            <div style={{ textAlign: "center", padding: 30, color: B.t3 }}>
+              Sin encuestas configuradas. Creá la primera.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 const ESTADOS_FLUJO = ["PENDIENTE","EN_PROCESO","EN_ESPERA","RESUELTO","CERRADO"];
 const EST_COLOR={PENDIENTE:B=>B.orange,EN_PROCESO:B=>B.blue,EN_ESPERA:B=>B.purple,RESUELTO:B=>B.green,CERRADO:B=>B.t3};
@@ -1053,6 +1492,10 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   const [nuevoEstado,setNuevoEstado]=useState(casoInit.estado);
   const [showEnc,setShowEnc]=useState(false);
   const [showInstr,setShowInstr]=useState(false);
+  const [showCierre,setShowCierre]=useState(false);
+  const [encuestaActiva,setEncuestaActiva]=useState(null);
+  const [encuestasDelCaso,setEncuestasDelCaso]=useState([]);
+  const [encuestasCompletadas,setEncuestasCompletadas]=useState([]);
   const tp=TIPOS_PROCESO.find(t=>t.codigo===caso.tipo_proceso);
   const emp=EMPRESAS.find(e=>e.codigo===caso.empresa_id);
   const pct=caso.sla_deadline?Math.max(0,Math.min(100,100-(Date.now()-new Date(caso.created_at))/(new Date(caso.sla_deadline)-new Date(caso.created_at))*100)):100;
@@ -1060,6 +1503,29 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
 
   const esRolTecnico = perfil?.rol==="TECNICO";
   const esRolSupervisorOSuperior = !esRolTecnico;
+
+  // Es servicio técnico
+  const esServicioTecnico = caso.tipo_proceso==="SERVICIO_TECNICO";
+
+  // Cargar encuestas del caso
+  useEffect(()=>{
+    (async()=>{
+      const{data}=await supabase.from("casos_encuestas")
+        .select("*, encuesta:encuesta_id(*)")
+        .eq("caso_id",caso.id);
+      if(data){
+        setEncuestasDelCaso(data);
+        setEncuestasCompletadas(data.filter(e=>e.completada));
+      }
+    })();
+  },[caso.id]);
+
+  // Para pasar a RESUELTO siendo técnico en ST necesita cierre completo
+  const necesitaCierre = esRolTecnico && esServicioTecnico &&
+    nuevoEstado==="RESUELTO" && !caso.cierre_completado;
+
+  // Encuestas pendientes
+  const encuestasPendientes = encuestasDelCaso.filter(e=>!e.completada);
 
   // ¿Tiene instrucciones y el técnico ya las confirmó?
   const tieneInstr = !!(caso.instrucciones_especiales?.texto || caso.instrucciones_especiales?.adjuntos?.length);
@@ -1102,6 +1568,8 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   const cambiarEstado=async()=>{
     if(nuevoEstado===caso.estado)return;
     if(bloqueado){toast("⚠ Debés confirmar las instrucciones antes de cambiar el estado");return;}
+    // Si técnico quiere resolver ST sin cierre completado, mostrar formulario
+    if(necesitaCierre){ setShowCierre(true); return; }
     setLoading(true);
     const updates={estado:nuevoEstado,updated_at:new Date().toISOString()};
     if(nuevoEstado==="CERRADO"){updates.fecha_cierre=new Date().toISOString();}
@@ -1114,6 +1582,45 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     setLoading(false);
   };
 
+  const guardarCierre=async(formCierre)=>{
+    setLoading(true);
+    const updates={
+      cierre_descripcion_problema: formCierre.descripcion_problema,
+      cierre_como_resolvio:        formCierre.como_resolvio,
+      cierre_modelo_terminal:      formCierre.modelo_terminal,
+      cierre_serie_terminal:       formCierre.serie_terminal,
+      cierre_requirio_n2:          formCierre.requirio_n2,
+      cierre_completado:           true,
+      cierre_at:                   new Date().toISOString(),
+      estado:                      "RESUELTO",
+      updated_at:                  new Date().toISOString(),
+    };
+    await supabase.from("casos").update(updates).eq("id",caso.id);
+    await addHistorial("CIERRE",`Caso resuelto · Modelo: ${formCierre.modelo_terminal} · N2: ${formCierre.requirio_n2?"Sí":"No"}`);
+    const casActualizado={...caso,...updates};
+    setCaso(casActualizado);
+    if(onUpdate) onUpdate(casActualizado);
+    setShowCierre(false);
+    setNuevoEstado("RESUELTO");
+    toast("✓ Caso resuelto correctamente");
+    // Si hay encuestas pendientes, mostrar la primera
+    if(encuestasPendientes.length>0) setEncuestaActiva(encuestasPendientes[0]);
+    setLoading(false);
+  };
+
+  const guardarEncuestaConfig=async(encuestaId,respuestas)=>{
+    await supabase.from("casos_encuestas").update({
+      completada:true, respuestas,
+      completada_at:new Date().toISOString()
+    }).eq("caso_id",caso.id).eq("encuesta_id",encuestaId);
+    await addHistorial("ENCUESTA","Encuesta completada por el técnico");
+    setEncuestasCompletadas(prev=>[...prev,{encuesta_id:encuestaId}]);
+    // Siguiente encuesta pendiente
+    const restantes=encuestasPendientes.filter(e=>e.encuesta_id!==encuestaId);
+    setEncuestaActiva(restantes.length>0?restantes[0]:null);
+    toast("+20 XP · Encuesta completada ✓");
+  };
+
   const agregarNota=async()=>{
     if(!nota.trim())return;
     setLoading(true);
@@ -1123,22 +1630,16 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     setLoading(false);
   };
 
-  const guardarEncuesta=async(resp)=>{
-    await supabase.from("casos").update({respuestas_encuesta:resp,estado:"CERRADO",fecha_cierre:new Date().toISOString()}).eq("id",caso.id);
-    await addHistorial("ENCUESTA","Encuesta de satisfacción completada");
-    setCaso(c=>({...c,respuestas_encuesta:resp,estado:"CERRADO"}));
-    setShowEnc(false);
-    toast("+20 XP · Encuesta completada 🎯");
-  };
-
   const historial=caso.historial||[];
-  const HIST_ICON={ESTADO:"⚡",NOTA:"📝",ENCUESTA:"📊",CREACION:"🆕",SISTEMA:"🔧",INSTRUCCIONES:"⚠"};
-  const HIST_COL={ESTADO:B=>B.orange,NOTA:B=>B.blue,ENCUESTA:B=>B.green,CREACION:B=>B.purple,SISTEMA:B=>B.t3,INSTRUCCIONES:B=>B.red};
+  const HIST_ICON={ESTADO:"⚡",NOTA:"📝",ENCUESTA:"📊",CREACION:"🆕",SISTEMA:"🔧",INSTRUCCIONES:"⚠",CIERRE:"✅",ASIGNACION:"👤"};
+  const HIST_COL={ESTADO:B=>B.orange,NOTA:B=>B.blue,ENCUESTA:B=>B.green,CREACION:B=>B.purple,SISTEMA:B=>B.t3,INSTRUCCIONES:B=>B.red,CIERRE:B=>B.green,ASIGNACION:B=>B.blue};
 
   return(
     <div style={{padding:"0 0 40px"}}>
-      {showEnc&&<ModalEncuesta caso={caso} onClose={()=>setShowEnc(false)} onSave={guardarEncuesta}/>}
+      {showEnc&&<ModalEncuestaConfig encuesta={{preguntas:[]}} caso={caso} user={user} onClose={()=>setShowEnc(false)} onSave={guardarEncuestaConfig}/>}
       {showInstr&&<ModalInstrucciones caso={caso} user={user} onClose={()=>setShowInstr(false)} onSave={guardarInstrucciones}/>}
+      {showCierre&&<ModalCierre caso={caso} user={user} onClose={()=>setShowCierre(false)} onGuardar={guardarCierre}/>}
+      {encuestaActiva&&<ModalEncuestaConfig encuesta={encuestaActiva.encuesta} caso={caso} user={user} onClose={()=>setEncuestaActiva(null)} onSave={guardarEncuestaConfig}/>}
 
       {/* ── INSTRUCCIONES ESPECIALES — siempre arriba del todo ── */}
       <BloqueInstrucciones
@@ -1247,14 +1748,39 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
             </div>
           ))}
         </div>
-        {caso.respuestas_encuesta&&(
-          <div style={{marginTop:12,padding:"10px 14px",background:`${B.green}11`,border:`1px solid ${B.green}33`}}>
-            <div style={{fontSize:10,color:B.green,fontWeight:700,marginBottom:6}}>✓ ENCUESTA COMPLETADA</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-              {Object.entries(caso.respuestas_encuesta).map(([k,v])=>(
-                <span key={k} style={{fontSize:10,padding:"3px 8px",background:`${B.green}22`,color:B.green,border:`1px solid ${B.green}33`}}>{v}</span>
+        {/* Datos de cierre técnico (solo ST) */}
+        {caso.cierre_completado&&(
+          <div style={{marginTop:12,padding:"12px 14px",background:`${B.green}11`,border:`1px solid ${B.green}33`,borderLeft:`3px solid ${B.green}`}}>
+            <div style={{fontSize:10,color:B.green,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>✅ CIERRE TÉCNICO COMPLETADO</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {[
+                ["Problema",caso.cierre_descripcion_problema],
+                ["Solución",caso.cierre_como_resolvio],
+                ["Modelo",caso.cierre_modelo_terminal],
+                ["Serie",caso.cierre_serie_terminal],
+                ["Soporte N2",caso.cierre_requirio_n2?"✓ SÍ":"✗ NO"],
+              ].map(([l,v])=>v&&(
+                <div key={l}>
+                  <div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
+                  <div style={{fontSize:12,color:caso.cierre_requirio_n2&&l==="Soporte N2"?B.red:B.t1,fontWeight:l==="Soporte N2"?700:400,marginTop:2}}>{v}</div>
+                </div>
               ))}
             </div>
+          </div>
+        )}
+        {/* Encuestas del caso */}
+        {encuestasDelCaso.length>0&&(
+          <div style={{marginTop:12,padding:"12px 14px",background:B.deep,border:`1px solid ${B.border}`}}>
+            <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>📋 ENCUESTAS DEL CASO</div>
+            {encuestasDelCaso.map(e=>(
+              <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:`1px solid ${B.border}22`}}>
+                <Tg label={e.completada?"✓ COMPLETADA":"PENDIENTE"} color={e.completada?B.green:B.orange}/>
+                <span style={{fontSize:12,flex:1}}>{e.encuesta?.nombre||"Encuesta"}</span>
+                {!e.completada&&esRolTecnico&&(
+                  <Bb label="COMPLETAR" onClick={()=>setEncuestaActiva(e)} small ghost color={B.orange}/>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -3004,6 +3530,7 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
 
   const TABS=[
     {id:"notificaciones",label:"🔔 NOTIFICACIONES"},
+    {id:"encuestas",label:"📋 ENCUESTAS"},
     {id:"procesos",label:"PROCESOS & SLA"},
     {id:"misiones",label:"MISIONES"},
     {id:"sistema",label:"SISTEMA"},
@@ -3022,6 +3549,9 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
       </div>
       {tab==="notificaciones"&&(
         <ConfigNotificaciones user={user} minutosAntes={minutosAntes} setMinutosAntes={setMinutosAntes} toast={toast}/>
+      )}
+      {tab==="encuestas"&&(
+        <GestorEncuestas user={user} toast={toast}/>
       )}
       {tab==="procesos"&&(
         <div>
