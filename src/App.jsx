@@ -62,6 +62,23 @@ const LOGROS_DEMO = [
 
 const now  = () => new Date().toISOString();
 const fmtD = iso => {if(!iso) return "—"; const d=new Date(iso); return d.toLocaleDateString("es-UY",{day:"2-digit",month:"2-digit",year:"2-digit"})+" "+d.toLocaleTimeString("es-UY",{hour:"2-digit",minute:"2-digit"});};
+
+// Cuenta regresiva hasta fecha+franja de recoordinación
+const cuentaRegresiva = (caso) => {
+  if(caso.estado!=="ASIGNADO"||!caso.fecha_recoordinacion) return null;
+  const FRANJA_H = {"FH1 (8-12)":8,"FH2 (12-16)":12,"FH3 (16-19)":16,"FH4 (19-22)":19};
+  const h = FRANJA_H[caso.franja_horaria||caso.rango_horario]||8;
+  const [y,m,d] = caso.fecha_recoordinacion.split("-").map(Number);
+  const target = new Date(y,m-1,d,h,0,0);
+  const diff = target - Date.now();
+  if(diff<=0) return null;
+  const dias  = Math.floor(diff/86400000);
+  const horas = Math.floor((diff%86400000)/3600000);
+  const mins  = Math.floor((diff%3600000)/60000);
+  if(dias>0) return `📅 ${dias}d ${horas}h`;
+  if(horas>0) return `⏰ ${horas}h ${mins}min`;
+  return `⏰ ${mins}min`;
+};
 const genN = () => "CASO-"+String(Math.floor(Math.random()*900000)+100000);
 const slaInfo = (deadline,estado) => {
   if(!deadline) return {label:"—",color:"#32324A"};
@@ -640,7 +657,15 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
       case "terminal": return <span className="mono" style={{fontSize:11,color:B.orange,fontWeight:700}}>{c.numero_serie||c.numero||"—"}</span>;
       case "razon":    return <div style={{fontSize:11,fontWeight:600,lineHeight:1.3}}>{c.razon_social||"—"}</div>;
       case "rut":      return <span className="mono" style={{fontSize:10,color:B.t2}}>{c.rut||"—"}</span>;
-      case "estado":   return <Tg label={c.estado||"—"} color={EC[c.estado]||B.t3}/>;
+      case "estado": {
+        const cr = cuentaRegresiva(c);
+        return (
+          <div>
+            <Tg label={c.estado||"—"} color={EC[c.estado]||B.t3}/>
+            {cr&&<div style={{fontSize:10,color:B.teal,fontWeight:700,marginTop:3}}>{cr}</div>}
+          </div>
+        );
+      }
       case "prioridad":return <Tg label={c.prioridad||"—"} color={PC[c.prioridad]||B.t2}/>;
       case "franja":   return <span style={{fontSize:10,color:"#CC7700",fontWeight:600}}>{c.franja_horaria||c.rango_horario||"—"}</span>;
       case "telefono": return c.telefono
@@ -1945,15 +1970,14 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     return()=>clearInterval(timerRef.current);
   },[caso.estado]);
 
+  const autoStartRef = useRef(false);
   useEffect(()=>{
+    if(autoStartRef.current) return;
+    autoStartRef.current = true;
     if(esRolTecnico && caso.estado==="ASIGNADO"){
-      if(tieneInstr && !yaConfirmado){
-        setPantallaInstr(true); // mostrar pantalla completa
-        return;
-      }
+      if(tieneInstr && !yaConfirmado){ setPantallaInstr(true); return; }
       (async()=>{ await cambiarEstadoDirecto("EN_PROCESO","Técnico inició la atención del caso"); })();
     }
-    // Si ya está EN PROCESO y tiene instrucciones sin confirmar
     if(esRolTecnico && caso.estado==="EN_PROCESO" && tieneInstr && !yaConfirmado){
       setPantallaInstr(true);
     }
@@ -2090,33 +2114,26 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     return <PantallaInstrucciones caso={caso} onConfirmar={confirmarInstrucciones} confirmando={confirmando}/>;
   }
 
-  // ── PANTALLA COMPLETA DE FINALIZAR ──
-  if(showFinalizar){
-    return <PantallaFinalizar
-      caso={caso} user={user} perfil={perfil}
-      onVolver={()=>setShowFinalizar(false)}
-      onFinalizado={async(updates,resolvio)=>{
-        const h=[...(caso.historial||[]),{id:Date.now(),tipo:"FINALIZACION",
-          texto:`FINALIZADO — ${resolvio?"Problema resuelto":"No resuelto"} · Modelo: ${updates.cierre_modelo_terminal||""} · Serie: ${updates.cierre_serie_terminal||""}`,
-          usuario:user.email,ts:new Date().toISOString()}];
-        await supabase.from("casos").update({...updates,historial:h,updated_at:new Date().toISOString()}).eq("id",caso.id);
-        const casActualizado={...caso,...updates,historial:h};
-        setCaso(casActualizado); if(onUpdate) onUpdate(casActualizado);
-        toast("✓ Caso finalizado");
-        setShowFinalizar(false);
-        onBack(); // volver a lista de casos
-      }}
-    />;
-  }
-
   return(
     <div style={{padding:"0 0 40px"}}>
       {showInstr&&<ModalInstrucciones caso={caso} user={user} onClose={()=>setShowInstr(false)} onSave={guardarInstrucciones}/>}
       {showCierre&&<ModalCierre caso={caso} user={user} onClose={()=>setShowCierre(false)} onGuardar={guardarCierre}/>}
+      {showFinalizar&&<OverlayFinalizar caso={caso} onVolver={()=>setShowFinalizar(false)} onGuardar={async(updates)=>{
+        const h=[...(caso.historial||[]),{id:Date.now(),tipo:"FINALIZACION",
+          texto:`FINALIZADO — ${updates.resolvio?"Problema resuelto":"No resuelto"} · Modelo: ${updates.cierre_modelo_terminal||""} · Serie: ${updates.cierre_serie_terminal||""}`,
+          usuario:user.email,ts:new Date().toISOString()}];
+        const payload={...updates,tiempo_total_seg:tiempoSegundos,historial:h,updated_at:new Date().toISOString()};
+        await supabase.from("casos").update(payload).eq("id",caso.id);
+        const casActualizado={...caso,...payload};
+        setCaso(casActualizado); if(onUpdate) onUpdate(casActualizado);
+        toast("✓ Caso finalizado");
+        setShowFinalizar(false);
+        onBack();
+      }}/>}
       {encuestaActiva&&<ModalEncuestaConfig encuesta={encuestaActiva.encuesta} caso={caso} user={user} onClose={()=>setEncuestaActiva(null)} onSave={guardarEncuestaConfig}/>}
-      {showPausar&&<ModalTextoLibre titulo="⏸ PAUSAR CASO" label="Motivo de la pausa" placeholder="Explicá por qué pausás el caso..." onClose={()=>setShowPausar(false)} onGuardar={async(txt)=>{await pausar(txt);setShowPausar(false);}}/>}
-      {showCancelar&&<ModalTextoLibre titulo="✗ CANCELAR CASO" label="Motivo de la cancelación" placeholder="Explicá por qué cancelás el caso..." color={B.red} onClose={()=>setShowCancelar(false)} onGuardar={async(txt)=>{await cancelar(txt);setShowCancelar(false);}}/>}
-      {showRecoord&&<ModalRecoordinar onClose={()=>setShowRecoord(false)} onGuardar={async(data)=>{await recoordinar(data);setShowRecoord(false);}}/>}
+      {showPausar&&<OverlayPausar caso={caso} onVolver={()=>setShowPausar(false)} onGuardar={async(txt)=>{await pausar(txt);setShowPausar(false);}}/>}
+      {showCancelar&&<OverlayCancelar caso={caso} onVolver={()=>setShowCancelar(false)} onGuardar={async(txt)=>{await cancelar(txt);setShowCancelar(false);}}/>}
+      {showRecoord&&<OverlayRecoordinar caso={caso} onVolver={()=>setShowRecoord(false)} onGuardar={async(data)=>{await recoordinar(data);setShowRecoord(false);onBack();}}/>}
 
       {/* Instrucciones confirmadas — badge en cabezal */}
       <BloqueInstrucciones instrucciones={caso.instrucciones_especiales} onConfirmar={confirmarInstrucciones} yaConfirmado={yaConfirmado} esRolTecnico={false}/>
@@ -2130,6 +2147,7 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
             <Tg label={caso.tipo_proceso} color={tp?.color||B.orange}/>
             {caso.tier&&<Tg label={caso.tier} color={{VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green}[caso.tier]||B.t2}/>}
             <Tg label={caso.estado} color={estadoColor}/>
+            {cuentaRegresiva(caso)&&<span style={{fontSize:12,color:B.teal,fontWeight:700}}>{cuentaRegresiva(caso)}</span>}
             {caso.es_incidente&&<Tg label={`INC ${caso.incidente_id||""}`} color={B.red}/>}
             {tieneInstr&&yaConfirmado&&<Tg label="⚠ INSTRUCCIONES LEÍDAS" color={B.green}/>}
           </div>
@@ -2246,82 +2264,444 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     </div>
   );
 };
-const ModalTextoLibre=({titulo,label,placeholder,color=B.orange,onClose,onGuardar})=>{
-  const [texto,setTexto]=useState(""); const [saving,setSaving]=useState(false);
-  return(
-    <Modal title={titulo} onClose={onClose} width={480}>
-      <div style={{marginBottom:14}}><FL label={label} req/>
-        <textarea className="field" rows={4} placeholder={placeholder}
-          value={texto} onChange={e=>setTexto(e.target.value)} style={{resize:"vertical"}}/></div>
-      <div style={{display:"flex",justifyContent:"flex-end",gap:10,paddingTop:14,borderTop:`1px solid ${B.border}`}}>
-        <Bb label="CANCELAR" onClick={onClose} ghost small color={B.t2}/>
-        <Bb label={saving?"GUARDANDO...":"CONFIRMAR"} color={color}
-          onClick={async()=>{setSaving(true);await onGuardar(texto);setSaving(false);}}
-          disabled={!texto.trim()||saving}/>
-      </div>
-    </Modal>
-  );
-};
+// ═══════════════════════════════════════════════════════════
+// OVERLAYS MOBILE — PAUSAR / CANCELAR / RECOORDINAR / FINALIZAR
+// Diseñados para Android gama media/baja
+// ═══════════════════════════════════════════════════════════
 
-// ─── MODAL FINALIZAR ────────────────────────────────────────
-const ModalFinalizar=({onClose,onGuardar})=>{
-  const [resolvio,setResolvio]=useState(null); const [saving,setSaving]=useState(false);
-  return(
-    <Modal title="🏁 FINALIZAR CASO" onClose={onClose} width={440}>
+// Wrapper base para todos los overlays de acción
+const OverlayAccion = ({ color=B.orange, icono, titulo, subtitulo, onVolver, children, botonLabel, botonDisabled, onConfirmar, saving }) => (
+  <div style={{
+    position:"fixed", inset:0, zIndex:300,
+    background:"rgba(5,5,7,0.97)",
+    display:"flex", flexDirection:"column",
+    overflowY:"auto",
+  }}>
+    {/* Franja de color superior */}
+    <div style={{height:6, background:color, flexShrink:0}}/>
+
+    {/* Header */}
+    <div style={{
+      padding:"20px 20px 16px",
+      borderBottom:`1px solid ${color}33`,
+      flexShrink:0,
+    }}>
+      <button onClick={onVolver} style={{
+        background:"none", border:`1px solid ${B.border}`,
+        color:B.t2, cursor:"pointer", padding:"10px 18px",
+        fontSize:13, marginBottom:16, display:"flex", alignItems:"center", gap:8,
+      }}>← VOLVER</button>
+      <div style={{fontSize:36, marginBottom:8}}>{icono}</div>
+      <div style={{
+        fontFamily:"'Orbitron',sans-serif", fontSize:18,
+        fontWeight:900, color, marginBottom:4,
+      }}>{titulo}</div>
+      {subtitulo&&<div style={{fontSize:13, color:B.t2}}>{subtitulo}</div>}
+    </div>
+
+    {/* Contenido */}
+    <div style={{flex:1, padding:"20px 20px 0", overflowY:"auto"}}>
+      {children}
+    </div>
+
+    {/* Botón principal */}
+    <div style={{padding:20, flexShrink:0}}>
+      <button onClick={onConfirmar} disabled={botonDisabled||saving}
+        style={{
+          width:"100%", padding:"20px 0",
+          background: botonDisabled||saving ? B.t3 : color,
+          border:"none", cursor: botonDisabled||saving ? "not-allowed" : "pointer",
+          fontFamily:"'Orbitron',sans-serif", fontWeight:900,
+          fontSize:16, color:"#050507", letterSpacing:".06em",
+          borderRadius:2, transition:"background .15s",
+        }}>
+        {saving ? "GUARDANDO..." : botonLabel}
+      </button>
+    </div>
+  </div>
+);
+
+// ─── OVERLAY PAUSAR ─────────────────────────────────────────
+const OverlayPausar = ({ caso, onVolver, onGuardar }) => {
+  const [motivo, setMotivo] = useState("");
+  const [saving, setSaving] = useState(false);
+  const MOTIVOS_RAPIDOS = ["Sin partes disponibles","Esperando autorización","Problema de acceso al local","Almuerzo / descanso","Problemas técnicos complejos"];
+  return (
+    <OverlayAccion
+      color={B.purple} icono="⏸" titulo="PAUSAR CASO"
+      subtitulo={caso.razon_social}
+      onVolver={onVolver}
+      botonLabel="CONFIRMAR PAUSA"
+      botonDisabled={!motivo.trim()}
+      saving={saving}
+      onConfirmar={async()=>{ setSaving(true); await onGuardar(motivo); setSaving(false); }}>
       <div style={{marginBottom:20}}>
-        <div style={{fontSize:13,color:B.t1,fontWeight:700,marginBottom:14}}>¿Se resolvió el problema?</div>
-        <div style={{display:"flex",gap:12}}>
-          {[["✓ SÍ, se resolvió",true,B.green],["✗ NO se resolvió",false,B.red]].map(([label,val,color])=>(
-            <button key={String(val)} onClick={()=>setResolvio(val)}
-              style={{flex:1,padding:"16px 10px",border:`2px solid ${resolvio===val?color:B.border}`,
-                background:resolvio===val?color+"22":"transparent",color:resolvio===val?color:B.t2,
-                cursor:"pointer",fontSize:13,fontWeight:700,transition:"all .15s"}}>
-              {label}
+        <div style={{fontSize:13, color:B.t2, marginBottom:16}}>¿Por qué pausás el caso?</div>
+        {/* Motivos rápidos */}
+        <div style={{display:"flex", flexDirection:"column", gap:10, marginBottom:20}}>
+          {MOTIVOS_RAPIDOS.map(m=>(
+            <button key={m} onClick={()=>setMotivo(m)}
+              style={{
+                padding:"16px 18px", textAlign:"left",
+                border:`2px solid ${motivo===m?B.purple:B.border}`,
+                background:motivo===m?B.purple+"22":B.card,
+                color:motivo===m?B.purple:B.t1,
+                cursor:"pointer", fontSize:15, borderRadius:2,
+                display:"flex", alignItems:"center", gap:12,
+              }}>
+              <span style={{fontSize:20, flexShrink:0}}>{motivo===m?"◉":"○"}</span>
+              {m}
             </button>
           ))}
         </div>
+        <div style={{fontSize:12, color:B.t3, marginBottom:8}}>O escribí otro motivo:</div>
+        <textarea
+          className="field" rows={3}
+          placeholder="Describí el motivo de la pausa..."
+          value={motivo} onChange={e=>setMotivo(e.target.value)}
+          style={{fontSize:15, resize:"none"}}/>
       </div>
-      <div style={{display:"flex",justifyContent:"flex-end",gap:10,paddingTop:14,borderTop:`1px solid ${B.border}`}}>
-        <Bb label="CANCELAR" onClick={onClose} ghost small color={B.t2}/>
-        <Bb label={saving?"GUARDANDO...":"CONFIRMAR"}
-          onClick={async()=>{setSaving(true);await onGuardar(resolvio);setSaving(false);}}
-          disabled={resolvio===null||saving}
-          color={resolvio===true?B.green:resolvio===false?B.red:B.t3}/>
-      </div>
-    </Modal>
+    </OverlayAccion>
   );
 };
 
-// ─── MODAL RECOORDINAR ──────────────────────────────────────
-const ModalRecoordinar=({onClose,onGuardar})=>{
-  const [fecha,setFecha]=useState(""); const [franja,setFranja]=useState("");
-  const [motivo,setMotivo]=useState(""); const [saving,setSaving]=useState(false);
-  const completo=fecha&&franja&&motivo.trim();
-  return(
-    <Modal title="📅 RECOORDINAR CASO" onClose={onClose} width={500}>
-      <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:16}}>
-        <div><FL label="Nueva fecha" req/>
-          <input className="field" type="date" value={fecha} onChange={e=>setFecha(e.target.value)}
-            min={new Date().toISOString().split("T")[0]}/></div>
-        <div><FL label="Franja horaria" req/>
-          <select className="field" value={franja} onChange={e=>setFranja(e.target.value)}>
-            <option value="">Seleccionar...</option>
-            {["FH1 (8-12)","FH2 (12-16)","FH3 (16-19)","FH4 (19-22)"].map(f=><option key={f} value={f}>{f}</option>)}
-          </select></div>
-        <div><FL label="Motivo de la recoordinación" req/>
-          <textarea className="field" rows={3} placeholder="Explicá por qué recoordinás el caso..."
-            value={motivo} onChange={e=>setMotivo(e.target.value)} style={{resize:"vertical"}}/></div>
+// ─── OVERLAY CANCELAR ───────────────────────────────────────
+const OverlayCancelar = ({ caso, onVolver, onGuardar }) => {
+  const [motivo, setMotivo] = useState("");
+  const [confirmado, setConfirmado] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const MOTIVOS_RAPIDOS = ["El comercio no abrió","Equipo no se puede reparar","Caso duplicado","El cliente canceló la visita","Error en la orden de trabajo"];
+  return (
+    <OverlayAccion
+      color={B.red} icono="✗" titulo="CANCELAR CASO"
+      subtitulo={caso.razon_social}
+      onVolver={onVolver}
+      botonLabel={confirmado ? "✗ CONFIRMAR CANCELACIÓN" : "MANTENER ACTIVO"}
+      botonDisabled={!motivo.trim()}
+      saving={saving}
+      onConfirmar={async()=>{
+        if(!confirmado){ setConfirmado(true); return; }
+        setSaving(true); await onGuardar(motivo); setSaving(false);
+      }}>
+      {!confirmado ? (
+        <div>
+          <div style={{fontSize:13, color:B.t2, marginBottom:16}}>¿Por qué cancelás el caso?</div>
+          <div style={{display:"flex", flexDirection:"column", gap:10, marginBottom:20}}>
+            {MOTIVOS_RAPIDOS.map(m=>(
+              <button key={m} onClick={()=>setMotivo(m)}
+                style={{
+                  padding:"16px 18px", textAlign:"left",
+                  border:`2px solid ${motivo===m?B.red:B.border}`,
+                  background:motivo===m?B.red+"22":B.card,
+                  color:motivo===m?B.red:B.t1,
+                  cursor:"pointer", fontSize:15, borderRadius:2,
+                  display:"flex", alignItems:"center", gap:12,
+                }}>
+                <span style={{fontSize:20}}>{motivo===m?"◉":"○"}</span>{m}
+              </button>
+            ))}
+          </div>
+          <textarea className="field" rows={3}
+            placeholder="O escribí otro motivo..."
+            value={motivo} onChange={e=>setMotivo(e.target.value)}
+            style={{fontSize:15, resize:"none"}}/>
+        </div>
+      ) : (
+        <div style={{textAlign:"center", padding:"20px 0"}}>
+          <div style={{fontSize:60, marginBottom:20}}>⚠️</div>
+          <div style={{fontSize:18, fontWeight:700, color:B.red, marginBottom:12}}>
+            ¿Estás seguro?
+          </div>
+          <div style={{fontSize:15, color:B.t2, marginBottom:20, lineHeight:1.6}}>
+            Esta acción cancela el caso definitivamente.
+            No se puede deshacer.
+          </div>
+          <div style={{
+            padding:"14px 16px", background:B.red+"11",
+            border:`1px solid ${B.red}33`, fontSize:13,
+            color:B.t2, textAlign:"left",
+          }}>
+            <strong style={{color:B.red}}>Motivo:</strong> {motivo}
+          </div>
+          <button onClick={()=>setConfirmado(false)}
+            style={{marginTop:16, background:"none", border:`1px solid ${B.border}`,
+              color:B.t2, cursor:"pointer", padding:"12px 24px", fontSize:14, width:"100%"}}>
+            ← VOLVER ATRÁS
+          </button>
+        </div>
+      )}
+    </OverlayAccion>
+  );
+};
+
+// ─── OVERLAY RECOORDINAR ────────────────────────────────────
+const OverlayRecoordinar = ({ caso, onVolver, onGuardar }) => {
+  const [fecha, setFecha]   = useState("");
+  const [franja, setFranja] = useState("");
+  const [motivo, setMotivo] = useState("");
+  const [saving, setSaving] = useState(false);
+  const completo = fecha && franja && motivo.trim();
+  const FRANJAS_OPT = [
+    {id:"FH1 (8-12)",  label:"FH1", hora:"08:00 – 12:00", icono:"🌅"},
+    {id:"FH2 (12-16)", label:"FH2", hora:"12:00 – 16:00", icono:"☀️"},
+    {id:"FH3 (16-19)", label:"FH3", hora:"16:00 – 19:00", icono:"🌆"},
+    {id:"FH4 (19-22)", label:"FH4", hora:"19:00 – 22:00", icono:"🌙"},
+  ];
+  return (
+    <OverlayAccion
+      color={B.teal} icono="📅" titulo="RECOORDINAR"
+      subtitulo={caso.razon_social}
+      onVolver={onVolver}
+      botonLabel="CONFIRMAR RECOORDINACIÓN"
+      botonDisabled={!completo}
+      saving={saving}
+      onConfirmar={async()=>{ setSaving(true); await onGuardar({nuevaFecha:fecha,nuevaFranja:franja,motivo}); setSaving(false); }}>
+      <div style={{display:"flex", flexDirection:"column", gap:20}}>
+        {/* Fecha */}
+        <div>
+          <div style={{fontSize:14, fontWeight:700, color:B.t1, marginBottom:10}}>📆 Nueva fecha</div>
+          <input type="date" className="field"
+            value={fecha} onChange={e=>setFecha(e.target.value)}
+            min={new Date().toISOString().split("T")[0]}
+            style={{fontSize:16, padding:"14px 16px"}}/>
+        </div>
+        {/* Franja */}
+        <div>
+          <div style={{fontSize:14, fontWeight:700, color:B.t1, marginBottom:10}}>🕐 Nueva franja horaria</div>
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
+            {FRANJAS_OPT.map(f=>(
+              <button key={f.id} onClick={()=>setFranja(f.id)}
+                style={{
+                  padding:"16px 12px",
+                  border:`2px solid ${franja===f.id?B.teal:B.border}`,
+                  background:franja===f.id?B.teal+"22":B.card,
+                  color:franja===f.id?B.teal:B.t2,
+                  cursor:"pointer", textAlign:"center", borderRadius:2,
+                }}>
+                <div style={{fontSize:24, marginBottom:4}}>{f.icono}</div>
+                <div style={{fontSize:14, fontWeight:700}}>{f.label}</div>
+                <div style={{fontSize:11, color:B.t3}}>{f.hora}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* Motivo */}
+        <div>
+          <div style={{fontSize:14, fontWeight:700, color:B.t1, marginBottom:10}}>📝 Motivo</div>
+          <textarea className="field" rows={4}
+            placeholder="Explicá por qué recoordinás este caso..."
+            value={motivo} onChange={e=>setMotivo(e.target.value)}
+            style={{fontSize:15, resize:"none"}}/>
+        </div>
+        {/* Info */}
+        <div style={{padding:"12px 14px", background:B.teal+"11",
+          border:`1px solid ${B.teal}33`, fontSize:13, color:B.t2, lineHeight:1.6}}>
+          💡 El caso te quedará reasignado para la nueva fecha y franja.
+          Desaparece de tu lista hasta ese día.
+        </div>
       </div>
-      <div style={{padding:"10px 14px",background:B.teal+"11",border:`1px solid ${B.teal}33`,fontSize:11,color:B.t2,marginBottom:14}}>
-        💡 El caso quedará reasignado al mismo técnico para la nueva fecha y franja seleccionadas.
-      </div>
-      <div style={{display:"flex",justifyContent:"flex-end",gap:10,paddingTop:14,borderTop:`1px solid ${B.border}`}}>
-        <Bb label="CANCELAR" onClick={onClose} ghost small color={B.t2}/>
-        <Bb label={saving?"GUARDANDO...":"CONFIRMAR RECOORDINACIÓN"} color={B.teal}
-          onClick={async()=>{setSaving(true);await onGuardar({nuevaFecha:fecha,nuevaFranja:franja,motivo});setSaving(false);}}
-          disabled={!completo||saving}/>
-      </div>
-    </Modal>
+    </OverlayAccion>
+  );
+};
+
+// ─── OVERLAY FINALIZAR — flujo paso a paso ──────────────────
+const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
+  const [paso, setPaso]     = useState(1);
+  const [resolvio, setRes]  = useState(null);
+  const [modelo, setModelo] = useState("");
+  const [serie, setSerie]   = useState("");
+  const [showScan, setShowScan] = useState(false);
+  const [descProb, setDescProb] = useState("");
+  const [comoRes, setComoRes]   = useState("");
+  const [n2, setN2]             = useState(null);
+  const [saving, setSaving]     = useState(false);
+
+  const esServicioTecnico = ["SERVICIO_TECNICO","SOPORTE"].includes((caso.tipo_proceso||"").toUpperCase());
+  const totalPasos = resolvio && esServicioTecnico ? 4 : 3;
+
+  const puedeAvanzar = paso===1 ? resolvio!==null
+    : paso===2 ? !!modelo
+    : paso===3 ? serie.trim().length>0
+    : descProb.trim() && comoRes.trim() && n2!==null;
+
+  const avanzar = async () => {
+    if(paso < totalPasos){ setPaso(p=>p+1); return; }
+    setSaving(true);
+    await onGuardar({
+      resolvio: resolvio===true,
+      cierre_modelo_terminal: modelo,
+      cierre_serie_terminal: serie,
+      ...(resolvio && esServicioTecnico ? {
+        cierre_descripcion_problema: descProb,
+        cierre_como_resolvio: comoRes,
+        cierre_requirio_n2: n2,
+        cierre_completado: true,
+        cierre_at: new Date().toISOString(),
+      } : {}),
+      estado: "FINALIZADO",
+    });
+    setSaving(false);
+  };
+
+  const labelBoton = paso < totalPasos ? "SIGUIENTE →" : "✓ FINALIZAR CASO";
+  const colorBoton = paso===totalPasos ? B.green : B.orange;
+
+  return (
+    <>
+      {showScan&&<EscanerBarras onScan={v=>{setSerie(v);setShowScan(false);}} onClose={()=>setShowScan(false)}/>}
+      <OverlayAccion
+        color={colorBoton} icono="🏁" titulo={`PASO ${paso} DE ${totalPasos}`}
+        subtitulo={caso.razon_social}
+        onVolver={paso===1?onVolver:()=>setPaso(p=>p-1)}
+        botonLabel={labelBoton} botonDisabled={!puedeAvanzar}
+        saving={saving} onConfirmar={avanzar}>
+
+        {/* Barra de progreso */}
+        <div style={{display:"flex", gap:6, marginBottom:24}}>
+          {Array.from({length:totalPasos}).map((_,i)=>(
+            <div key={i} style={{flex:1, height:4, borderRadius:2,
+              background: i<paso ? B.green : i===paso-1 ? B.orange : B.border}}/>
+          ))}
+        </div>
+
+        {/* PASO 1 — ¿Resolviste? */}
+        {paso===1&&(
+          <div>
+            <div style={{fontSize:18, fontWeight:700, color:B.t1, marginBottom:24}}>
+              ¿Resolviste el problema del cliente?
+            </div>
+            <div style={{display:"flex", flexDirection:"column", gap:16}}>
+              {[[true,"✅","SÍ, lo resolví",B.green],[false,"❌","NO pude resolverlo",B.red]].map(([val,ic,lbl,col])=>(
+                <button key={String(val)} onClick={()=>setRes(val)}
+                  style={{
+                    padding:"24px 20px",
+                    border:`3px solid ${resolvio===val?col:B.border}`,
+                    background:resolvio===val?col+"22":B.card,
+                    color:resolvio===val?col:B.t2,
+                    cursor:"pointer", borderRadius:2,
+                    display:"flex", alignItems:"center", gap:16,
+                    textAlign:"left", transition:"all .15s",
+                  }}>
+                  <span style={{fontSize:40, flexShrink:0}}>{ic}</span>
+                  <span style={{fontSize:18, fontWeight:700}}>{lbl}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* PASO 2 — Modelo */}
+        {paso===2&&(
+          <div>
+            <div style={{fontSize:18, fontWeight:700, color:B.t1, marginBottom:24}}>
+              ¿Cuál es el modelo del equipo?
+            </div>
+            <div style={{display:"flex", flexDirection:"column", gap:10}}>
+              {MODELOS_TERMINAL.map(m=>(
+                <button key={m} onClick={()=>setModelo(m)}
+                  style={{
+                    padding:"18px 20px",
+                    border:`2px solid ${modelo===m?B.orange:B.border}`,
+                    background:modelo===m?B.orangeDim:B.card,
+                    color:modelo===m?B.orange:B.t1,
+                    cursor:"pointer", borderRadius:2,
+                    display:"flex", alignItems:"center", gap:14,
+                    fontSize:16, fontWeight:modelo===m?700:400,
+                    transition:"all .15s",
+                  }}>
+                  <span style={{fontSize:22}}>{modelo===m?"◉":"○"}</span>{m}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* PASO 3 — Serie */}
+        {paso===3&&(
+          <div>
+            <div style={{fontSize:18, fontWeight:700, color:B.t1, marginBottom:8}}>
+              Serie del equipo del cliente
+            </div>
+            <div style={{fontSize:13, color:B.t2, marginBottom:24}}>
+              Escaneá el código de barras o ingresá manualmente
+            </div>
+            <button onClick={()=>setShowScan(true)}
+              style={{
+                width:"100%", padding:"20px 0", marginBottom:16,
+                background:B.blue+"22", border:`2px solid ${B.blue}`,
+                color:B.blue, cursor:"pointer", fontSize:16, fontWeight:700,
+                borderRadius:2, display:"flex", alignItems:"center",
+                justifyContent:"center", gap:12,
+              }}>
+              <span style={{fontSize:28}}>📷</span> ESCANEAR CÓDIGO DE BARRAS
+            </button>
+            <div style={{fontSize:12, color:B.t3, textAlign:"center", marginBottom:12}}>— o escribí la serie —</div>
+            <input className="field"
+              placeholder="Ej: A1B2C3D4E5"
+              value={serie} onChange={e=>setSerie(e.target.value)}
+              style={{fontSize:18, padding:"16px 14px", letterSpacing:".08em", textAlign:"center"}}/>
+            {serie&&(
+              <div style={{marginTop:12, padding:"10px 14px", background:B.green+"11",
+                border:`1px solid ${B.green}33`, fontSize:13, color:B.green, textAlign:"center"}}>
+                ✓ Serie: <strong>{serie}</strong>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* PASO 4 — Detalles ST (solo si resolvio + ST) */}
+        {paso===4&&(
+          <div style={{display:"flex", flexDirection:"column", gap:20}}>
+            <div>
+              <div style={{fontSize:15, fontWeight:700, color:B.t1, marginBottom:8}}>
+                📋 ¿Cuál era el problema?
+              </div>
+              <textarea className="field" rows={3}
+                placeholder="Describí el problema que tenía el equipo..."
+                value={descProb} onChange={e=>setDescProb(e.target.value)}
+                style={{fontSize:15, resize:"none"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:15, fontWeight:700, color:B.t1, marginBottom:8}}>
+                🔧 ¿Cómo lo resolviste?
+              </div>
+              <textarea className="field" rows={3}
+                placeholder="Describí la solución aplicada..."
+                value={comoRes} onChange={e=>setComoRes(e.target.value)}
+                style={{fontSize:15, resize:"none"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:15, fontWeight:700, color:B.t1, marginBottom:12}}>
+                🆘 ¿Requirió soporte N2?
+              </div>
+              <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12}}>
+                {[[true,"SÍ",B.red,"⚠️"],[false,"NO",B.green,"✓"]].map(([val,lbl,col,ic])=>(
+                  <button key={String(val)} onClick={()=>setN2(val)}
+                    style={{
+                      padding:"20px 12px",
+                      border:`2px solid ${n2===val?col:B.border}`,
+                      background:n2===val?col+"22":B.card,
+                      color:n2===val?col:B.t2,
+                      cursor:"pointer", borderRadius:2,
+                      fontSize:16, fontWeight:700, textAlign:"center",
+                      transition:"all .15s",
+                    }}>
+                    <div style={{fontSize:28, marginBottom:4}}>{ic}</div>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+              {n2===true&&(
+                <div style={{marginTop:12, padding:"12px 14px", background:B.red+"11",
+                  border:`1px solid ${B.red}33`, fontSize:13, color:B.red}}>
+                  ⚠ Se registrará como caso con soporte N2 para análisis posterior
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </OverlayAccion>
+    </>
   );
 };
 
@@ -4179,7 +4559,18 @@ export default function App(){
           .not("estado","in","(FINALIZADO,CANCELADO)");
       }
       const{data}=await query;
-      setCasos(data||[]);
+      // Para técnico: excluir recoordinados que son de días futuros
+      const hoy = new Date(); hoy.setHours(0,0,0,0);
+      const filtrados = p?.rol==="TECNICO"
+        ? (data||[]).filter(c=>{
+            if(c.estado==="ASIGNADO" && c.fecha_recoordinacion){
+              const fRecoord = new Date(c.fecha_recoordinacion+"T00:00:00");
+              return fRecoord <= hoy; // solo mostrar si ya llegó la fecha
+            }
+            return true;
+          })
+        : (data||[]);
+      setCasos(filtrados);
     })();
   },[session]);
 
@@ -4211,7 +4602,17 @@ export default function App(){
         .not("estado","in","(FINALIZADO,CANCELADO)");
     }
     const{data}=await query;
-    setCasos(data||[]);
+    const hoy=new Date(); hoy.setHours(0,0,0,0);
+    const filtrados=perfil?.rol==="TECNICO"
+      ?(data||[]).filter(c=>{
+          if(c.estado==="ASIGNADO"&&c.fecha_recoordinacion){
+            const fR=new Date(c.fecha_recoordinacion+"T00:00:00");
+            return fR<=hoy;
+          }
+          return true;
+        })
+      :(data||[]);
+    setCasos(filtrados);
   };
 
   if(loading)return(
