@@ -80,9 +80,20 @@ const cuentaRegresiva = (caso) => {
   return `⏰ ${mins}min`;
 };
 const genN = () => "CASO-"+String(Math.floor(Math.random()*900000)+100000);
+
+const useMobile = () => {
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  useEffect(()=>{
+    const h = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  },[]);
+  return isMobile;
+};
+
 const slaInfo = (deadline,estado) => {
   if(!deadline) return {label:"—",color:"#32324A"};
-  if(["RESUELTO","CERRADO"].includes(estado)) return {label:"✓ OK",color:"#00E87A"};
+  if(["FINALIZADO","CANCELADO"].includes(estado)) return {label:"✓ OK",color:"#00E87A"};
   const h=(new Date(deadline)-new Date())/3600000;
   if(h<0) return {label:`Venc. ${Math.abs(h).toFixed(0)}h`,color:"#FF2040"};
   if(h<1) return {label:`${(h*60).toFixed(0)}min`,color:"#FFD020"};
@@ -103,6 +114,15 @@ const css = `
   @keyframes ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
   @keyframes glow{0%,100%{text-shadow:0 0 10px #FF6B0088}50%{text-shadow:0 0 24px #FF6B00,0 0 48px #FFA50055}}
   @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+  @keyframes scanLine{0%{top:0}50%{top:calc(100% - 3px)}100%{top:0}}
+  /* Mobile */
+  @media(max-width:767px){
+    .mobile-main{padding:12px 12px 80px 12px!important;}
+    table{font-size:12px;}
+    th,td{padding:7px 8px!important;}
+    .modal-box{clip-path:none!important;border-radius:8px 8px 0 0;}
+    .modal-bg{align-items:flex-end!important;padding:0!important;}
+  }
   .fade-in{animation:fadeIn .28s ease both}
   .pop-in{animation:popIn .32s cubic-bezier(.34,1.4,.64,1) both}
   .live{animation:pulse 2s infinite}
@@ -217,8 +237,8 @@ const Modal = ({title,onClose,children,width=680}) => (
   </div>
 );
 const Ticker = ({casos}) => {
-  const breach=casos.filter(c=>c.sla_deadline&&new Date(c.sla_deadline)<new Date()&&!["RESUELTO","CERRADO"].includes(c.estado||"")).length;
-  const items=[`◈ ${casos.length} casos en el sistema`,`⚠ ${breach} casos con SLA vencido`,`✓ ${casos.filter(c=>c.estado==="RESUELTO").length} casos resueltos`,`⚙ ${casos.filter(c=>c.estado==="EN_PROGRESO").length} en progreso`,`★ BOOLEAN · La lógica detrás de toda la operación`];
+  const breach=casos.filter(c=>c.sla_deadline&&new Date(c.sla_deadline)<new Date()&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
+  const items=[`◈ ${casos.length} casos en el sistema`,`⚠ ${breach} casos con SLA vencido`,`✓ ${casos.filter(c=>c.estado==="FINALIZADO").length} casos resueltos`,`⚙ ${casos.filter(c=>c.estado==="EN_PROGRESO").length} en progreso`,`★ BOOLEAN · La lógica detrás de toda la operación`];
   const full=[...items,...items];
   return (
     <div style={{background:B.orange,height:24,display:"flex",alignItems:"center",overflow:"hidden",flexShrink:0}}>
@@ -261,24 +281,79 @@ const Login = ({onLogin}) => {
 };
 
 const Sidebar = ({view,setView,user,onLogout,casos,perfil}) => {
-  const breach=casos.filter(c=>!["RESUELTO","CERRADO"].includes(c.estado||"")&&c.sla_deadline&&new Date(c.sla_deadline)<new Date()).length;
-  const abiertos=casos.filter(c=>c.estado!=="CERRADO").length;
+  const isMobile = useMobile();
+  const breach=casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||"")&&c.sla_deadline&&new Date(c.sla_deadline)<new Date()).length;
+  const abiertos=casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
   const rol=perfil?.rol||"DIRECTOR";
 
   const MENU_COMPLETO=[
-    {id:"mision",       icon:"◎",  label:"MISIÓN",          roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
-    {id:"ruta",         icon:"🗺", label:"MI RUTA DEL DÍA", roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
-    {id:"casos",        icon:"≣",  label:"CASOS",            roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"], badge:abiertos},
-    {id:"nuevo",        icon:"+",  label:"NUEVO CASO",       roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
-    {id:"bulk",         icon:"⬆", label:"CARGA MASIVA",     roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
-    {id:"analitica",    icon:"◑",  label:"ANALÍTICA",        roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
-    {id:"comunicaciones",icon:"💬",label:"COMUNICACIONES",   roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
-    {id:"logros",       icon:"★",  label:"LOGROS",           roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
-    {id:"usuarios",     icon:"👥", label:"USUARIOS",         roles:["DIRECTOR","REGIONAL"]},
-    {id:"config",       icon:"⟲", label:"CONFIGURACIÓN",    roles:["DIRECTOR"]},
+    {id:"mision",        icon:"◎",  emoji:"🎯", label:"MISIÓN",          roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
+    {id:"ruta",          icon:"🗺", emoji:"🗺", label:"RUTA",             roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
+    {id:"casos",         icon:"≣",  emoji:"📋", label:"CASOS",            roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"], badge:abiertos},
+    {id:"nuevo",         icon:"+",  emoji:"➕", label:"NUEVO",            roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
+    {id:"bulk",          icon:"⬆", emoji:"📤", label:"CARGA",            roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
+    {id:"analitica",     icon:"◑",  emoji:"📊", label:"ANÁLISIS",         roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
+    {id:"comunicaciones",icon:"💬", emoji:"💬", label:"CHAT",             roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
+    {id:"logros",        icon:"★",  emoji:"🏆", label:"LOGROS",           roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
+    {id:"usuarios",      icon:"👥", emoji:"👥", label:"USUARIOS",         roles:["DIRECTOR","REGIONAL"]},
+    {id:"config",        icon:"⟲", emoji:"⚙️", label:"CONFIG",           roles:["DIRECTOR"]},
   ];
   const menu=MENU_COMPLETO.filter(m=>m.roles.includes(rol));
   const initials=(user?.email||"U").substring(0,2).toUpperCase();
+
+  // ── MOBILE — barra inferior fija estilo WhatsApp ──────────
+  if(isMobile) return (
+    <>
+      {/* Contenido ocupa toda la pantalla con padding abajo para la barra */}
+      <style>{`
+        .mobile-main { padding-bottom: 70px !important; }
+        .mob-nav-item { flex:1; display:flex; flex-direction:column; align-items:center;
+          justify-content:center; padding:6px 2px; cursor:pointer; position:relative;
+          min-height:56px; background:none; border:none; }
+        .mob-nav-item.active { color: #FF6B00; }
+        .mob-nav-item:not(.active) { color: #666; }
+      `}</style>
+      {/* Barra de alerta SLA si hay breach */}
+      {breach>0&&(
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:200,
+          background:B.red,padding:"6px 14px",display:"flex",gap:8,alignItems:"center"}}>
+          <span style={{fontSize:12,color:"#fff",fontWeight:700}}>⚠ {breach} SLA VENCIDO{breach>1?"S":""}</span>
+        </div>
+      )}
+      {/* Barra de navegación inferior */}
+      <div style={{
+        position:"fixed", bottom:0, left:0, right:0, zIndex:200,
+        background:"#0A0A0F",
+        borderTop:"1px solid #1a1a1a",
+        display:"flex", alignItems:"stretch",
+        paddingBottom:"env(safe-area-inset-bottom, 0px)",
+      }}>
+        {menu.slice(0,5).map(item=>(
+          <button key={item.id}
+            className={`mob-nav-item${view===item.id?" active":""}`}
+            onClick={()=>setView(item.id)}>
+            <span style={{fontSize:22, lineHeight:1}}>{item.emoji}</span>
+            <span style={{fontSize:9,fontWeight:700,marginTop:2,letterSpacing:".02em",
+              color:view===item.id?B.orange:"#555"}}>{item.label}</span>
+            {item.badge>0&&(
+              <span style={{
+                position:"absolute",top:6,right:"50%",transform:"translateX(8px)",
+                background:B.orange,color:"#050507",
+                borderRadius:10,padding:"1px 5px",fontSize:8,fontWeight:900,
+                fontFamily:"'Orbitron',sans-serif",minWidth:16,textAlign:"center",
+              }}>{item.badge}</span>
+            )}
+          </button>
+        ))}
+        {/* Botón más opciones si hay más de 5 items */}
+        {menu.length>5&&(
+          <MobileMoreMenu menu={menu.slice(5)} view={view} setView={setView} onLogout={onLogout} user={user} perfil={perfil}/>
+        )}
+      </div>
+    </>
+  );
+
+  // ── DESKTOP — sidebar lateral original ───────────────────
   return (
     <div style={{width:210,background:B.panel,borderRight:`1px solid ${B.border}`,display:"flex",flexDirection:"column",height:"100%",flexShrink:0}}>
       <div style={{padding:"16px 16px 12px",borderBottom:`1px solid ${B.border}`,flexShrink:0}}>
@@ -324,19 +399,85 @@ const Sidebar = ({view,setView,user,onLogout,casos,perfil}) => {
     </div>
   );
 };
+
+// Menú "más opciones" para mobile cuando hay más de 5 items
+const MobileMoreMenu = ({menu, view, setView, onLogout, user, perfil}) => {
+  const [open, setOpen] = useState(false);
+  const initials=(user?.email||"U").substring(0,2).toUpperCase();
+  const hasActive = menu.some(m=>m.id===view);
+  return (
+    <>
+      <button className={`mob-nav-item${hasActive?" active":""}`} onClick={()=>setOpen(o=>!o)}>
+        <span style={{fontSize:22}}>☰</span>
+        <span style={{fontSize:9,fontWeight:700,marginTop:2,color:hasActive?B.orange:"#555"}}>MÁS</span>
+      </button>
+      {open&&(
+        <>
+          {/* Backdrop */}
+          <div onClick={()=>setOpen(false)}
+            style={{position:"fixed",inset:0,zIndex:290,background:"rgba(0,0,0,0.7)"}}/>
+          {/* Panel */}
+          <div style={{
+            position:"fixed",bottom:70,left:0,right:0,zIndex:295,
+            background:"#0A0A0F",borderTop:`2px solid ${B.orange}`,
+            padding:"8px 0 8px",
+          }}>
+            {/* Usuario info */}
+            <div style={{padding:"10px 20px 12px",borderBottom:"1px solid #1a1a1a",
+              display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
+              <div style={{width:38,height:38,borderRadius:"50%",
+                background:`linear-gradient(135deg,${B.orange},${B.amber})`,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:13,fontWeight:900,color:"#050507"}}>{initials}</div>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:"#ccc"}}>{perfil?.nombre||user?.email}</div>
+                <div style={{fontSize:10,color:B.orange,fontWeight:700}}>
+                  {perfil?.rol==="TECNICO"?"TÉCNICO DE CAMPO":perfil?.rol||"DIRECTOR"}
+                </div>
+              </div>
+            </div>
+            {menu.map(item=>(
+              <button key={item.id} onClick={()=>{setView(item.id);setOpen(false);}}
+                style={{
+                  width:"100%",padding:"14px 20px",background:"none",border:"none",
+                  display:"flex",alignItems:"center",gap:16,cursor:"pointer",
+                  borderLeft:`3px solid ${view===item.id?B.orange:"transparent"}`,
+                  background:view===item.id?B.orangeDim:"transparent",
+                }}>
+                <span style={{fontSize:22}}>{item.emoji}</span>
+                <span style={{fontSize:15,fontWeight:700,color:view===item.id?B.orange:"#ccc"}}>{item.label}</span>
+                {item.badge>0&&<span style={{marginLeft:"auto",background:B.orange,color:"#050507",
+                  borderRadius:10,padding:"2px 8px",fontSize:11,fontWeight:900}}>{item.badge}</span>}
+              </button>
+            ))}
+            <div style={{padding:"12px 20px 4px",borderTop:"1px solid #1a1a1a",marginTop:6}}>
+              <button onClick={onLogout}
+                style={{width:"100%",padding:"12px 0",background:"none",
+                  border:`1px solid #333`,color:"#666",cursor:"pointer",
+                  fontSize:14,fontWeight:700,borderRadius:2}}>
+                CERRAR SESIÓN
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+};
+
 const Mision = ({casos,setView}) => {
   const [time,setTime]=useState(new Date());
   useEffect(()=>{const t=setInterval(()=>setTime(new Date()),1000);return()=>clearInterval(t);},[]);
   const total=casos.length;
-  const breach=casos.filter(c=>c.sla_deadline&&new Date(c.sla_deadline)<new Date()&&!["RESUELTO","CERRADO"].includes(c.estado||"")).length;
+  const breach=casos.filter(c=>c.sla_deadline&&new Date(c.sla_deadline)<new Date()&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
   const slaComp=total?Math.round(((total-breach)/total)*100):100;
   const installs=casos.filter(c=>c.tipo_proceso==="INSTALACION").length;
-  const incidentes=casos.filter(c=>c.es_incidente&&!["RESUELTO","CERRADO"].includes(c.estado||"")).length;
+  const incidentes=casos.filter(c=>c.es_incidente&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
   const MISIONES=[
     {titulo:"Instalar terminales del día",prog:installs,meta:15,xp:250,icono:"📦",done:installs>=15},
     {titulo:"Resolver incidentes críticos",prog:Math.min(incidentes,3),meta:3,xp:150,icono:"🔥",done:incidentes>=3},
     {titulo:"Cumplir SLA diario ≥ 95%",prog:slaComp,meta:100,xp:100,icono:"⏱",done:slaComp>=95},
-    {titulo:"Completar 5 retiros",prog:casos.filter(c=>c.tipo_proceso==="RETIRO"&&c.estado==="CERRADO").length,meta:5,xp:80,icono:"🔄",done:casos.filter(c=>c.tipo_proceso==="RETIRO"&&c.estado==="CERRADO").length>=5},
+    {titulo:"Completar 5 retiros",prog:casos.filter(c=>c.tipo_proceso==="RETIRO"&&c.estado==="CANCELADO").length,meta:5,xp:80,icono:"🔄",done:casos.filter(c=>c.tipo_proceso==="RETIRO"&&c.estado==="CANCELADO").length>=5},
   ];
   return (
     <div style={{height:"100%",display:"flex",flexDirection:"column",overflow:"hidden"}}>
@@ -451,7 +592,7 @@ const Mision = ({casos,setView}) => {
         </div>
       </div>
       <div className="kpi-bar">
-        {[{icon:"👥",label:"TÉCNICOS",value:"42",delta:"▲7%",c:B.blue},{icon:"📦",label:"INSTALACIONES",value:String(installs||128),delta:"▲12%",c:B.orange},{icon:"⚠",label:"INCIDENTES",value:String(incidentes||7),delta:"▼13%",c:B.red},{icon:"⏱",label:"SLA NACIONAL",value:`${slaComp}%`,delta:"▲5%",c:B.green},{icon:"✓",label:"RESUELTOS",value:String(casos.filter(c=>c.estado==="RESUELTO").length),delta:"",c:B.green},{icon:"★",label:"XP TOTAL",value:"18.250",delta:"",c:B.amber}].map(k=>(
+        {[{icon:"👥",label:"TÉCNICOS",value:"42",delta:"▲7%",c:B.blue},{icon:"📦",label:"INSTALACIONES",value:String(installs||128),delta:"▲12%",c:B.orange},{icon:"⚠",label:"INCIDENTES",value:String(incidentes||7),delta:"▼13%",c:B.red},{icon:"⏱",label:"SLA NACIONAL",value:`${slaComp}%`,delta:"▲5%",c:B.green},{icon:"✓",label:"RESUELTOS",value:String(casos.filter(c=>c.estado==="FINALIZADO").length),delta:"",c:B.green},{icon:"★",label:"XP TOTAL",value:"18.250",delta:"",c:B.amber}].map(k=>(
           <div key={k.label} className="kpi-item">
             <span style={{fontSize:15}}>{k.icon}</span>
             <div>
@@ -1456,90 +1597,186 @@ const PantallaFinalizar = ({ caso, user, perfil, onVolver, onFinalizado }) => {
 };
 
 const EscanerBarras = ({ onScan, onClose }) => {
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const [scanning, setScanning] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError]   = useState("");
+  const [cargando, setCarg] = useState(true);
+  const [manual, setManual] = useState("");
+  const divRef  = useRef(null);
+  const scanRef = useRef(null);
 
-  useEffect(() => {
-    iniciarCamara();
-    return () => detenerCamara();
-  }, []);
-
-  const iniciarCamara = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setScanning(true);
-        escanearLoop();
-      }
-    } catch (e) {
-      setError("No se pudo acceder a la cámara. Ingresá la serie manualmente.");
-    }
-  };
-
-  const detenerCamara = () => {
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    setScanning(false);
-  };
-
-  const escanearLoop = () => {
-    // Usa BarcodeDetector API nativa del browser (Chrome Android, iOS 17+)
-    if (!("BarcodeDetector" in window)) {
-      setError("Tu browser no soporta escaneo automático. Ingresá la serie manualmente.");
-      return;
-    }
-    const detector = new window.BarcodeDetector({ formats: ["code_128","code_39","ean_13","ean_8","qr_code","data_matrix"] });
-    const scan = async () => {
-      if (!videoRef.current || !scanning) return;
+  useEffect(()=>{
+    let mounted = true;
+    const cargarZxing = async () => {
       try {
-        const barcodes = await detector.detect(videoRef.current);
-        if (barcodes.length > 0) {
-          detenerCamara();
-          onScan(barcodes[0].rawValue);
-          return;
+        // Cargar ZXing desde CDN si no está cargado
+        if(!window.ZXing) {
+          await new Promise((res,rej)=>{
+            const s = document.createElement("script");
+            s.src = "https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js";
+            s.onload = res;
+            s.onerror = ()=>rej(new Error("No se pudo cargar el escáner"));
+            document.head.appendChild(s);
+          });
         }
-      } catch {}
-      requestAnimationFrame(scan);
+        if(!mounted) return;
+        // Pedir permiso de cámara
+        await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+        if(!mounted || !divRef.current) return;
+
+        const codeReader = new window.ZXing.BrowserMultiFormatReader();
+        scanRef.current = codeReader;
+        setCarg(false);
+
+        const devices = await window.ZXing.BrowserCodeReader.listVideoInputDevices();
+        // Preferir cámara trasera
+        const cam = devices.find(d=>d.label.toLowerCase().includes("back")||d.label.toLowerCase().includes("rear")||d.label.toLowerCase().includes("environment"))
+          || devices[devices.length-1];
+
+        await codeReader.decodeFromVideoDevice(cam?.deviceId||undefined, divRef.current, (result, err) => {
+          if(result && mounted) {
+            onScan(result.getText());
+          }
+        });
+      } catch(e) {
+        if(mounted) {
+          setError(e.message || "No se pudo acceder a la cámara");
+          setCarg(false);
+        }
+      }
     };
-    requestAnimationFrame(scan);
+    cargarZxing();
+    return ()=>{
+      mounted = false;
+      scanRef.current?.reset?.();
+      scanRef.current?.stopContinuousDecode?.();
+    };
+  },[]);
+
+  const confirmarManual = () => {
+    if(manual.trim()) onScan(manual.trim());
   };
 
   return (
-    <Modal title="📷 ESCANEAR SERIE DEL EQUIPO" onClose={()=>{ detenerCamara(); onClose(); }} width={480}>
-      <div style={{ textAlign: "center" }}>
-        {error ? (
-          <div style={{ padding: 20, color: B.red, fontSize: 13 }}>{error}</div>
-        ) : (
-          <>
-            <div style={{ position: "relative", background: B.deep, marginBottom: 14 }}>
-              <video ref={videoRef} style={{ width: "100%", maxHeight: 300, objectFit: "cover" }} muted playsInline/>
-              {/* Visor de escaneo */}
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-                <div style={{ width: 260, height: 80, border: `2px solid ${B.orange}`, boxShadow: `0 0 0 2000px rgba(0,0,0,0.5)` }}>
-                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: B.orange, animation: "fadeIn 1s ease infinite alternate" }}/>
+    <div style={{
+      position:"fixed", inset:0, zIndex:400,
+      background:"#050507",
+      display:"flex", flexDirection:"column",
+    }}>
+      {/* Header */}
+      <div style={{padding:"16px 20px",borderBottom:"1px solid #1a1a1a",flexShrink:0,
+        display:"flex",alignItems:"center",gap:14}}>
+        <button onClick={()=>{ scanRef.current?.reset?.(); onClose(); }}
+          style={{background:"none",border:"1px solid #333",color:"#888",
+            cursor:"pointer",padding:"10px 18px",fontSize:14,borderRadius:2}}>
+          ← VOLVER
+        </button>
+        <div>
+          <div style={{fontSize:16,fontWeight:900,color:B.blue,fontFamily:"'Orbitron',sans-serif"}}>
+            📷 ESCANEAR SERIE
+          </div>
+          <div style={{fontSize:11,color:"#666",marginTop:2}}>Apuntá al código de barras del equipo</div>
+        </div>
+      </div>
+
+      {error ? (
+        /* Error — modo manual */
+        <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",
+          justifyContent:"center",padding:24,gap:20}}>
+          <div style={{fontSize:48}}>📷</div>
+          <div style={{fontSize:15,color:"#FF6B00",textAlign:"center",lineHeight:1.6}}>
+            {error}
+          </div>
+          <div style={{fontSize:13,color:"#666",textAlign:"center"}}>
+            Escribí la serie manualmente:
+          </div>
+          <input className="field"
+            placeholder="Ej: A1B2C3D4E5"
+            value={manual} onChange={e=>setManual(e.target.value)}
+            style={{fontSize:20,padding:"16px",textAlign:"center",
+              letterSpacing:".1em",width:"100%",maxWidth:340}}
+            autoFocus/>
+          <button onClick={confirmarManual} disabled={!manual.trim()}
+            style={{width:"100%",maxWidth:340,padding:"18px 0",
+              background:manual.trim()?B.green:"#333",border:"none",
+              cursor:manual.trim()?"pointer":"not-allowed",
+              fontFamily:"'Orbitron',sans-serif",fontWeight:900,
+              fontSize:16,color:"#050507",borderRadius:2}}>
+            ✓ CONFIRMAR SERIE
+          </button>
+        </div>
+      ) : (
+        <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+          {/* Visor de cámara */}
+          <div style={{flex:1,position:"relative",background:"#000",overflow:"hidden"}}>
+            {cargando&&(
+              <div style={{position:"absolute",inset:0,display:"flex",
+                alignItems:"center",justifyContent:"center",flexDirection:"column",gap:14,zIndex:1}}>
+                <Spin s={40}/>
+                <div style={{fontSize:13,color:"#666"}}>Iniciando cámara...</div>
+              </div>
+            )}
+            <video ref={divRef} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+            {/* Guía de escaneo */}
+            {!cargando&&(
+              <div style={{position:"absolute",inset:0,display:"flex",
+                alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+                <div style={{
+                  width:"80%",maxWidth:300,height:100,
+                  border:`3px solid ${B.orange}`,
+                  boxShadow:`0 0 0 2000px rgba(0,0,0,0.5)`,
+                  position:"relative",
+                }}>
+                  {/* Línea animada */}
+                  <div style={{
+                    position:"absolute",left:0,right:0,height:3,
+                    background:B.orange,opacity:0.8,
+                    animation:"scanLine 2s ease-in-out infinite",
+                  }}/>
+                  {/* Esquinas */}
+                  {[[0,0,"top","left"],[0,"auto","top","right"],["auto",0,"bottom","left"],["auto","auto","bottom","right"]].map(([t,b,vp,hp],i)=>(
+                    <div key={i} style={{position:"absolute",
+                      top:t,bottom:b===0?0:b,
+                      left:hp==="left"?-3:undefined,right:hp==="right"?-3:undefined,
+                      width:20,height:20,
+                      borderTop:vp==="top"?`4px solid ${B.orange}`:"none",
+                      borderBottom:vp==="bottom"?`4px solid ${B.orange}`:"none",
+                      borderLeft:hp==="left"?`4px solid ${B.orange}`:"none",
+                      borderRight:hp==="right"?`4px solid ${B.orange}`:"none",
+                    }}/>
+                  ))}
                 </div>
               </div>
+            )}
+          </div>
+          {/* Input manual abajo */}
+          <div style={{padding:16,background:"#0A0A0F",borderTop:"1px solid #1a1a1a"}}>
+            <div style={{fontSize:11,color:"#555",textAlign:"center",marginBottom:10}}>
+              O escribí la serie manualmente
             </div>
-            <div style={{ fontSize: 12, color: B.t2, marginBottom: 14 }}>
-              Apuntá la cámara al código de barras del equipo
+            <div style={{display:"flex",gap:10}}>
+              <input className="field" style={{flex:1,fontSize:15,textAlign:"center",letterSpacing:".06em"}}
+                placeholder="Serie del equipo..."
+                value={manual} onChange={e=>setManual(e.target.value)}/>
+              <button onClick={confirmarManual} disabled={!manual.trim()}
+                style={{padding:"0 20px",background:manual.trim()?B.green:"#333",
+                  border:"none",cursor:manual.trim()?"pointer":"not-allowed",
+                  fontWeight:900,color:"#050507",fontSize:14,borderRadius:2,flexShrink:0}}>
+                ✓
+              </button>
             </div>
-          </>
-        )}
-        <Bb label="CANCELAR — INGRESAR MANUALMENTE" onClick={()=>{ detenerCamara(); onClose(); }} ghost small color={B.t2}/>
-      </div>
-    </Modal>
+          </div>
+        </div>
+      )}
+      <style>{`
+        @keyframes scanLine {
+          0% { top: 0; }
+          50% { top: calc(100% - 3px); }
+          100% { top: 0; }
+        }
+      `}</style>
+    </div>
   );
 };
 
-// ═══════════════════════════════════════════════════════════════
-// FORMULARIO DE CIERRE — Solo Servicio Técnico
-// ═══════════════════════════════════════════════════════════════
 const ModalCierre = ({ caso, user, onClose, onGuardar }) => {
   const [form, setForm] = useState({
     descripcion_problema: caso.cierre_descripcion_problema || "",
@@ -2131,8 +2368,8 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
         onBack();
       }}/>}
       {encuestaActiva&&<ModalEncuestaConfig encuesta={encuestaActiva.encuesta} caso={caso} user={user} onClose={()=>setEncuestaActiva(null)} onSave={guardarEncuestaConfig}/>}
-      {showPausar&&<OverlayPausar caso={caso} onVolver={()=>setShowPausar(false)} onGuardar={async(txt)=>{await pausar(txt);setShowPausar(false);}}/>}
-      {showCancelar&&<OverlayCancelar caso={caso} onVolver={()=>setShowCancelar(false)} onGuardar={async(txt)=>{await cancelar(txt);setShowCancelar(false);}}/>}
+      {showPausar&&<OverlayPausar caso={caso} onVolver={()=>setShowPausar(false)} onGuardar={async(txt)=>{await pausar(txt);setShowPausar(false);onBack();}}/>}
+      {showCancelar&&<OverlayCancelar caso={caso} onVolver={()=>setShowCancelar(false)} onGuardar={async(txt)=>{await cancelar(txt);setShowCancelar(false);onBack();}}/>}
       {showRecoord&&<OverlayRecoordinar caso={caso} onVolver={()=>setShowRecoord(false)} onGuardar={async(data)=>{await recoordinar(data);setShowRecoord(false);onBack();}}/>}
 
       {/* Instrucciones confirmadas — badge en cabezal */}
@@ -2270,50 +2507,78 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
 // ═══════════════════════════════════════════════════════════
 
 // Wrapper base para todos los overlays de acción
-const OverlayAccion = ({ color=B.orange, icono, titulo, subtitulo, onVolver, children, botonLabel, botonDisabled, onConfirmar, saving }) => (
+// ═══════════════════════════════════════════════════════════
+// OVERLAYS MOBILE — Cada paso es una pantalla completa
+// ═══════════════════════════════════════════════════════════
+
+// Pantalla base reutilizable para todos los flujos de acción
+const PantallaAccion = ({color, icono, titulo, subtitulo, pasoActual, totalPasos, children, botonLabel, botonDisabled, onBoton, onVolver, saving}) => (
   <div style={{
     position:"fixed", inset:0, zIndex:300,
-    background:"rgba(5,5,7,0.97)",
+    background:"#050507",
     display:"flex", flexDirection:"column",
-    overflowY:"auto",
+    overflowY:"hidden",
   }}>
-    {/* Franja de color superior */}
-    <div style={{height:6, background:color, flexShrink:0}}/>
+    {/* Franja color */}
+    <div style={{height:5, background:color, flexShrink:0}}/>
 
     {/* Header */}
     <div style={{
-      padding:"20px 20px 16px",
+      padding:"16px 20px 14px", flexShrink:0,
       borderBottom:`1px solid ${color}33`,
-      flexShrink:0,
+      background:"#0A0A0F",
     }}>
       <button onClick={onVolver} style={{
-        background:"none", border:`1px solid ${B.border}`,
-        color:B.t2, cursor:"pointer", padding:"10px 18px",
-        fontSize:13, marginBottom:16, display:"flex", alignItems:"center", gap:8,
+        background:"none", border:`1px solid #333`,
+        color:"#888", cursor:"pointer", padding:"10px 18px",
+        fontSize:14, marginBottom:14, borderRadius:2,
+        display:"flex", alignItems:"center", gap:8,
       }}>← VOLVER</button>
-      <div style={{fontSize:36, marginBottom:8}}>{icono}</div>
+
+      {/* Barra de progreso */}
+      {totalPasos>1&&(
+        <div style={{display:"flex", gap:5, marginBottom:14}}>
+          {Array.from({length:totalPasos}).map((_,i)=>(
+            <div key={i} style={{
+              flex:1, height:5, borderRadius:3,
+              background: i<pasoActual-1 ? "#00E87A"
+                : i===pasoActual-1 ? color
+                : "#222",
+              transition:"background .3s",
+            }}/>
+          ))}
+        </div>
+      )}
+
+      <div style={{fontSize:11, color:"#666", marginBottom:4, letterSpacing:".1em"}}>
+        {totalPasos>1?`PASO ${pasoActual} DE ${totalPasos}`:""} {subtitulo}
+      </div>
       <div style={{
-        fontFamily:"'Orbitron',sans-serif", fontSize:18,
-        fontWeight:900, color, marginBottom:4,
-      }}>{titulo}</div>
-      {subtitulo&&<div style={{fontSize:13, color:B.t2}}>{subtitulo}</div>}
+        fontSize:22, fontWeight:900, color,
+        fontFamily:"'Orbitron',sans-serif", lineHeight:1.2,
+        display:"flex", alignItems:"center", gap:10,
+      }}>
+        <span>{icono}</span> {titulo}
+      </div>
     </div>
 
-    {/* Contenido */}
-    <div style={{flex:1, padding:"20px 20px 0", overflowY:"auto"}}>
+    {/* Contenido scrolleable */}
+    <div style={{flex:1, overflowY:"auto", padding:"20px 20px 0"}}>
       {children}
     </div>
 
-    {/* Botón principal */}
-    <div style={{padding:20, flexShrink:0}}>
-      <button onClick={onConfirmar} disabled={botonDisabled||saving}
+    {/* Botón fijo abajo */}
+    <div style={{padding:16, flexShrink:0, background:"#0A0A0F", borderTop:`1px solid #1a1a1a`}}>
+      <button onClick={onBoton} disabled={botonDisabled||saving}
         style={{
-          width:"100%", padding:"20px 0",
-          background: botonDisabled||saving ? B.t3 : color,
-          border:"none", cursor: botonDisabled||saving ? "not-allowed" : "pointer",
+          width:"100%", padding:"22px 0",
+          background: botonDisabled||saving ? "#333" : color,
+          border:"none",
+          cursor: botonDisabled||saving ? "not-allowed" : "pointer",
           fontFamily:"'Orbitron',sans-serif", fontWeight:900,
-          fontSize:16, color:"#050507", letterSpacing:".06em",
-          borderRadius:2, transition:"background .15s",
+          fontSize:17, color: botonDisabled||saving ? "#666" : "#050507",
+          letterSpacing:".06em", borderRadius:2,
+          transition:"background .15s",
         }}>
         {saving ? "GUARDANDO..." : botonLabel}
       </button>
@@ -2325,213 +2590,218 @@ const OverlayAccion = ({ color=B.orange, icono, titulo, subtitulo, onVolver, chi
 const OverlayPausar = ({ caso, onVolver, onGuardar }) => {
   const [motivo, setMotivo] = useState("");
   const [saving, setSaving] = useState(false);
-  const MOTIVOS_RAPIDOS = ["Sin partes disponibles","Esperando autorización","Problema de acceso al local","Almuerzo / descanso","Problemas técnicos complejos"];
+  const MOTIVOS = ["Sin partes disponibles","Esperando autorización","Sin acceso al local","Almuerzo / descanso","Complejidad técnica inesperada","Falta de conectividad"];
   return (
-    <OverlayAccion
+    <PantallaAccion
       color={B.purple} icono="⏸" titulo="PAUSAR CASO"
       subtitulo={caso.razon_social}
-      onVolver={onVolver}
+      pasoActual={1} totalPasos={1}
       botonLabel="CONFIRMAR PAUSA"
       botonDisabled={!motivo.trim()}
       saving={saving}
-      onConfirmar={async()=>{ setSaving(true); await onGuardar(motivo); setSaving(false); }}>
-      <div style={{marginBottom:20}}>
-        <div style={{fontSize:13, color:B.t2, marginBottom:16}}>¿Por qué pausás el caso?</div>
-        {/* Motivos rápidos */}
-        <div style={{display:"flex", flexDirection:"column", gap:10, marginBottom:20}}>
-          {MOTIVOS_RAPIDOS.map(m=>(
-            <button key={m} onClick={()=>setMotivo(m)}
-              style={{
-                padding:"16px 18px", textAlign:"left",
-                border:`2px solid ${motivo===m?B.purple:B.border}`,
-                background:motivo===m?B.purple+"22":B.card,
-                color:motivo===m?B.purple:B.t1,
-                cursor:"pointer", fontSize:15, borderRadius:2,
-                display:"flex", alignItems:"center", gap:12,
-              }}>
-              <span style={{fontSize:20, flexShrink:0}}>{motivo===m?"◉":"○"}</span>
-              {m}
-            </button>
-          ))}
-        </div>
-        <div style={{fontSize:12, color:B.t3, marginBottom:8}}>O escribí otro motivo:</div>
-        <textarea
-          className="field" rows={3}
-          placeholder="Describí el motivo de la pausa..."
-          value={motivo} onChange={e=>setMotivo(e.target.value)}
-          style={{fontSize:15, resize:"none"}}/>
+      onVolver={onVolver}
+      onBoton={async()=>{ setSaving(true); await onGuardar(motivo); setSaving(false); }}>
+      <div style={{marginBottom:8,fontSize:16,fontWeight:700,color:"#ccc"}}>¿Por qué pausás?</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+        {MOTIVOS.map(m=>(
+          <button key={m} onClick={()=>setMotivo(m)}
+            style={{
+              padding:"18px 16px", textAlign:"left",
+              border:`2px solid ${motivo===m?B.purple:"#2a2a2a"}`,
+              background:motivo===m?B.purple+"22":"#0e0e14",
+              color:motivo===m?B.purple:"#ccc",
+              cursor:"pointer", fontSize:15, borderRadius:2,
+              display:"flex", alignItems:"center", gap:14, transition:"all .15s",
+            }}>
+            <span style={{fontSize:22,flexShrink:0}}>{motivo===m?"◉":"○"}</span>{m}
+          </button>
+        ))}
       </div>
-    </OverlayAccion>
+      <div style={{fontSize:13,color:"#666",marginBottom:8}}>O escribí otro motivo:</div>
+      <textarea className="field" rows={3}
+        placeholder="Describí el motivo..."
+        value={motivo} onChange={e=>setMotivo(e.target.value)}
+        style={{fontSize:16,resize:"none"}}/>
+    </PantallaAccion>
   );
 };
 
-// ─── OVERLAY CANCELAR ───────────────────────────────────────
+// ─── OVERLAY CANCELAR — 2 pasos ─────────────────────────────
 const OverlayCancelar = ({ caso, onVolver, onGuardar }) => {
+  const [paso, setPaso] = useState(1);
   const [motivo, setMotivo] = useState("");
-  const [confirmado, setConfirmado] = useState(false);
   const [saving, setSaving] = useState(false);
-  const MOTIVOS_RAPIDOS = ["El comercio no abrió","Equipo no se puede reparar","Caso duplicado","El cliente canceló la visita","Error en la orden de trabajo"];
-  return (
-    <OverlayAccion
+  const MOTIVOS = ["El comercio no abrió","Equipo irreparable","Caso duplicado","Cliente canceló","Error en la orden"];
+
+  if(paso===1) return (
+    <PantallaAccion
       color={B.red} icono="✗" titulo="CANCELAR CASO"
       subtitulo={caso.razon_social}
-      onVolver={onVolver}
-      botonLabel={confirmado ? "✗ CONFIRMAR CANCELACIÓN" : "MANTENER ACTIVO"}
+      pasoActual={1} totalPasos={2}
+      botonLabel="SIGUIENTE →"
       botonDisabled={!motivo.trim()}
-      saving={saving}
-      onConfirmar={async()=>{
-        if(!confirmado){ setConfirmado(true); return; }
-        setSaving(true); await onGuardar(motivo); setSaving(false);
-      }}>
-      {!confirmado ? (
-        <div>
-          <div style={{fontSize:13, color:B.t2, marginBottom:16}}>¿Por qué cancelás el caso?</div>
-          <div style={{display:"flex", flexDirection:"column", gap:10, marginBottom:20}}>
-            {MOTIVOS_RAPIDOS.map(m=>(
-              <button key={m} onClick={()=>setMotivo(m)}
-                style={{
-                  padding:"16px 18px", textAlign:"left",
-                  border:`2px solid ${motivo===m?B.red:B.border}`,
-                  background:motivo===m?B.red+"22":B.card,
-                  color:motivo===m?B.red:B.t1,
-                  cursor:"pointer", fontSize:15, borderRadius:2,
-                  display:"flex", alignItems:"center", gap:12,
-                }}>
-                <span style={{fontSize:20}}>{motivo===m?"◉":"○"}</span>{m}
-              </button>
-            ))}
-          </div>
-          <textarea className="field" rows={3}
-            placeholder="O escribí otro motivo..."
-            value={motivo} onChange={e=>setMotivo(e.target.value)}
-            style={{fontSize:15, resize:"none"}}/>
-        </div>
-      ) : (
-        <div style={{textAlign:"center", padding:"20px 0"}}>
-          <div style={{fontSize:60, marginBottom:20}}>⚠️</div>
-          <div style={{fontSize:18, fontWeight:700, color:B.red, marginBottom:12}}>
-            ¿Estás seguro?
-          </div>
-          <div style={{fontSize:15, color:B.t2, marginBottom:20, lineHeight:1.6}}>
-            Esta acción cancela el caso definitivamente.
-            No se puede deshacer.
-          </div>
-          <div style={{
-            padding:"14px 16px", background:B.red+"11",
-            border:`1px solid ${B.red}33`, fontSize:13,
-            color:B.t2, textAlign:"left",
-          }}>
-            <strong style={{color:B.red}}>Motivo:</strong> {motivo}
-          </div>
-          <button onClick={()=>setConfirmado(false)}
-            style={{marginTop:16, background:"none", border:`1px solid ${B.border}`,
-              color:B.t2, cursor:"pointer", padding:"12px 24px", fontSize:14, width:"100%"}}>
-            ← VOLVER ATRÁS
+      onVolver={onVolver}
+      onBoton={()=>setPaso(2)}>
+      <div style={{marginBottom:8,fontSize:16,fontWeight:700,color:"#ccc"}}>¿Por qué cancelás?</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+        {MOTIVOS.map(m=>(
+          <button key={m} onClick={()=>setMotivo(m)}
+            style={{
+              padding:"18px 16px", textAlign:"left",
+              border:`2px solid ${motivo===m?B.red:"#2a2a2a"}`,
+              background:motivo===m?B.red+"22":"#0e0e14",
+              color:motivo===m?B.red:"#ccc",
+              cursor:"pointer", fontSize:15, borderRadius:2,
+              display:"flex", alignItems:"center", gap:14, transition:"all .15s",
+            }}>
+            <span style={{fontSize:22}}>{motivo===m?"◉":"○"}</span>{m}
           </button>
+        ))}
+      </div>
+      <textarea className="field" rows={3}
+        placeholder="O escribí otro motivo..."
+        value={motivo} onChange={e=>setMotivo(e.target.value)}
+        style={{fontSize:16,resize:"none"}}/>
+    </PantallaAccion>
+  );
+
+  return (
+    <PantallaAccion
+      color={B.red} icono="⚠️" titulo="¿ESTÁS SEGURO?"
+      subtitulo={caso.razon_social}
+      pasoActual={2} totalPasos={2}
+      botonLabel="✗ SÍ, CANCELAR DEFINITIVAMENTE"
+      saving={saving}
+      onVolver={()=>setPaso(1)}
+      onBoton={async()=>{ setSaving(true); await onGuardar(motivo); setSaving(false); }}>
+      <div style={{textAlign:"center",padding:"10px 0"}}>
+        <div style={{fontSize:70,marginBottom:20}}>⚠️</div>
+        <div style={{fontSize:18,color:"#FF2040",fontWeight:700,marginBottom:16}}>
+          Esta acción no se puede deshacer
         </div>
-      )}
-    </OverlayAccion>
+        <div style={{padding:"16px",background:"#1a0000",border:"1px solid #FF204033",
+          fontSize:15,color:"#ccc",textAlign:"left",lineHeight:1.7,borderRadius:2}}>
+          <strong style={{color:"#FF2040"}}>Motivo:</strong><br/>{motivo}
+        </div>
+      </div>
+    </PantallaAccion>
   );
 };
 
-// ─── OVERLAY RECOORDINAR ────────────────────────────────────
+// ─── OVERLAY RECOORDINAR — 3 pasos ──────────────────────────
 const OverlayRecoordinar = ({ caso, onVolver, onGuardar }) => {
-  const [fecha, setFecha]   = useState("");
+  const [paso,   setPaso]   = useState(1);
+  const [fecha,  setFecha]  = useState("");
   const [franja, setFranja] = useState("");
   const [motivo, setMotivo] = useState("");
   const [saving, setSaving] = useState(false);
-  const completo = fecha && franja && motivo.trim();
-  const FRANJAS_OPT = [
+  const FRANJAS = [
     {id:"FH1 (8-12)",  label:"FH1", hora:"08:00 – 12:00", icono:"🌅"},
     {id:"FH2 (12-16)", label:"FH2", hora:"12:00 – 16:00", icono:"☀️"},
     {id:"FH3 (16-19)", label:"FH3", hora:"16:00 – 19:00", icono:"🌆"},
     {id:"FH4 (19-22)", label:"FH4", hora:"19:00 – 22:00", icono:"🌙"},
   ];
-  return (
-    <OverlayAccion
-      color={B.teal} icono="📅" titulo="RECOORDINAR"
+
+  if(paso===1) return (
+    <PantallaAccion
+      color={B.teal} icono="📅" titulo="NUEVA FECHA"
       subtitulo={caso.razon_social}
+      pasoActual={1} totalPasos={3}
+      botonLabel="SIGUIENTE →"
+      botonDisabled={!fecha}
       onVolver={onVolver}
-      botonLabel="CONFIRMAR RECOORDINACIÓN"
-      botonDisabled={!completo}
-      saving={saving}
-      onConfirmar={async()=>{ setSaving(true); await onGuardar({nuevaFecha:fecha,nuevaFranja:franja,motivo}); setSaving(false); }}>
-      <div style={{display:"flex", flexDirection:"column", gap:20}}>
-        {/* Fecha */}
-        <div>
-          <div style={{fontSize:14, fontWeight:700, color:B.t1, marginBottom:10}}>📆 Nueva fecha</div>
-          <input type="date" className="field"
-            value={fecha} onChange={e=>setFecha(e.target.value)}
-            min={new Date().toISOString().split("T")[0]}
-            style={{fontSize:16, padding:"14px 16px"}}/>
+      onBoton={()=>setPaso(2)}>
+      <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:20}}>¿Para qué día recoordinás?</div>
+      <input type="date" className="field"
+        value={fecha} onChange={e=>setFecha(e.target.value)}
+        min={new Date().toISOString().split("T")[0]}
+        style={{fontSize:20,padding:"18px 16px",textAlign:"center",letterSpacing:".05em"}}/>
+      {fecha&&(
+        <div style={{marginTop:14,padding:"12px 16px",background:"#001a1a",
+          border:`1px solid ${B.teal}44`,fontSize:15,color:B.teal,textAlign:"center",borderRadius:2}}>
+          ✓ {new Date(fecha+"T12:00:00").toLocaleDateString("es-UY",{weekday:"long",day:"numeric",month:"long"})}
         </div>
-        {/* Franja */}
-        <div>
-          <div style={{fontSize:14, fontWeight:700, color:B.t1, marginBottom:10}}>🕐 Nueva franja horaria</div>
-          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
-            {FRANJAS_OPT.map(f=>(
-              <button key={f.id} onClick={()=>setFranja(f.id)}
-                style={{
-                  padding:"16px 12px",
-                  border:`2px solid ${franja===f.id?B.teal:B.border}`,
-                  background:franja===f.id?B.teal+"22":B.card,
-                  color:franja===f.id?B.teal:B.t2,
-                  cursor:"pointer", textAlign:"center", borderRadius:2,
-                }}>
-                <div style={{fontSize:24, marginBottom:4}}>{f.icono}</div>
-                <div style={{fontSize:14, fontWeight:700}}>{f.label}</div>
-                <div style={{fontSize:11, color:B.t3}}>{f.hora}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-        {/* Motivo */}
-        <div>
-          <div style={{fontSize:14, fontWeight:700, color:B.t1, marginBottom:10}}>📝 Motivo</div>
-          <textarea className="field" rows={4}
-            placeholder="Explicá por qué recoordinás este caso..."
-            value={motivo} onChange={e=>setMotivo(e.target.value)}
-            style={{fontSize:15, resize:"none"}}/>
-        </div>
-        {/* Info */}
-        <div style={{padding:"12px 14px", background:B.teal+"11",
-          border:`1px solid ${B.teal}33`, fontSize:13, color:B.t2, lineHeight:1.6}}>
-          💡 El caso te quedará reasignado para la nueva fecha y franja.
-          Desaparece de tu lista hasta ese día.
-        </div>
+      )}
+    </PantallaAccion>
+  );
+
+  if(paso===2) return (
+    <PantallaAccion
+      color={B.teal} icono="🕐" titulo="NUEVA FRANJA"
+      subtitulo={caso.razon_social}
+      pasoActual={2} totalPasos={3}
+      botonLabel="SIGUIENTE →"
+      botonDisabled={!franja}
+      onVolver={()=>setPaso(1)}
+      onBoton={()=>setPaso(3)}>
+      <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:20}}>¿En qué horario?</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        {FRANJAS.map(f=>(
+          <button key={f.id} onClick={()=>setFranja(f.id)}
+            style={{
+              padding:"20px 12px",
+              border:`2px solid ${franja===f.id?B.teal:"#2a2a2a"}`,
+              background:franja===f.id?B.teal+"22":"#0e0e14",
+              color:franja===f.id?B.teal:"#ccc",
+              cursor:"pointer", textAlign:"center", borderRadius:2,
+              transition:"all .15s",
+            }}>
+            <div style={{fontSize:32,marginBottom:6}}>{f.icono}</div>
+            <div style={{fontSize:16,fontWeight:700,marginBottom:2}}>{f.label}</div>
+            <div style={{fontSize:12,color:"#666"}}>{f.hora}</div>
+          </button>
+        ))}
       </div>
-    </OverlayAccion>
+    </PantallaAccion>
+  );
+
+  return (
+    <PantallaAccion
+      color={B.teal} icono="📝" titulo="MOTIVO"
+      subtitulo={caso.razon_social}
+      pasoActual={3} totalPasos={3}
+      botonLabel="✓ CONFIRMAR RECOORDINACIÓN"
+      botonDisabled={!motivo.trim()}
+      saving={saving}
+      onVolver={()=>setPaso(2)}
+      onBoton={async()=>{ setSaving(true); await onGuardar({nuevaFecha:fecha,nuevaFranja:franja,motivo}); setSaving(false); }}>
+      <div style={{marginBottom:10,padding:"12px 16px",background:"#001a1a",
+        border:`1px solid ${B.teal}44`,fontSize:14,color:"#aaa",lineHeight:1.7,borderRadius:2}}>
+        <div>📅 <strong style={{color:B.teal}}>{new Date(fecha+"T12:00:00").toLocaleDateString("es-UY",{weekday:"long",day:"numeric",month:"long"})}</strong></div>
+        <div>🕐 <strong style={{color:B.teal}}>{franja}</strong></div>
+      </div>
+      <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:12}}>¿Por qué recoordinás?</div>
+      <textarea className="field" rows={5}
+        placeholder="Explicá el motivo de la recoordinación..."
+        value={motivo} onChange={e=>setMotivo(e.target.value)}
+        style={{fontSize:16,resize:"none"}}/>
+    </PantallaAccion>
   );
 };
 
-// ─── OVERLAY FINALIZAR — flujo paso a paso ──────────────────
+// ─── OVERLAY FINALIZAR — hasta 7 pasos ──────────────────────
 const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
   const [paso, setPaso]     = useState(1);
   const [resolvio, setRes]  = useState(null);
   const [modelo, setModelo] = useState("");
   const [serie, setSerie]   = useState("");
-  const [showScan, setShowScan] = useState(false);
-  const [descProb, setDescProb] = useState("");
-  const [comoRes, setComoRes]   = useState("");
-  const [n2, setN2]             = useState(null);
-  const [saving, setSaving]     = useState(false);
+  const [descProb, setDesc] = useState("");
+  const [comoRes, setComo]  = useState("");
+  const [n2, setN2]         = useState(null);
+  const [showScan, setScan] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const esServicioTecnico = ["SERVICIO_TECNICO","SOPORTE"].includes((caso.tipo_proceso||"").toUpperCase());
-  const totalPasos = resolvio && esServicioTecnico ? 4 : 3;
+  // Pasos: 1=resolvio 2=modelo 3=serie [4=prob 5=como 6=n2 si ST+resolvio]
+  const totalPasos = resolvio===true && esServicioTecnico ? 6 : 3;
 
-  const puedeAvanzar = paso===1 ? resolvio!==null
-    : paso===2 ? !!modelo
-    : paso===3 ? serie.trim().length>0
-    : descProb.trim() && comoRes.trim() && n2!==null;
-
-  const avanzar = async () => {
-    if(paso < totalPasos){ setPaso(p=>p+1); return; }
+  const guardar = async () => {
     setSaving(true);
     await onGuardar({
       resolvio: resolvio===true,
       cierre_modelo_terminal: modelo,
       cierre_serie_terminal: serie,
-      ...(resolvio && esServicioTecnico ? {
+      ...(resolvio===true && esServicioTecnico ? {
         cierre_descripcion_problema: descProb,
         cierre_como_resolvio: comoRes,
         cierre_requirio_n2: n2,
@@ -2543,866 +2813,193 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
     setSaving(false);
   };
 
-  const labelBoton = paso < totalPasos ? "SIGUIENTE →" : "✓ FINALIZAR CASO";
-  const colorBoton = paso===totalPasos ? B.green : B.orange;
-
-  return (
-    <>
-      {showScan&&<EscanerBarras onScan={v=>{setSerie(v);setShowScan(false);}} onClose={()=>setShowScan(false)}/>}
-      <OverlayAccion
-        color={colorBoton} icono="🏁" titulo={`PASO ${paso} DE ${totalPasos}`}
-        subtitulo={caso.razon_social}
-        onVolver={paso===1?onVolver:()=>setPaso(p=>p-1)}
-        botonLabel={labelBoton} botonDisabled={!puedeAvanzar}
-        saving={saving} onConfirmar={avanzar}>
-
-        {/* Barra de progreso */}
-        <div style={{display:"flex", gap:6, marginBottom:24}}>
-          {Array.from({length:totalPasos}).map((_,i)=>(
-            <div key={i} style={{flex:1, height:4, borderRadius:2,
-              background: i<paso ? B.green : i===paso-1 ? B.orange : B.border}}/>
-          ))}
-        </div>
-
-        {/* PASO 1 — ¿Resolviste? */}
-        {paso===1&&(
-          <div>
-            <div style={{fontSize:18, fontWeight:700, color:B.t1, marginBottom:24}}>
-              ¿Resolviste el problema del cliente?
-            </div>
-            <div style={{display:"flex", flexDirection:"column", gap:16}}>
-              {[[true,"✅","SÍ, lo resolví",B.green],[false,"❌","NO pude resolverlo",B.red]].map(([val,ic,lbl,col])=>(
-                <button key={String(val)} onClick={()=>setRes(val)}
-                  style={{
-                    padding:"24px 20px",
-                    border:`3px solid ${resolvio===val?col:B.border}`,
-                    background:resolvio===val?col+"22":B.card,
-                    color:resolvio===val?col:B.t2,
-                    cursor:"pointer", borderRadius:2,
-                    display:"flex", alignItems:"center", gap:16,
-                    textAlign:"left", transition:"all .15s",
-                  }}>
-                  <span style={{fontSize:40, flexShrink:0}}>{ic}</span>
-                  <span style={{fontSize:18, fontWeight:700}}>{lbl}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* PASO 2 — Modelo */}
-        {paso===2&&(
-          <div>
-            <div style={{fontSize:18, fontWeight:700, color:B.t1, marginBottom:24}}>
-              ¿Cuál es el modelo del equipo?
-            </div>
-            <div style={{display:"flex", flexDirection:"column", gap:10}}>
-              {MODELOS_TERMINAL.map(m=>(
-                <button key={m} onClick={()=>setModelo(m)}
-                  style={{
-                    padding:"18px 20px",
-                    border:`2px solid ${modelo===m?B.orange:B.border}`,
-                    background:modelo===m?B.orangeDim:B.card,
-                    color:modelo===m?B.orange:B.t1,
-                    cursor:"pointer", borderRadius:2,
-                    display:"flex", alignItems:"center", gap:14,
-                    fontSize:16, fontWeight:modelo===m?700:400,
-                    transition:"all .15s",
-                  }}>
-                  <span style={{fontSize:22}}>{modelo===m?"◉":"○"}</span>{m}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* PASO 3 — Serie */}
-        {paso===3&&(
-          <div>
-            <div style={{fontSize:18, fontWeight:700, color:B.t1, marginBottom:8}}>
-              Serie del equipo del cliente
-            </div>
-            <div style={{fontSize:13, color:B.t2, marginBottom:24}}>
-              Escaneá el código de barras o ingresá manualmente
-            </div>
-            <button onClick={()=>setShowScan(true)}
-              style={{
-                width:"100%", padding:"20px 0", marginBottom:16,
-                background:B.blue+"22", border:`2px solid ${B.blue}`,
-                color:B.blue, cursor:"pointer", fontSize:16, fontWeight:700,
-                borderRadius:2, display:"flex", alignItems:"center",
-                justifyContent:"center", gap:12,
-              }}>
-              <span style={{fontSize:28}}>📷</span> ESCANEAR CÓDIGO DE BARRAS
-            </button>
-            <div style={{fontSize:12, color:B.t3, textAlign:"center", marginBottom:12}}>— o escribí la serie —</div>
-            <input className="field"
-              placeholder="Ej: A1B2C3D4E5"
-              value={serie} onChange={e=>setSerie(e.target.value)}
-              style={{fontSize:18, padding:"16px 14px", letterSpacing:".08em", textAlign:"center"}}/>
-            {serie&&(
-              <div style={{marginTop:12, padding:"10px 14px", background:B.green+"11",
-                border:`1px solid ${B.green}33`, fontSize:13, color:B.green, textAlign:"center"}}>
-                ✓ Serie: <strong>{serie}</strong>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* PASO 4 — Detalles ST (solo si resolvio + ST) */}
-        {paso===4&&(
-          <div style={{display:"flex", flexDirection:"column", gap:20}}>
-            <div>
-              <div style={{fontSize:15, fontWeight:700, color:B.t1, marginBottom:8}}>
-                📋 ¿Cuál era el problema?
-              </div>
-              <textarea className="field" rows={3}
-                placeholder="Describí el problema que tenía el equipo..."
-                value={descProb} onChange={e=>setDescProb(e.target.value)}
-                style={{fontSize:15, resize:"none"}}/>
-            </div>
-            <div>
-              <div style={{fontSize:15, fontWeight:700, color:B.t1, marginBottom:8}}>
-                🔧 ¿Cómo lo resolviste?
-              </div>
-              <textarea className="field" rows={3}
-                placeholder="Describí la solución aplicada..."
-                value={comoRes} onChange={e=>setComoRes(e.target.value)}
-                style={{fontSize:15, resize:"none"}}/>
-            </div>
-            <div>
-              <div style={{fontSize:15, fontWeight:700, color:B.t1, marginBottom:12}}>
-                🆘 ¿Requirió soporte N2?
-              </div>
-              <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12}}>
-                {[[true,"SÍ",B.red,"⚠️"],[false,"NO",B.green,"✓"]].map(([val,lbl,col,ic])=>(
-                  <button key={String(val)} onClick={()=>setN2(val)}
-                    style={{
-                      padding:"20px 12px",
-                      border:`2px solid ${n2===val?col:B.border}`,
-                      background:n2===val?col+"22":B.card,
-                      color:n2===val?col:B.t2,
-                      cursor:"pointer", borderRadius:2,
-                      fontSize:16, fontWeight:700, textAlign:"center",
-                      transition:"all .15s",
-                    }}>
-                    <div style={{fontSize:28, marginBottom:4}}>{ic}</div>
-                    {lbl}
-                  </button>
-                ))}
-              </div>
-              {n2===true&&(
-                <div style={{marginTop:12, padding:"12px 14px", background:B.red+"11",
-                  border:`1px solid ${B.red}33`, fontSize:13, color:B.red}}>
-                  ⚠ Se registrará como caso con soporte N2 para análisis posterior
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </OverlayAccion>
-    </>
-  );
-};
-
-// ═══════════════════════════════════════════════════════════
-// ─── CONSTANTES NUEVOS CAMPOS ─────────────────────────────────
-const TIERS=["VIP","T1a","T1b","T2"];
-const TIER_SLA={VIP:2,T1a:4,T1b:6,T2:8};
-const TIER_C={VIP:B=>B.amber,T1a:B=>B.orange,T1b:B=>B.blue,T2:B=>B.green};
-const SUB_TIPOS=["FISICO","CONEXION","CONFIGURACION","BATERIA","CARGADOR","OTRO"];
-const FRANJAS=["FH1 (8-12)","FH2 (12-16)","FH3 (16-19)","FH4 (19-22)"];
-const TIPOS_ACCION=["INSTALACION","SERVICIO_TECNICO","RETIRO","VISITA_PROACTIVA"];
-const TIPO_ACCION_C={INSTALACION:B=>B.green,SERVICIO_TECNICO:B=>B.orange,RETIRO:B=>B.blue,VISITA_PROACTIVA:B=>B.purple};
-const TIPO_ACCION_IC={INSTALACION:"📦",SERVICIO_TECNICO:"🔧",RETIRO:"🔄",VISITA_PROACTIVA:"👁"};
-const PRIORIDADES_N=["CRITICA","ALTA","MEDIA","BAJA"];
-const PRIOR_N_C={CRITICA:B=>B.red,ALTA:B=>B.orange,MEDIA:B=>B.blue,BAJA:B=>B.green};
-
-const genBooleanId=()=>"BN-"+String(Math.floor(Math.random()*999999)).padStart(6,"0");
-
-const BulkUpload=({user,toast})=>{
-  const [file,setFile]=useState(null);
-  const [rows,setRows]=useState([]);
-  const [errors,setErrors]=useState([]);
-  const [loading,setLoading]=useState(false);
-  const [done,setDone]=useState(0);
-  const [step,setStep]=useState(1); // 1=upload 2=preview 3=done
-  const fileRef=useRef(null);
-
-  // Mapeo flexible de columnas — acepta nombres en español e inglés
-  const normalize=(r)=>{
-    const get=(...keys)=>{for(const k of keys){const v=r[k]||r[k?.toUpperCase()]||r[k?.toLowerCase()];if(v!==undefined&&v!=="")return String(v).trim();}return "";};
-    return {
-      id_externo:     get("ID_EXTERNO","id_externo","ID","id","EXT_ID") || genBooleanId(),
-      tipo_accion:    get("TIPO_ACCION","tipo_accion","TIPO","tipo","tipo_proceso","TIPO_PROCESO"),
-      sub_tipo:       get("SUB_TIPO","sub_tipo","SUBTIPO","subtipo"),
-      nro_terminal:   get("NRO_TERMINAL","nro_terminal","NUMERO_TERMINAL","numero_terminal","terminal","TERMINAL","numero_serie","NUMERO_SERIE"),
-      obs_modelo:     get("OBS_MODELO","obs_modelo","MODELO","modelo","observaciones_modelo"),
-      rut:            get("RUT","rut"),
-      razon_social:   get("RAZON_SOCIAL","razon_social","NOMBRE","nombre","COMERCIO"),
-      tier:           get("TIER","tier","SEGMENTO","segmento"),
-      departamento:   get("DEPARTAMENTO","departamento","DEPTO","depto"),
-      localidad:      get("LOCALIDAD","localidad","CIUDAD","ciudad"),
-      direccion:      get("DIRECCION","direccion","DIRECCIÓN","dirección"),
-      telefono:       get("TELEFONO","telefono","TEL","tel"),
-      rubro:          get("RUBRO","rubro"),
-      franja_horaria: get("FRANJA_HORARIA","franja_horaria","FRANJA_HOR","franja_hor","FRANJA","franja","rango_horario","RANGO_HORARIO"),
-      prioridad:      get("PRIORIDAD","prioridad","PRIOR","prior"),
-    };
-  };
-
-  const validateRow=(r,i)=>{
-    const errs=[];
-    if(!r.tipo_accion) errs.push(`Fila ${i+2}: TIPO_ACCION es requerido`);
-    else if(!TIPOS_ACCION.includes(r.tipo_accion.toUpperCase())) errs.push(`Fila ${i+2}: TIPO_ACCION inválido ('${r.tipo_accion}')`);
-    if(!r.nro_terminal) errs.push(`Fila ${i+2}: NRO_TERMINAL es requerido`);
-    else if(isNaN(Number(String(r.nro_terminal).replace(/\s/g,"")))) errs.push(`Fila ${i+2}: NRO_TERMINAL debe ser numérico`);
-    if(!r.rut) errs.push(`Fila ${i+2}: RUT es requerido`);
-    if(!r.razon_social) errs.push(`Fila ${i+2}: RAZON_SOCIAL es requerida`);
-    if(!r.tier) errs.push(`Fila ${i+2}: TIER es requerido`);
-    else if(!TIERS.map(t=>t.toLowerCase()).includes(r.tier.toLowerCase())) errs.push(`Fila ${i+2}: TIER inválido ('${r.tier}') — usá VIP/T1a/T1b/T2`);
-    if(!r.departamento) errs.push(`Fila ${i+2}: DEPARTAMENTO es requerido`);
-    if(!r.localidad) errs.push(`Fila ${i+2}: LOCALIDAD es requerida`);
-    if(!r.direccion) errs.push(`Fila ${i+2}: DIRECCION es requerida`);
-    if(!r.franja_horaria) errs.push(`Fila ${i+2}: FRANJA_HORARIA es requerida`);
-    if(!r.prioridad) errs.push(`Fila ${i+2}: PRIORIDAD es requerida`);
-    return errs;
-  };
-
-  const parseCSV = (text) => {
-    const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
-    if (lines.length < 2) return [];
-    const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g,"").toLowerCase()
-      .replace(/\s*★\s*/g,"").replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,""));
-    return lines.slice(1).map(line => {
-      // maneja campos con comas dentro de comillas
-      const vals = []; let cur = ""; let inQ = false;
-      for (let ch of line) {
-        if (ch === '"') { inQ = !inQ; }
-        else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ""; }
-        else { cur += ch; }
-      }
-      vals.push(cur.trim());
-      const obj = {};
-      headers.forEach((h, i) => { obj[h] = (vals[i] || "").replace(/^"|"$/g, ""); });
-      return obj;
-    }).filter(r => Object.values(r).some(v => v));
-  };
-
-  const parseFile = async (f) => {
-    try {
-      const ext = f.name.split(".").pop().toLowerCase();
-      if (ext === "csv") {
-        // CSV nativo — sin dependencias
-        const text = await f.text();
-        const data = parseCSV(text);
-        const normalized = data.map(normalize).filter(r =>
-          Object.values(r).some(v => v && v.length > 0 && !v.startsWith("BN-"))
-        );
-        setRows(normalized);
-        const allErrs = normalized.flatMap((r, i) => validateRow(r, i));
-        setErrors(allErrs);
-        if (allErrs.length === 0) setStep(2);
-      } else if (ext === "xlsx" || ext === "xls") {
-        // Excel — carga SheetJS desde CDN solo cuando se necesita
-        toast("Leyendo Excel...");
-        await new Promise((resolve, reject) => {
-          if (window.XLSX) { resolve(); return; }
-          const s = document.createElement("script");
-          s.src = "https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js";
-          s.onload = resolve;
-          s.onerror = () => reject(new Error("No se pudo cargar el lector de Excel"));
-          document.head.appendChild(s);
-        });
-        const buf = await f.arrayBuffer();
-        const wb  = window.XLSX.read(buf, { type: "array" });
-        const sheetName = wb.SheetNames.find(n =>
-          !["DICCIONARIO","REFERENCIA","REFERENCIA_RÁPIDA","ENCUESTAS","INCIDENTES"].includes(n)
-        ) || wb.SheetNames[0];
-        const ws  = wb.Sheets[sheetName];
-        const raw = window.XLSX.utils.sheet_to_json(ws, { defval: "" });
-        const normalized = raw.map(r => {
-          const nr = {};
-          Object.entries(r).forEach(([k, v]) => {
-            nr[k.toLowerCase().replace(/\s*★\s*/g,"").replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,"")] = String(v);
-          });
-          return nr;
-        }).map(normalize).filter(r => Object.values(r).some(v => v && v.length > 0 && !v.startsWith("BN-")));
-        setRows(normalized);
-        const allErrs = normalized.flatMap((r, i) => validateRow(r, i));
-        setErrors(allErrs);
-        if (allErrs.length === 0) setStep(2);
-      } else {
-        toast("Formato no soportado. Usá .xlsx o .csv");
-      }
-    } catch (e) {
-      toast("Error al leer el archivo: " + e.message);
-    }
-  };
-
-  const importar=async()=>{
-    if(rows.length===0)return;
-    setLoading(true); let ok=0;
-    for(const r of rows){
-      const tierRaw=r.tier||"T2";
-      const tier=TIERS.find(t=>t.toLowerCase()===tierRaw.toLowerCase())||"T2";
-      const slaH=TIER_SLA[tier]||8;
-      const tipo=(r.tipo_accion||"SERVICIO_TECNICO").toUpperCase();
-      const prio=(r.prioridad||"MEDIA").toUpperCase();
-      const {error}=await supabase.from("casos").insert({
-        id_externo:      r.id_externo||genBooleanId(),
-        tipo_proceso:    tipo,
-        sub_tipo:        r.sub_tipo?.toUpperCase()||null,
-        numero_serie:    String(r.nro_terminal||"").replace(/\s/g,""),
-        obs_modelo:      r.obs_modelo||null,
-        rut:             r.rut,
-        razon_social:    r.razon_social,
-        tier:            tier,
-        departamento:    r.departamento,
-        localidad:       r.localidad,
-        direccion:       r.direccion,
-        telefono:        r.telefono||null,
-        rubro:           r.rubro||null,
-        franja_horaria:  r.franja_horaria||"FH2 (12-16)",
-        prioridad:       prio,
-        estado:          "PENDIENTE",
-        creado_por:      user.id,
-        sla_deadline:    new Date(Date.now()+slaH*3600000).toISOString(),
-        historial:[{id:Date.now()+ok,tipo:"CREACION",texto:`Carga masiva · ID externo: ${r.id_externo}`,usuario:user.email,ts:new Date().toISOString()}]
-      });
-      if(!error) ok++; else console.warn("Insert error row",ok,error.message);
-    }
-    setDone(ok); setLoading(false);
-    setStep(3); toast(`✓ ${ok}/${rows.length} casos importados correctamente`);
-  };
-
-  const PRIO_C_LOCAL={CRITICA:B.red,ALTA:B.orange,MEDIA:B.blue,BAJA:B.green};
-  const TIPO_C_LOCAL={INSTALACION:B.green,SERVICIO_TECNICO:B.orange,RETIRO:B.blue,VISITA_PROACTIVA:B.purple};
-  const TIER_C_LOCAL={VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green};
-
-  const reset=()=>{setFile(null);setRows([]);setErrors([]);setDone(0);setStep(1);if(fileRef.current)fileRef.current.value="";};
-
-  return(
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-        <div>
-          <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em",marginBottom:3}}>IMPORTAR</div>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:18,color:B.t1}}>CARGA MASIVA</div>
-        </div>
-        <div style={{display:"flex",gap:9}}>
-          <Bb label="⬇ PLANTILLA CSV" ghost small color={B.green} onClick={()=>{
-            const headers="ID_EXTERNO,TIPO_ACCION,SUB_TIPO,NRO_TERMINAL,OBS_MODELO,RUT,RAZON_SOCIAL,TIER,DEPARTAMENTO,LOCALIDAD,DIRECCION,TELEFONO,RUBRO,FRANJA_HORARIA,PRIORIDAD";
-            const rows=[
-              ",INSTALACION,,1234567,POS Ingenico Move 5000,21 000001 5,Supermercado Norte SA,VIP,Montevideo,Pocitos,Av Brasil 2785,099111222,Supermercado,FH2 (12-16),ALTA",
-              "EXT-00123,SERVICIO_TECNICO,CONEXION,7654321,Verifone V240m,21 000002 3,Farmacia Central,T1a,Maldonado,Punta del Este,Gorlero 1234,099333444,Farmacia,FH1 (8-12),CRITICA",
-              "EXT-00456,SERVICIO_TECNICO,BATERIA,9871234,PAX A920,21 000003 1,Estacion ANCAP,T1b,Salto,Salto,Artigas 456,099555666,Combustible,FH3 (16-19),MEDIA",
-              ",RETIRO,,1122334,Ingenico iCT220,21 000004 9,Hotel Carrasco,VIP,Montevideo,Carrasco,Rambla Republica 5101,099777888,Hotel,FH4 (19-22),BAJA",
-              "EXT-00789,VISITA_PROACTIVA,,5566778,Verifone VX520,21 000005 7,Restaurante El Fogon,T2,Canelones,Ciudad de la Costa,Av Giannattasio km 14,099999000,Restaurante,FH2 (12-16),MEDIA",
-            ];
-            const csv=[headers,...rows].join("\n");
-            const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"});
-            const url=URL.createObjectURL(blob);
-            const a=document.createElement("a");
-            a.href=url; a.download="BOOLEAN_plantilla_carga_masiva.csv";
-            document.body.appendChild(a); a.click();
-            document.body.removeChild(a); URL.revokeObjectURL(url);
-          }}/>
-          {step>1&&<Bb label="↺ NUEVA CARGA" onClick={reset} ghost small color={B.t2}/>}
-        </div>
+  // PASO 1 — ¿Resolviste?
+  if(paso===1) return (
+    <PantallaAccion
+      color={B.green} icono="🏁" titulo="¿RESOLVISTE?"
+      subtitulo={caso.razon_social}
+      pasoActual={1} totalPasos={totalPasos}
+      botonLabel="SIGUIENTE →"
+      botonDisabled={resolvio===null}
+      onVolver={onVolver}
+      onBoton={()=>setPaso(2)}>
+      <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>
+        ¿Resolviste el problema del cliente?
       </div>
-
-      {/* Stepper */}
-      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:20}}>
-        {[["1","SUBIR ARCHIVO"],["2","VALIDAR"],["3","IMPORTADO"]].map(([n,l],i)=>(
-          <div key={n} style={{display:"flex",alignItems:"center",gap:6}}>
-            <div style={{width:22,height:22,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:900,flexShrink:0,
-              background:step>i?B.green:step===i+1?B.orange:B.border,
-              color:step>i||step===i+1?"#050507":B.t3,fontFamily:"'Orbitron',sans-serif"}}>
-              {step>i?"✓":n}
-            </div>
-            <span style={{fontSize:9,color:step===i+1?B.orange:B.t3,fontWeight:700,letterSpacing:".08em"}}>{l}</span>
-            {i<2&&<div style={{width:20,height:1,background:B.border,flexShrink:0}}/>}
-          </div>
-        ))}
-      </div>
-
-      {/* STEP 1: Upload */}
-      {step===1&&(
-        <>
-          <div style={{background:B.orangeDim,border:`1px solid ${B.orange}22`,borderLeft:`3px solid ${B.orange}`,padding:"12px 16px",marginBottom:14,fontSize:11}}>
-            <div style={{color:B.orange,fontWeight:700,letterSpacing:".08em",marginBottom:6}}>CAMPOS REQUERIDOS EN EL EXCEL:</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-              {["TIPO_ACCION","NRO_TERMINAL","RUT","RAZON_SOCIAL","TIER","DEPARTAMENTO","LOCALIDAD","DIRECCION","FRANJA_HORARIA","PRIORIDAD"].map(f=>(
-                <span key={f} style={{background:B.red+"22",color:B.red,border:`1px solid ${B.red}33`,padding:"2px 9px",fontSize:9,fontWeight:700}}>★ {f}</span>
-              ))}
-              {["ID_EXTERNO","SUB_TIPO","OBS_MODELO","TELEFONO","RUBRO"].map(f=>(
-                <span key={f} style={{background:B.border,color:B.t3,padding:"2px 9px",fontSize:9}}>· {f}</span>
-              ))}
-            </div>
-            <div style={{marginTop:8,fontSize:10,color:B.t2}}>
-              ℹ <strong style={{color:B.t1}}>ID_EXTERNO</strong> — si no se provee, el sistema asigna un ID con prefijo <span style={{color:B.blue,fontWeight:700}}>BN-</span>&nbsp;·&nbsp;
-              <strong style={{color:B.t1}}>NRO_TERMINAL</strong> solo numérico&nbsp;·&nbsp;
-              <strong style={{color:B.t1}}>SUB_TIPO</strong> solo para SERVICIO_TECNICO
-            </div>
-          </div>
-          <div onClick={()=>fileRef.current?.click()}
-            style={{border:`2px dashed ${B.border}`,background:B.deep,padding:"36px 20px",textAlign:"center",cursor:"pointer",transition:"all .15s",marginBottom:14}}
-            onMouseEnter={e=>e.currentTarget.style.borderColor=B.orange}
-            onMouseLeave={e=>e.currentTarget.style.borderColor=B.border}>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}}
-              onChange={e=>{const f=e.target.files[0];if(f){setFile(f);setRows([]);setErrors([]);setDone(0);parseFile(f);}}}/>
-            <div style={{fontSize:38,marginBottom:9}}>📂</div>
-            <div style={{fontSize:13,color:B.t1,fontWeight:600,marginBottom:4}}>Arrastrá o hacé clic para seleccionar</div>
-            <div style={{fontSize:10,color:B.t3}}>{file?file.name:".xlsx · .xls · .csv — Máximo 500 filas"}</div>
-          </div>
-          {errors.length>0&&(
-            <div style={{background:B.redDim,border:`1px solid ${B.red}33`,borderLeft:`3px solid ${B.red}`,padding:14,marginBottom:14}}>
-              <div style={{color:B.red,fontWeight:700,marginBottom:8,letterSpacing:".06em"}}>⚠ {errors.length} ERRORES DETECTADOS — CORREGÍ EL ARCHIVO Y VOLVÉ A SUBIRLO</div>
-              {errors.slice(0,8).map((e,i)=><div key={i} style={{fontSize:11,color:B.t2,marginBottom:2}}>· {e}</div>)}
-              {errors.length>8&&<div style={{fontSize:10,color:B.t3,marginTop:4}}>...y {errors.length-8} más</div>}
-            </div>
-          )}
-          {rows.length>0&&errors.length===0&&(
-            <div style={{display:"flex",justifyContent:"flex-end"}}>
-              <Bb label={`CONTINUAR → ${rows.length} FILAS VÁLIDAS`} onClick={()=>setStep(2)}/>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* STEP 2: Preview + import */}
-      {step===2&&(
-        <>
-          <div style={{display:"flex",gap:11,marginBottom:14,flexWrap:"wrap"}}>
-            {[[rows.length,"FILAS TOTALES",B.orange],[rows.filter(r=>!r.id_externo?.startsWith("BN-")).length,"CON ID EXTERNO",B.blue],[rows.filter(r=>r.id_externo?.startsWith("BN-")).length,"ID BOOLEAN AUTO",B.purple]].map(([v,l,c])=>(
-              <div key={l} className="card" style={{flex:1,minWidth:110,padding:12,borderTop:`2px solid ${c}`,textAlign:"center"}}>
-                <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:24,fontWeight:900,color:c}}>{v}</div>
-                <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".08em",marginTop:3}}>{l}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{overflowX:"auto",marginBottom:14}}>
-            <table>
-              <thead>
-                <tr>
-                  {["ID","TIPO","SUB_TIPO","TERMINAL","RUT / RAZÓN SOCIAL","TIER","DPTO","FRANJA","PRIORIDAD","ESTADO"].map(h=><th key={h}>{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.slice(0,10).map((r,i)=>{
-                  const tipo=r.tipo_accion?.toUpperCase();
-                  const prio=r.prioridad?.toUpperCase();
-                  const tier=r.tier?.toUpperCase();
-                  const isAutoId=r.id_externo?.startsWith("BN-");
-                  return(
-                    <tr key={i}>
-                      <td>
-                        <span style={{fontSize:9,fontFamily:"monospace",color:isAutoId?B.purple:B.blue,fontWeight:700,padding:"1px 5px",background:isAutoId?B.purpleDim:B.blueDim,border:`1px solid ${isAutoId?B.purple:B.blue}33`}}>
-                          {r.id_externo}
-                        </span>
-                      </td>
-                      <td><span style={{color:TIPO_C_LOCAL[tipo]||B.t2,fontWeight:700,fontSize:10}}>{TIPO_ACCION_IC[tipo]||"◈"} {tipo}</span></td>
-                      <td style={{fontSize:10,color:B.purple}}>{r.sub_tipo||"—"}</td>
-                      <td style={{fontFamily:"monospace",fontSize:10,color:B.t1}}>{r.nro_terminal}</td>
-                      <td>
-                        <div style={{fontSize:11,fontWeight:600}}>{r.razon_social}</div>
-                        <div style={{fontSize:9,color:B.t3,fontFamily:"monospace"}}>{r.rut}</div>
-                      </td>
-                      <td><span style={{color:TIER_C_LOCAL[tier]||B.t2,fontWeight:700,fontSize:10}}>{tier}</span></td>
-                      <td style={{fontSize:10,color:B.t2}}>{r.departamento}</td>
-                      <td style={{fontSize:10,color:"#CC7700"}}>{r.franja_horaria}</td>
-                      <td><Tg label={prio||"MEDIA"} color={PRIO_C_LOCAL[prio]||B.t2}/></td>
-                      <td><Tg label="PENDIENTE" color={B.t3}/></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {rows.length>10&&<div style={{fontSize:10,color:B.t3,padding:"6px 12px"}}>...y {rows.length-10} filas más</div>}
-          </div>
-          <div style={{display:"flex",gap:9,justifyContent:"flex-end"}}>
-            <Bb label="← VOLVER" onClick={()=>setStep(1)} ghost small color={B.t2}/>
-            <Bb label={loading?`IMPORTANDO... ${done}/${rows.length}`:`⬆ IMPORTAR ${rows.length} CASOS`} onClick={importar} disabled={loading}/>
-          </div>
-        </>
-      )}
-
-      {/* STEP 3: Done */}
-      {step===3&&(
-        <div className="fade-in card" style={{padding:24,maxWidth:480,borderLeft:`4px solid ${B.green}`}}>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,fontWeight:900,color:B.green,marginBottom:10}}>✓ IMPORTACIÓN COMPLETADA</div>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:32,fontWeight:900,color:B.orange,marginBottom:6}}>{done}</div>
-          <div style={{fontSize:12,color:B.t2,marginBottom:18}}>casos creados correctamente y disponibles en el módulo de Casos.</div>
-          <Bb label="↺ NUEVA IMPORTACIÓN" onClick={reset}/>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ─── ANALÍTICA ───────────────────────────────────────────────
-const Analitica=({user,toast})=>{
-  const [tab,setTab]=useState("productividad");
-  const [casos,setCasos]=useState([]);
-  const [loading,setLoading]=useState(true);
-
-  useEffect(()=>{
-    (async()=>{
-      const{data}=await supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(500);
-      setCasos(data||[]);setLoading(false);
-    })();
-  },[]);
-
-  const TABS=[
-    {id:"productividad",label:"PRODUCTIVIDAD"},
-    {id:"sla",label:"SLA"},
-    {id:"incidentes",label:"INCIDENTES"},
-    {id:"empresas",label:"EMPRESAS"},
-    {id:"alertas",label:"🔔 RECORDATORIOS"},
-  ];
-
-  if(loading)return<div style={{textAlign:"center",padding:60,color:B.t3}}><Spin/></div>;
-
-  const total=casos.length;
-  const cerrados=casos.filter(c=>c.estado==="CERRADO"||c.estado==="RESUELTO").length;
-  const slaOk=casos.filter(c=>c.sla_deadline&&c.fecha_cierre&&new Date(c.fecha_cierre)<new Date(c.sla_deadline)).length;
-  const incidentes=casos.filter(c=>c.es_incidente).length;
-  const pctCierre=total?Math.round(cerrados/total*100):0;
-  const pctSla=cerrados?Math.round(slaOk/cerrados*100):0;
-
-  const byEmpresa=EMPRESAS.map(e=>({...e,count:casos.filter(c=>c.empresa_id===e.codigo).length})).sort((a,b)=>b.count-a.count);
-  const byTipo=TIPOS_PROCESO.map(t=>({...t,count:casos.filter(c=>c.tipo_proceso===t.codigo).length}));
-  const byEstado=["PENDIENTE","EN_PROCESO","EN_ESPERA","RESUELTO","CERRADO"].map(e=>({estado:e,count:casos.filter(c=>c.estado===e).length}));
-
-  const KPI=({val,label,sub,color})=>(
-    <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,textAlign:"center"}}>
-      <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:28,fontWeight:900,color:color||B.orange}}>{val}</div>
-      <div style={{fontSize:11,fontWeight:700,color:B.t1,marginTop:4}}>{label}</div>
-      {sub&&<div style={{fontSize:10,color:B.t3,marginTop:2}}>{sub}</div>}
-    </div>
-  );
-
-  const BarChart=({data,keyField,valField,color})=>{
-    const max=Math.max(...data.map(d=>d[valField]),1);
-    return(
-      <div style={{display:"flex",flexDirection:"column",gap:6}}>
-        {data.filter(d=>d[valField]>0).map(d=>(
-          <div key={d[keyField]} style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:100,fontSize:10,color:B.t2,textAlign:"right",flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d[keyField]}</div>
-            <div style={{flex:1,height:20,background:B.bg,position:"relative"}}>
-              <div style={{position:"absolute",left:0,top:0,height:"100%",width:`${d[valField]/max*100}%`,background:color||B.orange,transition:"width .4s"}}/>
-              <span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:10,fontWeight:700,color:B.t1,zIndex:1}}>{d[valField]}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  return(
-    <div>
-      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:18,color:B.t1,marginBottom:20}}>◈ ANALÍTICA OPERATIVA</div>
-      {/* KPIs globales */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
-        <KPI val={total} label="TOTAL CASOS"/>
-        <KPI val={cerrados} label="CERRADOS" sub={`${pctCierre}% del total`} color={B.green}/>
-        <KPI val={`${pctSla}%`} label="SLA CUMPLIDO" color={pctSla>=80?B.green:pctSla>=60?B.orange:B.red}/>
-        <KPI val={incidentes} label="INCIDENTES" color={B.red}/>
-      </div>
-
-      {/* Tabs */}
-      <div style={{display:"flex",gap:4,marginBottom:16,borderBottom:`1px solid ${B.border}`,paddingBottom:0}}>
-        {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)}
-            style={{padding:"8px 14px",background:tab===t.id?B.orange:"none",color:tab===t.id?B.bg:B.t3,border:"none",cursor:"pointer",fontSize:10,fontFamily:"'Orbitron',sans-serif",fontWeight:700,letterSpacing:".08em",transition:"all .15s"}}>
-            {t.label}
+      <div style={{display:"flex",flexDirection:"column",gap:16}}>
+        {[[true,"✅","SÍ, lo resolví",B.green],[false,"❌","NO pude resolverlo",B.red]].map(([val,ic,lbl,col])=>(
+          <button key={String(val)} onClick={()=>setRes(val)}
+            style={{
+              padding:"28px 20px",
+              border:`3px solid ${resolvio===val?col:"#2a2a2a"}`,
+              background:resolvio===val?col+"22":"#0e0e14",
+              color:resolvio===val?col:"#ccc",
+              cursor:"pointer", borderRadius:2,
+              display:"flex", alignItems:"center", gap:18, transition:"all .15s",
+            }}>
+            <span style={{fontSize:44,flexShrink:0}}>{ic}</span>
+            <span style={{fontSize:19,fontWeight:700,textAlign:"left"}}>{lbl}</span>
           </button>
         ))}
       </div>
-
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:20}}>
-        {tab==="productividad"&&(
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-            <div>
-              <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:12}}>CASOS POR ESTADO</div>
-              <BarChart data={byEstado.map(d=>({name:d.estado,count:d.count}))} keyField="name" valField="count" color={B.blue}/>
-            </div>
-            <div>
-              <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:12}}>CASOS POR TIPO</div>
-              <BarChart data={byTipo.map(d=>({name:d.nombre,count:d.count}))} keyField="name" valField="count" color={B.purple}/>
-            </div>
-          </div>
-        )}
-        {tab==="sla"&&(
-          <div>
-            <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:16}}>CUMPLIMIENTO SLA POR EMPRESA</div>
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {byEmpresa.filter(e=>e.count>0).map(e=>{
-                const empCasos=casos.filter(c=>c.empresa_id===e.codigo&&(c.estado==="CERRADO"||c.estado==="RESUELTO"));
-                const empSla=empCasos.filter(c=>c.sla_deadline&&c.fecha_cierre&&new Date(c.fecha_cierre)<new Date(c.sla_deadline)).length;
-                const pct=empCasos.length?Math.round(empSla/empCasos.length*100):0;
-                return(
-                  <div key={e.codigo} style={{display:"flex",alignItems:"center",gap:12}}>
-                    <div style={{width:90,fontSize:10,color:B.t2,flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.nombre}</div>
-                    <div style={{flex:1,height:18,background:B.bg,position:"relative"}}>
-                      <div style={{height:"100%",width:`${pct}%`,background:pct>=80?B.green:pct>=60?B.orange:B.red,transition:"width .4s"}}/>
-                    </div>
-                    <div style={{width:36,fontSize:11,fontWeight:700,color:pct>=80?B.green:pct>=60?B.orange:B.red,textAlign:"right"}}>{pct}%</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        {tab==="incidentes"&&(
-          <div>
-            <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:12}}>INCIDENTES ACTIVOS</div>
-            {casos.filter(c=>c.es_incidente).length===0?(
-              <div style={{textAlign:"center",padding:30,color:B.t3}}>Sin incidentes registrados</div>
-            ):(
-              <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {[...new Set(casos.filter(c=>c.es_incidente&&c.incidente_id).map(c=>c.incidente_id))].map(inc=>{
-                  const incCasos=casos.filter(c=>c.incidente_id===inc);
-                  const abiertos=incCasos.filter(c=>c.estado!=="CERRADO").length;
-                  return(
-                    <div key={inc} style={{background:B.bg,border:`1px solid ${B.red}33`,borderLeft:`3px solid ${B.red}`,padding:"10px 14px",display:"flex",alignItems:"center",gap:12}}>
-                      <Tg label="INC" color={B.red}/>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:12,fontWeight:700,color:B.t1}}>{inc}</div>
-                        <div style={{fontSize:10,color:B.t3}}>{incCasos.length} casos · {abiertos} abiertos</div>
-                      </div>
-                      <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:abiertos>0?B.red:B.green}}>{abiertos}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-        {tab==="empresas"&&(
-          <div>
-            <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:12}}>CASOS POR EMPRESA</div>
-            <BarChart data={byEmpresa.map(e=>({name:e.nombre,count:e.count}))} keyField="name" valField="count" color={B.orange}/>
-          </div>
-        )}
-        {tab==="alertas"&&(
-          <AlertasRecordatorio user={user}/>
-        )}
-      </div>
-    </div>
+    </PantallaAccion>
   );
-};
-// ═══════════════════════════════════════════════════════════
-// PART 8 — Comunicaciones, Logros, Usuarios, Config, App Root
-// ═══════════════════════════════════════════════════════════
 
-// ─── MI RUTA DEL DÍA ─────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════
-// MI RUTA DEL DÍA — Módulo completo con mapa y ruta óptima
-// Usa OpenRouteService (gratuito) + Leaflet (mapa visual)
-// ═══════════════════════════════════════════════════════════════
+  // PASO 2 — Modelo
+  if(paso===2) return (
+    <PantallaAccion
+      color={B.orange} icono="🖥️" titulo="MODELO DEL EQUIPO"
+      subtitulo={caso.razon_social}
+      pasoActual={2} totalPasos={totalPasos}
+      botonLabel="SIGUIENTE →"
+      botonDisabled={!modelo}
+      onVolver={()=>setPaso(1)}
+      onBoton={()=>setPaso(3)}>
+      <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:20}}>
+        ¿Cuál es el modelo del equipo?
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {MODELOS_TERMINAL.map(m=>(
+          <button key={m} onClick={()=>setModelo(m)}
+            style={{
+              padding:"20px 20px",
+              border:`2px solid ${modelo===m?B.orange:"#2a2a2a"}`,
+              background:modelo===m?B.orangeDim:"#0e0e14",
+              color:modelo===m?B.orange:"#ccc",
+              cursor:"pointer", borderRadius:2,
+              display:"flex", alignItems:"center", gap:16,
+              fontSize:17, fontWeight:modelo===m?700:400, transition:"all .15s",
+            }}>
+            <span style={{fontSize:24}}>{modelo===m?"◉":"○"}</span>{m}
+          </button>
+        ))}
+      </div>
+    </PantallaAccion>
+  );
 
-// ─── CONSTANTE API KEY ORS ─────────────────────────────────────
-// El usuario debe poner su key de openrouteservice.org (gratuita)
-const ORS_API_KEY = import.meta.env.VITE_ORS_API_KEY || "";
+  // PASO 3 — Serie
+  if(paso===3) return (
+    <>
+      {showScan&&<EscanerBarras onScan={v=>{setSerie(v);setScan(false);}} onClose={()=>setScan(false)}/>}
+      <PantallaAccion
+        color={B.orange} icono="🔢" titulo="SERIE DEL EQUIPO"
+        subtitulo={caso.razon_social}
+        pasoActual={3} totalPasos={totalPasos}
+        botonLabel={resolvio===true&&esServicioTecnico?"SIGUIENTE →":"✓ FINALIZAR CASO"}
+        botonDisabled={!serie.trim()}
+        saving={saving}
+        onVolver={()=>setPaso(2)}
+        onBoton={async()=>{ if(resolvio===true&&esServicioTecnico){setPaso(4);} else {await guardar();} }}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:20}}>
+          Serie del equipo del cliente
+        </div>
+        <button onClick={()=>setScan(true)}
+          style={{
+            width:"100%", padding:"22px 0", marginBottom:16,
+            background:"#001a33", border:`2px solid ${B.blue}`,
+            color:B.blue, cursor:"pointer", fontSize:17, fontWeight:700,
+            borderRadius:2, display:"flex", alignItems:"center",
+            justifyContent:"center", gap:14,
+          }}>
+          <span style={{fontSize:32}}>📷</span> ESCANEAR CÓDIGO DE BARRAS
+        </button>
+        <div style={{fontSize:13,color:"#555",textAlign:"center",marginBottom:12}}>— o escribí la serie —</div>
+        <input className="field"
+          placeholder="Ej: A1B2C3D4E5"
+          value={serie} onChange={e=>setSerie(e.target.value)}
+          style={{fontSize:20,padding:"18px",textAlign:"center",letterSpacing:".1em"}}/>
+        {serie&&(
+          <div style={{marginTop:14,padding:"14px",background:"#001a0a",
+            border:`1px solid ${B.green}44`,fontSize:16,color:B.green,textAlign:"center",borderRadius:2}}>
+            ✓ <strong>{serie}</strong>
+          </div>
+        )}
+      </PantallaAccion>
+    </>
+  );
 
-// ─── HELPERS DE GEOCODIFICACIÓN Y RUTA ────────────────────────
-const geocodificarDireccion = async (direccion, departamento, localidad) => {
-  const query = [direccion, localidad, departamento, "Uruguay"].filter(Boolean).join(", ");
-  try {
-    const res = await fetch(
-      `https://api.openrouteservice.org/geocode/search?api_key=${ORS_API_KEY}&text=${encodeURIComponent(query)}&boundary.country=UY&size=1`,
-      { headers: { Accept: "application/json" } }
-    );
-    const data = await res.json();
-    if (data.features?.length > 0) {
-      const [lng, lat] = data.features[0].geometry.coordinates;
-      return { lat, lng, ok: true };
-    }
-  } catch (e) { /* si falla ORS, usa Nominatim */ }
-  // Fallback: Nominatim (OpenStreetMap, sin key)
-  try {
-    const res2 = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=uy`,
-      { headers: { "Accept-Language": "es" } }
-    );
-    const data2 = await res2.json();
-    if (data2.length > 0) return { lat: parseFloat(data2[0].lat), lng: parseFloat(data2[0].lon), ok: true };
-  } catch (e) {}
-  return { lat: null, lng: null, ok: false };
-};
+  // PASO 4 — ¿Cuál fue el problema? (solo ST + resolvio)
+  if(paso===4) return (
+    <PantallaAccion
+      color={B.blue} icono="🔍" titulo="EL PROBLEMA"
+      subtitulo={caso.razon_social}
+      pasoActual={4} totalPasos={totalPasos}
+      botonLabel="SIGUIENTE →"
+      botonDisabled={!descProb.trim()}
+      onVolver={()=>setPaso(3)}
+      onBoton={()=>setPaso(5)}>
+      <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:16}}>
+        ¿Cuál era el problema?
+      </div>
+      <textarea className="field" rows={7}
+        placeholder="Describí el problema que tenía el equipo..."
+        value={descProb} onChange={e=>setDesc(e.target.value)}
+        style={{fontSize:16,resize:"none",lineHeight:1.7}}/>
+    </PantallaAccion>
+  );
 
-const calcularRutaORS = async (puntos) => {
-  // puntos: [{lat,lng}, ...] — primer y último son la base
-  if (puntos.length < 2) return null;
-  if (!ORS_API_KEY) return null;
-  try {
-    const coords = puntos.map(p => [p.lng, p.lat]);
-    const res = await fetch("https://api.openrouteservice.org/v2/directions/driving-car/json", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: ORS_API_KEY },
-      body: JSON.stringify({ coordinates: coords, instructions: false })
-    });
-    const data = await res.json();
-    if (data.routes?.[0]) {
-      const route = data.routes[0];
-      const totalKm  = (route.summary.distance / 1000).toFixed(1);
-      const totalMin = Math.round(route.summary.duration / 60);
-      // Decodificar polyline encoded geometry
-      const geom = route.geometry;
-      let polyline = [];
-      try {
-        // ORS devuelve GeoJSON o encoded — intentar ambos
-        if (typeof geom === "string") {
-          polyline = decodePolyline(geom);
-        } else if (geom?.coordinates) {
-          polyline = geom.coordinates.map(([lng, lat]) => [lat, lng]);
-        }
-      } catch {}
-      // Distancias entre paradas
-      const legs = route.segments || [];
-      return { totalKm, totalMin, polyline, legs, ok: true };
-    }
-  } catch (e) {}
-  return { ok: false };
-};
+  // PASO 5 — ¿Cómo lo resolviste?
+  if(paso===5) return (
+    <PantallaAccion
+      color={B.blue} icono="🔧" titulo="LA SOLUCIÓN"
+      subtitulo={caso.razon_social}
+      pasoActual={5} totalPasos={totalPasos}
+      botonLabel="SIGUIENTE →"
+      botonDisabled={!comoRes.trim()}
+      onVolver={()=>setPaso(4)}
+      onBoton={()=>setPaso(6)}>
+      <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:16}}>
+        ¿Cómo lo resolviste?
+      </div>
+      <textarea className="field" rows={7}
+        placeholder="Describí la solución que aplicaste..."
+        value={comoRes} onChange={e=>setComo(e.target.value)}
+        style={{fontSize:16,resize:"none",lineHeight:1.7}}/>
+    </PantallaAccion>
+  );
 
-// Decoder de Polyline encoded (formato Google/ORS)
-const decodePolyline = (encoded) => {
-  const poly = [];
-  let index = 0, lat = 0, lng = 0;
-  while (index < encoded.length) {
-    let b, shift = 0, result = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
-    shift = result = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lng += (result & 1) ? ~(result >> 1) : (result >> 1);
-    poly.push([lat / 1e5, lng / 1e5]);
-  }
-  return poly;
-};
-
-// Algoritmo greedy de vecino más cercano para ordenar paradas
-const ordenarPorCercania = (base, paradas) => {
-  if (!paradas.length) return [];
-  const dist = (a, b) => Math.sqrt(Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2));
-  const resultado = [];
-  let restantes = [...paradas];
-  let actual = base;
-  while (restantes.length > 0) {
-    let minIdx = 0;
-    let minDist = Infinity;
-    restantes.forEach((p, i) => { const d = dist(actual, p); if (d < minDist) { minDist = d; minIdx = i; } });
-    resultado.push(restantes[minIdx]);
-    actual = restantes[minIdx];
-    restantes.splice(minIdx, 1);
-  }
-  return resultado;
-};
-
-// ─── MAPA LEAFLET (inyectado via script dinámico) ─────────────
-const useLeaflet = () => {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    if (window.L) { setReady(true); return; }
-    // CSS
-    if (!document.getElementById("leaflet-css")) {
-      const link = document.createElement("link");
-      link.id = "leaflet-css"; link.rel = "stylesheet";
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-      document.head.appendChild(link);
-    }
-    // JS
-    const script = document.createElement("script");
-    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    script.onload = () => setReady(true);
-    document.head.appendChild(script);
-  }, []);
-  return ready;
-};
-
-const MapaRuta = ({ base, paradas, polyline }) => {
-  const mapRef    = useRef(null);
-  const mapObj    = useRef(null);
-  const leafletOk = useLeaflet();
-  // Usar Montevideo como centro por defecto si no hay base
-  const centerLat = base?.lat || -34.9011;
-  const centerLng = base?.lng || -56.1645;
-
-  useEffect(() => {
-    if (!leafletOk || !mapRef.current) return;
-    const L = window.L;
-
-    if (!mapObj.current) {
-      mapObj.current = L.map(mapRef.current, { zoomControl: true }).setView([centerLat, centerLng], 12);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap", maxZoom: 18
-      }).addTo(mapObj.current);
-    } else {
-      mapObj.current.eachLayer(l => { if (l._url) return; mapObj.current.removeLayer(l); });
-    }
-
-    const map = mapObj.current;
-    const bounds = [];
-
-    // Marcador base (solo si tiene coordenadas)
-    if (base?.lat) {
-      const iconBase = L.divIcon({
-        className: "",
-        html: `<div style="width:32px;height:32px;background:#FF6B00;border:3px solid #FFA500;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 0 12px #FF6B0088;color:#050507;font-weight:900">🏠</div>`,
-        iconSize: [32, 32], iconAnchor: [16, 16]
-      });
-      L.marker([base.lat, base.lng], { icon: iconBase }).addTo(map).bindPopup("<b>BASE OPERATIVA</b>");
-      bounds.push([base.lat, base.lng]);
-    }
-
-    // Marcadores de paradas
-    const PRIO_C_MAP = { CRITICA: "#FF2040", ALTA: "#FF6B00", MEDIA: "#00A8FF", BAJA: "#00E87A" };
-    paradas.forEach((p, i) => {
-      if (!p.lat) return;
-      const color = PRIO_C_MAP[p.prioridad] || "#6868A0";
-      const icon = L.divIcon({
-        className: "",
-        html: `<div style="width:30px;height:30px;background:#0D0D15;border:2px solid ${color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:${color};font-family:Orbitron,sans-serif;box-shadow:0 0 8px ${color}66">${i + 1}</div>`,
-        iconSize: [30, 30], iconAnchor: [15, 15]
-      });
-      L.marker([p.lat, p.lng], { icon })
-        .addTo(map)
-        .bindPopup(`<b>${i + 1}. ${p.razon_social || "Comercio"}</b><br>${p.direccion || ""}<br><span style="color:${color}">${p.tipo_proceso} · ${p.prioridad}</span>`);
-      bounds.push([p.lat, p.lng]);
-    });
-
-    // Trazar ruta
-    if (polyline?.length > 1) {
-      L.polyline(polyline, { color: "#FF6B00", weight: 4, opacity: 0.85 }).addTo(map);
-    } else if (bounds.length > 1) {
-      L.polyline(bounds, { color: "#FF6B0066", weight: 2, dashArray: "6 4" }).addTo(map);
-    }
-
-    if (bounds.length > 1) {
-      map.fitBounds(bounds, { padding: [30, 30] });
-    } else {
-      map.setView([centerLat, centerLng], 12);
-    }
-
-    // Forzar resize para que se dibuje correctamente
-    setTimeout(() => map.invalidateSize(), 100);
-
-  }, [leafletOk, base, paradas, polyline]);
-
-  return (
-    <div style={{ position: "relative" }}>
-      <div ref={mapRef} style={{ width: "100%", height: 360, background: B.deep, borderRadius: 2 }}/>
-      {!leafletOk && (
-        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center",
-          justifyContent: "center", background: B.deep, flexDirection: "column", gap: 10 }}>
-          <Spin s={24}/><span style={{ fontSize: 11, color: B.t3 }}>Cargando mapa...</span>
+  // PASO 6 — ¿Requirió N2?
+  if(paso===6) return (
+    <PantallaAccion
+      color={B.green} icono="🆘" titulo="SOPORTE N2"
+      subtitulo={caso.razon_social}
+      pasoActual={6} totalPasos={totalPasos}
+      botonLabel="✓ FINALIZAR CASO"
+      botonDisabled={n2===null}
+      saving={saving}
+      onVolver={()=>setPaso(5)}
+      onBoton={guardar}>
+      <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>
+        ¿Requirió soporte de nivel 2?
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        {[[true,"⚠️","SÍ",B.red],[false,"✓","NO",B.green]].map(([val,ic,lbl,col])=>(
+          <button key={String(val)} onClick={()=>setN2(val)}
+            style={{
+              padding:"28px 16px",
+              border:`2px solid ${n2===val?col:"#2a2a2a"}`,
+              background:n2===val?col+"22":"#0e0e14",
+              color:n2===val?col:"#ccc",
+              cursor:"pointer", borderRadius:2,
+              textAlign:"center", transition:"all .15s",
+            }}>
+            <div style={{fontSize:44,marginBottom:8}}>{ic}</div>
+            <div style={{fontSize:20,fontWeight:700}}>{lbl}</div>
+          </button>
+        ))}
+      </div>
+      {n2===true&&(
+        <div style={{marginTop:16,padding:"14px",background:"#1a0000",
+          border:"1px solid #FF204033",fontSize:14,color:"#FF2040",lineHeight:1.7,borderRadius:2}}>
+          ⚠ Se registrará como caso con soporte N2 para análisis estadístico posterior
         </div>
       )}
-    </div>
+    </PantallaAccion>
   );
+
+  return null;
 };
+
 
 // ─── COMPONENTE PRINCIPAL ──────────────────────────────────────
 const MiRutaDelDia = ({ user, toast, perfil }) => {
@@ -3449,7 +3046,7 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
       const tecId = perfil?.auth_id || perfil?.id || user.id;
       const { data: c } = await supabase.from("casos").select("*")
         .eq("tecnico_id", tecId)
-        .not("estado", "in", "(CERRADO,RESUELTO)")
+        .not("estado", "in", "(FINALIZADO,CANCELADO)")
         .order("created_at", { ascending: true });
       setCasos(c || []);
       if (c?.length) await geocodificarYOrdenar(c, { lat: null, lng: null });
@@ -3466,7 +3063,7 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
     }
     const { data: c } = await supabase.from("casos").select("*")
       .eq("tecnico_id", tec.auth_id || tec.id)
-      .not("estado", "in", "(CERRADO,RESUELTO)")
+      .not("estado", "in", "(FINALIZADO,CANCELADO)")
       .order("created_at", { ascending: true });
     setCasos(c || []);
     if (c?.length) await geocodificarYOrdenar(c, base);
@@ -4137,7 +3734,7 @@ const useRecordatorios = (casos, user, minutosAntes) => {
     if (casosIdRef.current.has(caso.id)) return; // ya programado
     const franja = caso.franja_horaria || caso.rango_horario;
     if (!franja || !FRANJA_INICIO[franja]) return;
-    if (["CERRADO","RESUELTO"].includes(caso.estado)) return;
+    if (["FINALIZADO","CANCELADO"].includes(caso.estado)) return;
 
     casosIdRef.current.add(caso.id);
 
@@ -4546,30 +4143,31 @@ export default function App(){
     return()=>subscription.unsubscribe();
   },[]);
 
+  const sessionLoadedRef = useRef(false);
+
   useEffect(()=>{
-    if(!session)return;
+    if(!session) return;
+    if(sessionLoadedRef.current) return; // solo cargar UNA vez por sesión
+    sessionLoadedRef.current = true;
     (async()=>{
-      // Cargar perfil primero para saber el rol
       const{data:p}=await supabase.from("usuarios").select("*").eq("auth_id",session.user.id).maybeSingle();
       if(p){ setPerfil(p); if(p.minutos_recordatorio) setMinutosAntes(p.minutos_recordatorio); }
-      // BUG6: técnico solo ve sus casos activos (no finalizados/cancelados)
       let query=supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(500);
       if(p?.rol==="TECNICO"){
         query=query.eq("tecnico_id",p.auth_id||p.id)
           .not("estado","in","(FINALIZADO,CANCELADO)");
       }
       const{data}=await query;
-      // Para técnico: excluir recoordinados que son de días futuros
-      const hoy = new Date(); hoy.setHours(0,0,0,0);
-      const filtrados = p?.rol==="TECNICO"
-        ? (data||[]).filter(c=>{
-            if(c.estado==="ASIGNADO" && c.fecha_recoordinacion){
-              const fRecoord = new Date(c.fecha_recoordinacion+"T00:00:00");
-              return fRecoord <= hoy; // solo mostrar si ya llegó la fecha
+      const hoy=new Date(); hoy.setHours(0,0,0,0);
+      const filtrados=p?.rol==="TECNICO"
+        ?(data||[]).filter(c=>{
+            if(c.estado==="ASIGNADO"&&c.fecha_recoordinacion){
+              const fR=new Date(c.fecha_recoordinacion+"T00:00:00");
+              return fR<=hoy;
             }
             return true;
           })
-        : (data||[]);
+        :(data||[]);
       setCasos(filtrados);
     })();
   },[session]);
@@ -4639,7 +4237,7 @@ export default function App(){
       <Ticker casos={casos}/>
       <div style={{display:"flex",flex:1,overflow:"hidden",height:"calc(100vh - 24px)"}}>
         <Sidebar view={view} setView={v=>{setView(v);setCasoDetalle(null);}} user={user} onLogout={()=>supabase.auth.signOut()} casos={casos} perfil={perfil}/>
-        <main style={{flex:1,overflowY:"auto",padding:"24px 28px"}}>
+        <main className={window.innerWidth<768?"mobile-main":""} style={{flex:1,overflowY:"auto",padding:window.innerWidth<768?"16px 14px":"24px 28px"}}>
           {view==="mision"&&<Mision casos={casos} setView={setView}/>}
           {view==="ruta"&&<MiRutaDelDia user={user} toast={toast} perfil={perfil}/>}
           {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);setView("detalle");}} onNew={()=>setView("nuevo")}/>}
@@ -4670,7 +4268,7 @@ export default function App(){
             perfil={perfil}
             onBack={()=>{setCasoDetalle(null);setView("casos");}}
             onUpdate={(casoActualizado)=>{
-              setCasoDetalle(casoActualizado);
+              // Solo actualizamos el array — NO setCasoDetalle para evitar remount
               setCasos(prev=>prev.map(c=>c.id===casoActualizado.id?casoActualizado:c));
             }}
           />}
