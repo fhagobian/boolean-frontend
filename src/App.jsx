@@ -2211,9 +2211,22 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   useEffect(()=>{
     if(autoStartRef.current) return;
     autoStartRef.current = true;
-    if(esRolTecnico && caso.estado==="ASIGNADO"){
+    // Solo auto-inicia si es técnico, está ASIGNADO y NO tiene tecnico_inicio_at
+    // (ese campo se guarda en Supabase para que persista entre montajes)
+    if(esRolTecnico && caso.estado==="ASIGNADO" && !caso.tecnico_inicio_at){
       if(tieneInstr && !yaConfirmado){ setPantallaInstr(true); return; }
-      (async()=>{ await cambiarEstadoDirecto("EN_PROCESO","Técnico inició la atención del caso"); })();
+      (async()=>{
+        const ts = new Date().toISOString();
+        await supabase.from("casos").update({
+          estado:"EN_PROCESO",
+          tecnico_inicio_at: ts,
+          updated_at: ts,
+        }).eq("id",caso.id);
+        const casActualizado={...caso,estado:"EN_PROCESO",tecnico_inicio_at:ts};
+        setCaso(casActualizado);
+        if(onUpdate) onUpdate(casActualizado);
+        toast("Estado: EN_PROCESO");
+      })();
     }
     if(esRolTecnico && caso.estado==="EN_PROCESO" && tieneInstr && !yaConfirmado){
       setPantallaInstr(true);
@@ -2362,10 +2375,9 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
         const payload={...updates,tiempo_total_seg:tiempoSegundos,historial:h,updated_at:new Date().toISOString()};
         await supabase.from("casos").update(payload).eq("id",caso.id);
         const casActualizado={...caso,...payload};
-        setCaso(casActualizado); if(onUpdate) onUpdate(casActualizado);
+        if(onUpdate) onUpdate(casActualizado); // actualiza/elimina del array ANTES de ir a la lista
         toast("✓ Caso finalizado");
-        setShowFinalizar(false);
-        onBack();
+        onBack(); // va directo a la lista recargada
       }}/>}
       {encuestaActiva&&<ModalEncuestaConfig encuesta={encuestaActiva.encuesta} caso={caso} user={user} onClose={()=>setEncuestaActiva(null)} onSave={guardarEncuestaConfig}/>}
       {showPausar&&<OverlayPausar caso={caso} onVolver={()=>setShowPausar(false)} onGuardar={async(txt)=>{await pausar(txt);setShowPausar(false);onBack();}}/>}
@@ -4266,10 +4278,20 @@ export default function App(){
             user={user}
             toast={toast}
             perfil={perfil}
-            onBack={()=>{setCasoDetalle(null);setView("casos");}}
+            onBack={async()=>{
+              setCasoDetalle(null);
+              setView("casos");
+              await recargarCasos(); // recarga siempre al volver
+            }}
             onUpdate={(casoActualizado)=>{
-              // Solo actualizamos el array — NO setCasoDetalle para evitar remount
-              setCasos(prev=>prev.map(c=>c.id===casoActualizado.id?casoActualizado:c));
+              const esTecnico = perfil?.rol==="TECNICO";
+              const estadosOcultos = ["FINALIZADO","CANCELADO"];
+              if(esTecnico && estadosOcultos.includes(casoActualizado.estado)){
+                // Técnico no debe ver casos finalizados o cancelados
+                setCasos(prev=>prev.filter(c=>c.id!==casoActualizado.id));
+              } else {
+                setCasos(prev=>prev.map(c=>c.id===casoActualizado.id?casoActualizado:c));
+              }
             }}
           />}
           {view==="bulk"&&<BulkUpload user={user} toast={async(m)=>{toast(m);await recargarCasos();}}/>}
