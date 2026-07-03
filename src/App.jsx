@@ -29,7 +29,7 @@ const EMPRESAS = [
   {codigo:"PINVERDE", nombre:"Pin y Verde",     color:"#FFD020", deps:["Canelones Este"]},
   {codigo:"GEOCOM",   nombre:"Geocom Maldonado",color:"#FF2040", deps:["Maldonado"]},
   {codigo:"MARINO",   nombre:"Mariño",          color:"#00D4B4", deps:["Treinta y Tres"]},
-  {codigo:"FISERV",   nombre:"Fiserv",          color:"#A855F7", deps:["Montevideo","Área Metropolitana"]},
+  {codigo:"FISERV",   nombre:"Fiserv",          color:"#A855F7", deps:["Montevideo","Canelones"]},
 ];
 
 const TIPOS_PROCESO = [
@@ -44,8 +44,8 @@ const EC = {
   PENDIENTE:"#FF6B00",ASIGNADO:"#00A8FF",EN_PROCESO:"#FFD020",
   PAUSADO:"#9B6DFF",FINALIZADO:"#00E87A",CANCELADO:"#FF2040",RECOORDINADO:"#00D4B4"
 };
-const PRIORS = ["CRITICAL","HIGH","MEDIUM","LOW"];
-const PC = {CRITICAL:"#FF2040",HIGH:"#FF6B00",MEDIUM:"#FFD020",LOW:"#00E87A"};
+const PRIORS = ["CRITICA","ALTA","MEDIA","BAJA"];
+const PC = {CRITICA:"#FF2040",ALTA:"#FF6B00",MEDIA:"#FFD020",BAJA:"#00E87A"};
 const CRITICIDADES = ["NORMAL","ALTA","MUY_ALTA","CRITICA"];
 const RUBROS = ["Supermercado","Farmacia","Combustible","Restaurante","Hotel","Retail","Banco","Otro"];
 const RANGOS_HORARIO = ["Sin restricción","08 a 10hs","10 a 12hs","12 a 14hs","14 a 16hs","16 a 18hs","+ de las 17hs","+ de las 18hs","Madrugada"];
@@ -450,259 +450,377 @@ const Mision = ({casos,setView}) => {
     </div>
   );
 };
-const CasosList = ({casos,onSelect,onNew,user,onRecargar}) => {
-  const [search,  setSearch]  = useState("");
-  const [fT,      setFT]      = useState("ALL");
-  const [fE,      setFE]      = useState("ALL");
-  const [fP,      setFP]      = useState("ALL");
-  const [fEmp,    setFEmp]    = useState("ALL");
-  const [encuestasMasivo, setEncuestasMasivo] = useState([]);
-  const [encuestaSel, setEncuestaSel] = useState("");
-  const [activandoEnc, setActivandoEnc] = useState(false);
-  const [fTier,   setFTier]   = useState("ALL");
-  const [fAsig,   setFAsig]   = useState("ALL");
-  const [sortCol, setSortCol] = useState("created_at");
-  const [sortDir, setSortDir] = useState("desc");
-  const [selIds,  setSelIds]  = useState(new Set());
-  const [tecnicos,setTecnicos]= useState([]);
-  const [tecSel,  setTecSel]  = useState("");
-  const [asignando,setAsig]   = useState(false);
-  const [showAsigBar,setBar]  = useState(false);
+const COLUMNAS_STD = [
+  {id:"tipo",     label:"TIPO",      ancho:50,  visible:true},
+  {id:"terminal", label:"TERMINAL",  ancho:110, visible:true},
+  {id:"razon",    label:"RAZÓN SOCIAL", ancho:160, visible:true},
+  {id:"rut",      label:"RUT",       ancho:110, visible:true},
+  {id:"estado",   label:"ESTADO",    ancho:110, visible:true},
+  {id:"prioridad",label:"PRIORIDAD", ancho:90,  visible:true},
+  {id:"franja",   label:"FRANJA",    ancho:100, visible:true},
+  {id:"telefono", label:"TEL.",      ancho:100, visible:true},
+  {id:"direccion",label:"DIRECCIÓN", ancho:160, visible:true},
+  {id:"localidad",label:"LOCALIDAD", ancho:110, visible:true},
+  {id:"depto",    label:"DEPTO",     ancho:100, visible:true},
+];
+
+const TIPO_ICONO = {
+  INSTALACION:"📦", SERVICIO_TECNICO:"🔧", RETIRO:"🔄", VISITA_PROACTIVA:"👁"
+};
+
+const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
+  const [search,   setSearch]   = useState("");
+  const [fE,       setFE]       = useState([]);   // estados seleccionados
+  const [fP,       setFP]       = useState([]);   // prioridades
+  const [fT,       setFT]       = useState([]);   // tipos
+  const [fEmp,     setFEmp]     = useState([]);   // empresas
+  const [fTier,    setFTier]    = useState([]);   // tiers
+  const [fAsig,    setFAsig]    = useState([]);   // asignacion
+  const [sortCol,  setSortCol]  = useState("created_at");
+  const [sortDir,  setSortDir]  = useState("desc");
+  const [selIds,   setSelIds]   = useState(new Set());
+  const [tecnicos, setTecnicos] = useState([]);
+  const [tecSel,   setTecSel]   = useState("");
+  const [asignando,setAsig]     = useState(false);
+  const [encuestasMasivo,setEncMasivo] = useState([]);
+  const [encuestaSel,setEncSel] = useState("");
+  const [activandoEnc,setActEnc]= useState(false);
+  const [columnas, setColumnas] = useState(()=>{
+    try{ const s=localStorage.getItem("boolean_cols_"+user?.id);
+      return s?JSON.parse(s):COLUMNAS_STD; }
+    catch{ return COLUMNAS_STD; }
+  });
+  const [showColConfig, setShowColConfig] = useState(false);
+  const [showRefIconos, setShowRefIconos] = useState(false);
+
+  const esRolTecnico = perfil?.rol==="TECNICO";
 
   useEffect(()=>{
     supabase.from("usuarios").select("*").eq("rol","TECNICO").eq("activo",true)
       .then(({data})=>setTecnicos(data||[]));
-    // Cargar encuestas activas para activación masiva
     supabase.from("encuestas_config").select("*").eq("activa",true)
-      .then(({data})=>setEncuestasMasivo(data||[]));
+      .then(({data})=>setEncMasivo(data||[]));
   },[]);
 
-  useEffect(()=>{ setBar(selIds.size>0); },[selIds]);
+  const guardarColumnas = (cols) => {
+    setColumnas(cols);
+    try{ localStorage.setItem("boolean_cols_"+user?.id, JSON.stringify(cols)); }catch{}
+  };
+
+  const vistaEstandar = () => guardarColumnas(COLUMNAS_STD);
+
+  // Filtro múltiple helper
+  const matchFiltro = (arr, val) => arr.length===0 || arr.includes(val);
 
   const fil = casos.filter(c=>{
-    if(fT!=="ALL"&&c.tipo_proceso!==fT) return false;
-    if(fE!=="ALL"&&c.estado!==fE) return false;
-    if(fP!=="ALL"&&c.prioridad!==fP) return false;
-    if(fEmp!=="ALL"&&c.empresa_id!==fEmp) return false;
-    if(fTier!=="ALL"&&c.tier!==fTier) return false;
-    if(fAsig==="ASIGNADO"&&!c.tecnico_id) return false;
-    if(fAsig==="SIN_ASIGNAR"&&c.tecnico_id) return false;
+    if(!matchFiltro(fT, c.tipo_proceso)) return false;
+    if(!matchFiltro(fE, c.estado)) return false;
+    if(!matchFiltro(fP, c.prioridad)) return false;
+    if(!matchFiltro(fEmp, c.empresa_id)) return false;
+    if(!matchFiltro(fTier, c.tier)) return false;
+    if(fAsig.length>0){
+      if(fAsig.includes("ASIGNADO")&&!c.tecnico_id) return false;
+      if(fAsig.includes("SIN_ASIGNAR")&&c.tecnico_id) return false;
+    }
     if(search){
       const q=search.toLowerCase();
-      if(!(c.numero||"").toLowerCase().includes(q)&&
-         !(c.descripcion||"").toLowerCase().includes(q)&&
-         !(c.rut||"").toLowerCase().includes(q)&&
-         !(c.razon_social||"").toLowerCase().includes(q)&&
-         !(c.departamento||"").toLowerCase().includes(q)) return false;
+      return (c.numero||"").toLowerCase().includes(q)||
+             (c.razon_social||"").toLowerCase().includes(q)||
+             (c.rut||"").toLowerCase().includes(q)||
+             (c.direccion||"").toLowerCase().includes(q)||
+             (c.localidad||"").toLowerCase().includes(q)||
+             (c.numero_serie||"").toLowerCase().includes(q);
     }
     return true;
   }).sort((a,b)=>{
     let va=a[sortCol]||""; let vb=b[sortCol]||"";
-    if(sortDir==="asc") return va>vb?1:-1;
-    return va<vb?1:-1;
+    return sortDir==="asc"?(va>vb?1:-1):(va<vb?1:-1);
   });
 
   const toggleSort=(col)=>{
     if(sortCol===col) setSortDir(d=>d==="asc"?"desc":"asc");
-    else { setSortCol(col); setSortDir("asc"); }
+    else{ setSortCol(col); setSortDir("asc"); }
   };
 
   const toggleSel=(id,e)=>{
     e.stopPropagation();
     setSelIds(prev=>{ const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
   };
-
   const toggleAll=()=>{
     if(selIds.size===fil.length) setSelIds(new Set());
     else setSelIds(new Set(fil.map(c=>c.id)));
   };
 
-  const activarEncuestaMasivo=async()=>{
-    if(!encuestaSel||selIds.size===0) return;
-    setActivandoEnc(true);
-    let ok=0;
-    for(const id of selIds){
-      const{error}=await supabase.from("casos_encuestas").insert({
-        caso_id:id, encuesta_id:encuestaSel,
-        activada_por:user?.email, activada_at:new Date().toISOString()
-      });
-      if(!error) ok++;
-    }
-    setActivandoEnc(false);
-    setEncuestaSel("");
-    setSelIds(new Set());
-    if(onRecargar) await onRecargar();
-  };
-
   const asignarMasivo=async()=>{
-    if(!tecSel||selIds.size===0) return;
-    setAsig(true);
+    if(!tecSel||selIds.size===0) return; setAsig(true);
     const tec=tecnicos.find(t=>t.id===tecSel);
     const ts=new Date().toISOString();
-    let ok=0;
     for(const id of selIds){
-      const caso=casos.find(c=>c.id===id);
-      if(!caso) continue;
-      const h=[...(caso.historial||[]),{id:Date.now()+ok,tipo:"ASIGNACION",
+      const caso=casos.find(c=>c.id===id); if(!caso) continue;
+      const h=[...(caso.historial||[]),{id:Date.now(),tipo:"ASIGNACION",
         texto:`Asignado a ${tec?.nombre||""} ${tec?.apellido||""} por ${user?.email}`,
         usuario:user?.email,ts}];
-      const{error}=await supabase.from("casos").update({
-        tecnico_id:tec.auth_id||tec.id,
-        estado:"ASIGNADO",
-        historial:h,updated_at:ts
-      }).eq("id",id);
-      if(!error) ok++;
+      await supabase.from("casos").update({tecnico_id:tec.auth_id||tec.id,estado:"ASIGNADO",historial:h,updated_at:ts}).eq("id",id);
     }
     setAsig(false); setSelIds(new Set()); setTecSel("");
     if(onRecargar) await onRecargar();
   };
 
-  const SortTh=({col,label})=>(
-    <th onClick={()=>toggleSort(col)} style={{cursor:"pointer",userSelect:"none",whiteSpace:"nowrap"}}>
-      {label}{sortCol===col?(sortDir==="asc"?" ▲":" ▼"):""}
-    </th>
-  );
+  const activarEncuestaMasivo=async()=>{
+    if(!encuestaSel||selIds.size===0) return; setActEnc(true);
+    for(const id of selIds){
+      await supabase.from("casos_encuestas").insert({
+        caso_id:id, encuesta_id:encuestaSel,
+        activada_por:user?.email, activada_at:new Date().toISOString()
+      });
+    }
+    setActEnc(false); setEncSel(""); setSelIds(new Set());
+    if(onRecargar) await onRecargar();
+  };
 
-  const Sel=({v,onChange,opts,ph})=>(
-    <select className="field" style={{flex:1,minWidth:100}} value={v} onChange={e=>onChange(e.target.value)}>
-      <option value="ALL">{ph}</option>
-      {opts.map(([a,b])=><option key={a} value={a}>{b}</option>)}
-    </select>
-  );
+  // Componente de filtro múltiple
+  const FiltroMultiple = ({label, opciones, valor, onChange}) => {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+    useEffect(()=>{
+      const h=(e)=>{ if(ref.current&&!ref.current.contains(e.target)) setOpen(false); };
+      document.addEventListener("mousedown",h); return()=>document.removeEventListener("mousedown",h);
+    },[]);
+    return (
+      <div ref={ref} style={{position:"relative"}}>
+        <button onClick={()=>setOpen(o=>!o)}
+          style={{padding:"6px 12px",background:valor.length>0?B.orangeDim:B.deep,
+            border:`1px solid ${valor.length>0?B.orange:B.border}`,color:valor.length>0?B.orange:B.t2,
+            cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>
+          {label}{valor.length>0&&<span style={{background:B.orange,color:"#050507",borderRadius:"50%",
+            width:16,height:16,fontSize:9,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            {valor.length}</span>}
+          <span style={{fontSize:8}}>▼</span>
+        </button>
+        {open&&(
+          <div style={{position:"absolute",top:"100%",left:0,zIndex:200,minWidth:160,
+            background:B.panel,border:`1px solid ${B.border}`,boxShadow:"0 8px 24px #00000066",padding:6}}>
+            {opciones.map(([v,l])=>(
+              <label key={v} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",
+                cursor:"pointer",fontSize:11,color:valor.includes(v)?B.orange:B.t2,
+                background:valor.includes(v)?B.orangeDim:"transparent"}}>
+                <input type="checkbox" checked={valor.includes(v)}
+                  onChange={()=>onChange(valor.includes(v)?valor.filter(x=>x!==v):[...valor,v])}
+                  style={{accentColor:B.orange,width:13,height:13}}/>
+                {l}
+              </label>
+            ))}
+            {valor.length>0&&(
+              <button onClick={()=>onChange([])}
+                style={{width:"100%",marginTop:4,padding:"4px 0",background:"none",
+                  border:`1px solid ${B.border}`,color:B.t3,cursor:"pointer",fontSize:10}}>
+                Limpiar
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
-  const empresasSeleccionadas=selIds.size>0
-    ?[...new Set([...selIds].map(id=>casos.find(c=>c.id===id)?.empresa_id).filter(Boolean))]
-    :[];
-  const tecnicosFiltrados=tecnicos.filter(t=>
-    empresasSeleccionadas.length===0||
-    empresasSeleccionadas.every(emp=>t.empresa_codigo===emp)
-  );
+  const colsVisibles = columnas.filter(c=>c.visible);
+  const empresasSeleccionadas=[...new Set([...selIds].map(id=>casos.find(c=>c.id===id)?.empresa_id).filter(Boolean))];
+  const tecnicosFiltrados=tecnicos.filter(t=>empresasSeleccionadas.length===0||empresasSeleccionadas.every(emp=>t.empresa_codigo===emp));
   const TIER_C_L={VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green};
+
+  const renderCelda=(col,c)=>{
+    const tec=tecnicos.find(t=>(t.auth_id||t.id)===c.tecnico_id);
+    const sl=slaInfo(c.sla_deadline,c.estado);
+    switch(col.id){
+      case "tipo": return (
+        <span title={c.tipo_proceso} style={{fontSize:20,cursor:"default"}}>
+          {TIPO_ICONO[c.tipo_proceso]||"◈"}
+        </span>
+      );
+      case "terminal": return <span className="mono" style={{fontSize:11,color:B.orange,fontWeight:700}}>{c.numero_serie||c.numero||"—"}</span>;
+      case "razon":    return <div style={{fontSize:11,fontWeight:600,lineHeight:1.3}}>{c.razon_social||"—"}</div>;
+      case "rut":      return <span className="mono" style={{fontSize:10,color:B.t2}}>{c.rut||"—"}</span>;
+      case "estado":   return <Tg label={c.estado||"—"} color={EC[c.estado]||B.t3}/>;
+      case "prioridad":return <Tg label={c.prioridad||"—"} color={PC[c.prioridad]||B.t2}/>;
+      case "franja":   return <span style={{fontSize:10,color:"#CC7700",fontWeight:600}}>{c.franja_horaria||c.rango_horario||"—"}</span>;
+      case "telefono": return c.telefono
+        ? <a href={`tel:${c.telefono}`} onClick={e=>e.stopPropagation()}
+            style={{color:B.blue,fontWeight:700,fontSize:11,textDecoration:"none"}}>📞 {c.telefono}</a>
+        : <span style={{color:B.t3}}>—</span>;
+      case "direccion":return <span style={{fontSize:10,color:B.t2}}>{c.direccion||"—"}</span>;
+      case "localidad":return <span style={{fontSize:11,color:B.t1}}>{c.localidad||"—"}</span>;
+      case "depto":    return <span style={{fontSize:11,color:B.t2}}>{c.departamento||"—"}</span>;
+      default: return "—";
+    }
+  };
 
   return (
     <div style={{padding:20,height:"100%",overflowY:"auto",paddingBottom:selIds.size>0?100:20}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+
+      {/* Modal configuración columnas */}
+      {showColConfig&&(
+        <Modal title="⚙ CONFIGURAR COLUMNAS" onClose={()=>setShowColConfig(false)} width={420}>
+          <div style={{marginBottom:14,fontSize:11,color:B.t2}}>
+            Activá o desactivá las columnas que querés ver. Arrastrá para reordenar.
+          </div>
+          {columnas.map((col,i)=>(
+            <div key={col.id} style={{display:"flex",alignItems:"center",gap:10,
+              padding:"8px 10px",marginBottom:4,background:B.deep,border:`1px solid ${B.border}`}}>
+              <span style={{color:B.t3,cursor:"move",fontSize:14}}>⠿</span>
+              <label style={{display:"flex",alignItems:"center",gap:8,flex:1,cursor:"pointer"}}>
+                <input type="checkbox" checked={col.visible}
+                  onChange={()=>guardarColumnas(columnas.map((c,j)=>j===i?{...c,visible:!c.visible}:c))}
+                  style={{accentColor:B.orange,width:14,height:14}}/>
+                <span style={{fontSize:12,color:col.visible?B.t1:B.t3}}>{col.label}</span>
+              </label>
+              <div style={{display:"flex",gap:4}}>
+                {i>0&&<button onClick={()=>{const a=[...columnas];[a[i-1],a[i]]=[a[i],a[i-1]];guardarColumnas(a);}}
+                  style={{background:"none",border:"none",color:B.t3,cursor:"pointer",fontSize:12}}>▲</button>}
+                {i<columnas.length-1&&<button onClick={()=>{const a=[...columnas];[a[i],a[i+1]]=[a[i+1],a[i]];guardarColumnas(a);}}
+                  style={{background:"none",border:"none",color:B.t3,cursor:"pointer",fontSize:12}}>▼</button>}
+              </div>
+            </div>
+          ))}
+          <div style={{display:"flex",gap:10,marginTop:14}}>
+            <Bb label="VISTA ESTÁNDAR" onClick={()=>{vistaEstandar();setShowColConfig(false);}} ghost small color={B.t2}/>
+            <Bb label="LISTO" onClick={()=>setShowColConfig(false)}/>
+          </div>
+        </Modal>
+      )}
+
+      {/* Referencia de íconos */}
+      {showRefIconos&&(
+        <Modal title="REFERENCIA DE ÍCONOS" onClose={()=>setShowRefIconos(false)} width={340}>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {Object.entries(TIPO_ICONO).map(([tipo,icono])=>(
+              <div key={tipo} style={{display:"flex",alignItems:"center",gap:14,
+                padding:"8px 12px",background:B.deep,border:`1px solid ${B.border}`}}>
+                <span style={{fontSize:24}}>{icono}</span>
+                <span style={{fontSize:13,color:B.t1,fontWeight:600}}>{tipo.replace("_"," ")}</span>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
         <div>
           <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em",marginBottom:3}}>GESTIÓN DE</div>
           <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>CASOS OPERATIVOS</h1>
           <div style={{fontSize:11,color:B.t2,marginTop:2}}>
             {fil.length} de {casos.length} casos
-            {selIds.size>0&&<span style={{color:B.orange,marginLeft:10,fontWeight:700}}>· {selIds.size} seleccionados</span>}
+            {selIds.size>0&&<span style={{color:B.orange,marginLeft:10,fontWeight:700}}>· {selIds.size} sel.</span>}
           </div>
         </div>
-        <div style={{display:"flex",gap:9}}>
-          {selIds.size>0&&<Bb label="✕ LIMPIAR" onClick={()=>setSelIds(new Set())} ghost small color={B.t2}/>}
-          <Bb label="+ NUEVO CASO" onClick={onNew}/>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <Bb label="?" onClick={()=>setShowRefIconos(true)} ghost small color={B.t3} title="Referencia de íconos"/>
+          <Bb label="⚙ COLUMNAS" onClick={()=>setShowColConfig(true)} ghost small color={B.t2}/>
+          <Bb label="↺ ESTÁNDAR" onClick={vistaEstandar} ghost small color={B.t2}/>
+          {selIds.size>0&&<Bb label="✕" onClick={()=>setSelIds(new Set())} ghost small color={B.t2}/>}
+          {!esRolTecnico&&<Bb label="+ NUEVO CASO" onClick={onNew}/>}
         </div>
       </div>
-      <div className="card" style={{padding:12,marginBottom:12}}>
-        <div style={{display:"flex",gap:9,flexWrap:"wrap",marginBottom:8}}>
-          <input className="field" placeholder="🔍  Número, RUT, razón social, departamento..." style={{flex:2,minWidth:200}} value={search} onChange={e=>setSearch(e.target.value)}/>
-          <select className="field" style={{flex:1,minWidth:120}} value={fAsig} onChange={e=>setFAsig(e.target.value)}>
-            <option value="ALL">Todos</option>
-            <option value="ASIGNADO">✓ Asignados</option>
-            <option value="SIN_ASIGNAR">○ Sin asignar</option>
-          </select>
-          <Sel v={fEmp} onChange={setFEmp} ph="Todas las empresas" opts={EMPRESAS.map(e=>[e.codigo,e.nombre])}/>
-        </div>
-        <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-          <Sel v={fT}    onChange={setFT}    ph="Todos los tipos"       opts={TIPOS_PROCESO.map(t=>[t.codigo,`${t.icono} ${t.nombre}`])}/>
-          <Sel v={fE}    onChange={setFE}    ph="Todos los estados"     opts={ESTADOS.map(s=>[s,s])}/>
-          <Sel v={fP}    onChange={setFP}    ph="Todas las prioridades" opts={PRIORS.map(p=>[p,p])}/>
-          <Sel v={fTier} onChange={setFTier} ph="Todos los tiers"       opts={["VIP","T1a","T1b","T2"].map(t=>[t,t])}/>
-        </div>
+
+      {/* Filtros */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
+        <input className="field" placeholder="🔍 Número, razón social, RUT, dirección..."
+          style={{flex:2,minWidth:200}} value={search} onChange={e=>setSearch(e.target.value)}/>
+        <FiltroMultiple label="Estado" valor={fE} onChange={setFE}
+          opciones={ESTADOS.map(s=>[s,s])}/>
+        <FiltroMultiple label="Tipo" valor={fT} onChange={setFT}
+          opciones={TIPOS_PROCESO.map(t=>[t.codigo,`${TIPO_ICONO[t.codigo]||"◈"} ${t.nombre}`])}/>
+        <FiltroMultiple label="Prioridad" valor={fP} onChange={setFP}
+          opciones={PRIORS.map(p=>[p,p])}/>
+        <FiltroMultiple label="Tier" valor={fTier} onChange={setFTier}
+          opciones={["VIP","T1a","T1b","T2"].map(t=>[t,t])}/>
+        {!esRolTecnico&&<FiltroMultiple label="Empresa" valor={fEmp} onChange={setFEmp}
+          opciones={EMPRESAS.map(e=>[e.codigo,e.nombre])}/>}
+        <FiltroMultiple label="Asignación" valor={fAsig} onChange={setFAsig}
+          opciones={[["ASIGNADO","✓ Asignados"],["SIN_ASIGNAR","○ Sin asignar"]]}/>
       </div>
-      <div className="card" style={{overflow:"hidden"}}>
-        <table>
-          <thead><tr>
-            <th style={{width:36}}>
-              <input type="checkbox" checked={selIds.size===fil.length&&fil.length>0} onChange={toggleAll}
-                style={{width:14,height:14,accentColor:B.orange,cursor:"pointer"}}/>
-            </th>
-            <SortTh col="numero" label="NÚMERO"/>
-            <SortTh col="tipo_proceso" label="TIPO"/>
-            <SortTh col="razon_social" label="RUT / RAZÓN SOCIAL"/>
-            <SortTh col="departamento" label="DPTO"/>
-            <SortTh col="tier" label="TIER"/>
-            <SortTh col="estado" label="ESTADO"/>
-            <SortTh col="prioridad" label="PRIOR."/>
-            <SortTh col="franja_horaria" label="FRANJA"/>
-            <th>SLA</th>
-            <th>TÉCNICO</th>
-            <SortTh col="empresa_id" label="EMPRESA"/>
-          </tr></thead>
+
+      {/* Tabla */}
+      <div className="card" style={{overflow:"auto"}}>
+        <table style={{tableLayout:"fixed"}}>
+          <thead>
+            <tr>
+              <th style={{width:36}}>
+                <input type="checkbox" checked={selIds.size===fil.length&&fil.length>0}
+                  onChange={toggleAll} style={{width:14,height:14,accentColor:B.orange,cursor:"pointer"}}/>
+              </th>
+              {colsVisibles.map(col=>(
+                <th key={col.id} style={{width:col.ancho,cursor:"pointer",whiteSpace:"nowrap",userSelect:"none"}}
+                  onClick={()=>toggleSort(col.id)}>
+                  {col.label}{sortCol===col.id?(sortDir==="asc"?" ▲":" ▼"):""}
+                </th>
+              ))}
+            </tr>
+          </thead>
           <tbody>
             {fil.map(c=>{
-              const tp=TIPOS_PROCESO.find(t=>t.codigo===c.tipo_proceso);
-              const sl=slaInfo(c.sla_deadline,c.estado);
-              const emp=EMPRESAS.find(e=>e.codigo===c.empresa_id);
-              const tec=tecnicos.find(t=>(t.auth_id||t.id)===c.tecnico_id);
               const sel=selIds.has(c.id);
-              return (
-                <tr key={c.id} style={{cursor:"pointer",background:sel?B.orangeDim:"transparent"}} onClick={()=>onSelect(c)}>
+              return(
+                <tr key={c.id} style={{cursor:"pointer",background:sel?B.orangeDim:"transparent"}}
+                  onClick={()=>onSelect(c)}>
                   <td onClick={e=>toggleSel(c.id,e)}>
                     <input type="checkbox" checked={sel} onChange={()=>{}}
                       style={{width:14,height:14,accentColor:B.orange,cursor:"pointer"}}/>
                   </td>
-                  <td><div style={{display:"flex",alignItems:"center",gap:6}}>
-                    <span className="mono" style={{fontSize:11,color:B.orange,fontWeight:700}}>{c.numero||c.id_externo}</span>
-                    {c.es_incidente&&<span style={{fontSize:8,background:B.redDim,color:B.red,padding:"1px 5px",fontWeight:700}}>INC</span>}
-                  </div></td>
-                  <td><div style={{display:"flex",alignItems:"center",gap:5}}><span>{tp?.icono||"◈"}</span><span style={{fontSize:11}}>{tp?.nombre||c.tipo_proceso}</span></div></td>
-                  <td><div style={{fontSize:11,fontWeight:600}}>{c.razon_social||"—"}</div><div className="mono" style={{fontSize:9,color:B.t3}}>{c.rut||"—"}</div></td>
-                  <td style={{fontSize:11,color:B.t2}}>{c.departamento||"—"}</td>
-                  <td><span style={{fontSize:10,fontWeight:700,color:TIER_C_L[c.tier]||B.t3}}>{c.tier||"—"}</span></td>
-                  <td><Tg label={c.estado||"ABIERTO"} color={EC[c.estado]||B.t3}/></td>
-                  <td><Tg label={c.prioridad||"—"} color={PC[c.prioridad]||B.t2}/></td>
-                  <td style={{fontSize:10,color:"#CC7700"}}>{c.franja_horaria||c.rango_horario||"—"}</td>
-                  <td><span className="mono" style={{fontSize:11,fontWeight:700,color:sl.color}}>{sl.label}</span></td>
-                  <td>{tec
-                    ?<span style={{fontSize:10,color:B.green,fontWeight:700}}>{tec.nombre} {tec.apellido}</span>
-                    :<span style={{fontSize:10,color:B.t3}}>Sin asignar</span>}
-                  </td>
-                  <td>{emp?<span style={{fontSize:11,color:emp.color,fontWeight:700}}>{emp.nombre}</span>:<span style={{color:B.t3}}>—</span>}</td>
+                  {colsVisibles.map(col=>(
+                    <td key={col.id} style={{overflow:"hidden",textOverflow:"ellipsis",maxWidth:col.ancho}}>
+                      {renderCelda(col,c)}
+                    </td>
+                  ))}
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {fil.length===0&&<div style={{padding:40,textAlign:"center",color:B.t3}}><div style={{fontSize:28,marginBottom:10}}>◎</div>Sin casos</div>}
+        {fil.length===0&&(
+          <div style={{padding:40,textAlign:"center",color:B.t3}}>
+            <div style={{fontSize:28,marginBottom:10}}>◎</div>Sin casos
+          </div>
+        )}
       </div>
-      {showAsigBar&&(
+
+      {/* Barra de acciones masivas */}
+      {selIds.size>0&&(
         <div style={{position:"fixed",bottom:0,left:210,right:0,background:B.panel,
-          borderTop:`2px solid ${B.orange}`,padding:"12px 24px",
-          display:"flex",alignItems:"center",gap:14,zIndex:100,
-          boxShadow:`0 -8px 32px ${B.orange}22`,flexWrap:"wrap"}}>
+          borderTop:`2px solid ${B.orange}`,padding:"10px 20px",
+          display:"flex",alignItems:"center",gap:12,zIndex:100,flexWrap:"wrap",
+          boxShadow:`0 -8px 32px ${B.orange}22`}}>
           <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,color:B.orange,flexShrink:0}}>
             {selIds.size} CASO{selIds.size>1?"S":""} SEL.
           </div>
           {empresasSeleccionadas.length>1&&(
-            <div style={{fontSize:10,color:B.yellow,background:B.yellowDim,padding:"3px 10px",border:`1px solid ${B.yellow}33`}}>
-              ⚠ {empresasSeleccionadas.length} empresas distintas
+            <div style={{fontSize:10,color:B.yellow,background:B.yellowDim,padding:"3px 8px"}}>
+              ⚠ {empresasSeleccionadas.length} empresas
             </div>
           )}
-          {/* Asignación de técnico */}
-          <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)} style={{flex:1,maxWidth:260}}>
-            <option value="">👤 Asignar técnico...</option>
-            {(tecnicosFiltrados.length>0?tecnicosFiltrados:tecnicos).map(t=>{
-              const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["CERRADO","RESUELTO"].includes(c.estado||"")).length;
-              return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} ({t.empresa_codigo}) — {carga} casos</option>;
-            })}
-          </select>
-          <Bb label={asignando?"ASIGNANDO...":"⚡ ASIGNAR"} onClick={asignarMasivo} disabled={!tecSel||asignando} small/>
-          {/* Activar encuesta */}
-          <div style={{width:1,height:30,background:B.border,flexShrink:0}}/>
-          <select className="field" value={encuestaSel} onChange={e=>setEncuestaSel(e.target.value)} style={{flex:1,maxWidth:220}}>
-            <option value="">📋 Activar encuesta...</option>
-            {encuestasMasivo.map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}
-          </select>
-          <Bb label={activandoEnc?"ACTIVANDO...":"📋 ACTIVAR"} onClick={activarEncuestaMasivo} disabled={!encuestaSel||activandoEnc} small ghost color={B.purple}/>
+          {!esRolTecnico&&<>
+            <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)} style={{flex:1,maxWidth:260}}>
+              <option value="">👤 Asignar técnico...</option>
+              {(tecnicosFiltrados.length>0?tecnicosFiltrados:tecnicos).map(t=>{
+                const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
+                return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} ({t.empresa_codigo}) — {carga} casos</option>;
+              })}
+            </select>
+            <Bb label={asignando?"...":"⚡ ASIGNAR"} onClick={asignarMasivo} disabled={!tecSel||asignando} small/>
+            <div style={{width:1,height:28,background:B.border}}/>
+            <select className="field" value={encuestaSel} onChange={e=>setEncSel(e.target.value)} style={{flex:1,maxWidth:200}}>
+              <option value="">📋 Activar encuesta...</option>
+              {encuestasMasivo.map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}
+            </select>
+            <Bb label={activandoEnc?"...":"📋 ACTIVAR"} onClick={activarEncuestaMasivo} disabled={!encuestaSel||activandoEnc} small ghost color={B.purple}/>
+          </>}
           <Bb label="✕" onClick={()=>setSelIds(new Set())} ghost small color={B.t2}/>
         </div>
       )}
     </div>
   );
 };
+
 
 const NuevoCaso = ({onSave,onCancel,loading}) => {
   const [f,setF]=useState({tipo_proceso:"SOPORTE",prioridad:"MEDIUM",descripcion:"",numero_serie:"",rut:"",razon_social:"",departamento:"",localidad:"",direccion:"",telefono:"",rubro:"",empresa_id:"",rango_horario:"Sin restricción",es_incidente:false,incidente_id:"",sla_horas:4,tiene_instrucciones:false,instrucciones_texto:""});
@@ -1016,6 +1134,301 @@ const MODELOS_TERMINAL = [
   "Move 2500","Move 5000","Lane 3000","Lane 7000",
   "Dx 8000","RX 5000","RX 7000"
 ];
+
+// ═══════════════════════════════════════════════════════════════
+// PANTALLA COMPLETA DE INSTRUCCIONES ESPECIALES
+// ═══════════════════════════════════════════════════════════════
+const PantallaInstrucciones = ({ caso, onConfirmar, confirmando }) => {
+  const instr = caso.instrucciones_especiales;
+  const [audioActivo, setAudioActivo] = useState(null);
+  const audioRef = useRef(null);
+
+  const toggleAudio = (url) => {
+    if (audioActivo === url) { audioRef.current?.pause(); setAudioActivo(null); }
+    else { setAudioActivo(url); setTimeout(() => audioRef.current?.play(), 50); }
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:B.void, display:"flex", flexDirection:"column",
+      alignItems:"center", justifyContent:"center", padding:20 }}>
+      <div style={{ width:"100%", maxWidth:600, animation:"popIn .3s ease" }}>
+        {/* Header */}
+        <div style={{ background:"#1A0400", border:`2px solid ${B.red}`,
+          borderBottom:"none", padding:"20px 24px", display:"flex", gap:14, alignItems:"center" }}>
+          <span style={{ fontSize:32 }}>⚠️</span>
+          <div>
+            <div style={{ fontFamily:"'Orbitron',sans-serif", fontSize:14, fontWeight:900,
+              color:B.red, letterSpacing:".08em" }}>INSTRUCCIONES ESPECIALES</div>
+            <div style={{ fontSize:11, color:B.t2, marginTop:3 }}>
+              Leé con atención antes de comenzar · {caso.razon_social}
+            </div>
+          </div>
+        </div>
+
+        {/* Contenido */}
+        <div style={{ background:"#0E0400", border:`2px solid ${B.red}`,
+          borderTop:`1px solid ${B.red}44`, borderBottom:"none", padding:24 }}>
+          {instr?.texto && (
+            <div style={{ fontSize:15, color:B.t1, lineHeight:1.8, marginBottom:16,
+              padding:"14px 16px", background:B.deep,
+              borderLeft:`4px solid ${B.orange}` }}>
+              {instr.texto}
+            </div>
+          )}
+          {instr?.adjuntos?.length > 0 && (
+            <div style={{ display:"flex", flexWrap:"wrap", gap:12, marginTop:12 }}>
+              {instr.adjuntos.map((adj, i) => {
+                const esImg = adj.tipo?.startsWith("image/");
+                const esAud = adj.tipo?.startsWith("audio/");
+                return (
+                  <div key={i} style={{ border:`1px solid ${B.border}`, background:B.card, overflow:"hidden" }}>
+                    {esImg && (
+                      <a href={adj.url} target="_blank" rel="noopener noreferrer">
+                        <img src={adj.url} alt={adj.nombre}
+                          style={{ width:180, height:130, objectFit:"cover", display:"block" }}/>
+                      </a>
+                    )}
+                    {esAud && (
+                      <div style={{ padding:"10px 14px", display:"flex", alignItems:"center", gap:10, minWidth:220 }}>
+                        <button onClick={() => toggleAudio(adj.url)}
+                          style={{ width:36, height:36, borderRadius:"50%",
+                            background:audioActivo===adj.url?B.orange:B.border,
+                            border:"none", cursor:"pointer",
+                            color:audioActivo===adj.url?"#050507":B.t1, fontSize:16,
+                            display:"flex", alignItems:"center", justifyContent:"center" }}>
+                          {audioActivo===adj.url ? "⏸" : "▶"}
+                        </button>
+                        <div>
+                          <div style={{ fontSize:11, fontWeight:700, color:B.t1 }}>{adj.nombre}</div>
+                          <div style={{ fontSize:9, color:B.t3 }}>Audio adjunto</div>
+                        </div>
+                        {audioActivo===adj.url && (
+                          <audio ref={audioRef} src={adj.url}
+                            onEnded={()=>setAudioActivo(null)} style={{ display:"none" }}/>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {instr?.autor && (
+            <div style={{ marginTop:16, fontSize:10, color:B.t3 }}>
+              Cargado por {instr.autor} · {fmtD(instr.ts)}
+            </div>
+          )}
+        </div>
+
+        {/* Botón confirmar */}
+        <button onClick={onConfirmar} disabled={confirmando}
+          style={{ width:"100%", padding:"18px 0",
+            background:confirmando?B.t3:B.red, border:"none", cursor:confirmando?"not-allowed":"pointer",
+            fontFamily:"'Orbitron',sans-serif", fontWeight:900, fontSize:14,
+            color:"#050507", letterSpacing:".1em", transition:"all .2s",
+            borderTop:`2px solid ${B.red}` }}>
+          {confirmando ? "CONFIRMANDO..." : "✓ CONFIRMO QUE LEÍ LAS INSTRUCCIONES — CONTINUAR"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
+// PANTALLA DE FINALIZAR — flujo paso a paso
+// ═══════════════════════════════════════════════════════════════
+const PantallaFinalizar = ({ caso, user, perfil, onVolver, onFinalizado }) => {
+  const [paso, setPaso] = useState(1); // 1=resolvio 2=modelo+serie 3=cierre_st
+  const [resolvio, setResolvio] = useState(null);
+  const [modelo, setModelo] = useState("");
+  const [serie, setSerie] = useState("");
+  const [showScan, setShowScan] = useState(false);
+  const [formCierre, setFormCierre] = useState({
+    descripcion_problema:"", como_resolvio:"", requirio_n2:null
+  });
+  const [saving, setSaving] = useState(false);
+
+  const esServicioTecnico = ["SERVICIO_TECNICO","SOPORTE"].includes((caso.tipo_proceso||"").toUpperCase());
+
+  const continuar = async () => {
+    if (paso === 1) { setPaso(2); return; }
+    if (paso === 2) {
+      if (resolvio && esServicioTecnico) { setPaso(3); return; }
+      // No ST o No resolvio → finalizar directo
+      await guardar();
+      return;
+    }
+    if (paso === 3) { await guardar(); return; }
+  };
+
+  const guardar = async () => {
+    setSaving(true);
+    const updates = {
+      estado:"FINALIZADO",
+      resolvio: resolvio === true,
+      cierre_modelo_terminal: modelo,
+      cierre_serie_terminal: serie,
+      ...(paso === 3 ? {
+        cierre_descripcion_problema: formCierre.descripcion_problema,
+        cierre_como_resolvio: formCierre.como_resolvio,
+        cierre_requirio_n2: formCierre.requirio_n2,
+        cierre_completado: true,
+        cierre_at: new Date().toISOString(),
+      } : {}),
+    };
+    await onFinalizado(updates, resolvio);
+    setSaving(false);
+  };
+
+  const PASOS_TITULO = ["","¿RESOLVISTE EL PROBLEMA?","DATOS DEL EQUIPO","DETALLES DE LA RESOLUCIÓN"];
+  const puedeAvanzar = paso===1 ? resolvio!==null
+    : paso===2 ? modelo && serie.trim()
+    : formCierre.descripcion_problema.trim() && formCierre.como_resolvio.trim() && formCierre.requirio_n2!==null;
+
+  return (
+    <>
+      {showScan && (
+        <EscanerBarras onScan={v=>{setSerie(v);setShowScan(false);}} onClose={()=>setShowScan(false)}/>
+      )}
+      <div style={{ minHeight:"100vh", background:B.void, display:"flex",
+        flexDirection:"column", alignItems:"center", padding:20, paddingTop:40 }}>
+        <div style={{ width:"100%", maxWidth:560 }}>
+
+          {/* Header */}
+          <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:24 }}>
+            <button onClick={onVolver}
+              style={{ background:"none", border:`1px solid ${B.border}`, color:B.t2,
+                cursor:"pointer", padding:"6px 12px", fontSize:11, fontFamily:"'Orbitron',sans-serif" }}>
+              ← VOLVER
+            </button>
+            <div>
+              <div style={{ fontSize:9, color:B.t3, fontWeight:700, letterSpacing:".18em" }}>
+                PASO {paso} DE {resolvio && esServicioTecnico ? 3 : 2}
+              </div>
+              <div style={{ fontFamily:"'Orbitron',sans-serif", fontSize:16, fontWeight:900, color:B.t1 }}>
+                🏁 {PASOS_TITULO[paso]}
+              </div>
+            </div>
+          </div>
+
+          {/* Info del caso */}
+          <div style={{ background:B.card, border:`1px solid ${B.border}`, padding:"10px 14px",
+            marginBottom:20, display:"flex", gap:10, alignItems:"center" }}>
+            <span style={{ fontSize:18 }}>{({INSTALACION:"📦",SERVICIO_TECNICO:"🔧",RETIRO:"🔄",VISITA_PROACTIVA:"👁"})[caso.tipo_proceso]||"◈"}</span>
+            <div>
+              <div style={{ fontSize:12, fontWeight:700, color:B.t1 }}>{caso.razon_social}</div>
+              <div style={{ fontSize:10, color:B.t3 }}>{caso.numero||caso.id_externo} · {caso.departamento}</div>
+            </div>
+          </div>
+
+          {/* PASO 1 — ¿Resolviste? */}
+          {paso===1 && (
+            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              {[
+                ["✓ SÍ, lo resolví", true, B.green],
+                ["✗ NO pude resolverlo", false, B.red]
+              ].map(([label, val, color]) => (
+                <button key={String(val)} onClick={()=>setResolvio(val)}
+                  style={{ padding:"24px 20px", border:`2px solid ${resolvio===val?color:B.border}`,
+                    background:resolvio===val?color+"22":B.card,
+                    color:resolvio===val?color:B.t2, cursor:"pointer",
+                    fontSize:16, fontWeight:700, textAlign:"left",
+                    transition:"all .2s", display:"flex", alignItems:"center", gap:14 }}>
+                  <span style={{ fontSize:28 }}>{val?"✅":"❌"}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* PASO 2 — Modelo y serie */}
+          {paso===2 && (
+            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+              <div>
+                <FL label="Modelo del equipo" req/>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                  {MODELOS_TERMINAL.map(m=>(
+                    <button key={m} onClick={()=>setModelo(m)}
+                      style={{ padding:"10px 16px",
+                        border:`1px solid ${modelo===m?B.orange:B.border}`,
+                        background:modelo===m?B.orangeDim:B.deep,
+                        color:modelo===m?B.orange:B.t2, cursor:"pointer",
+                        fontSize:13, fontWeight:modelo===m?700:400, transition:"all .15s" }}>
+                      {modelo===m?"◉ ":"○ "}{m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <FL label="Serie del equipo del cliente" req/>
+                <div style={{ display:"flex", gap:8 }}>
+                  <input className="field" style={{ flex:1, fontSize:15, letterSpacing:".06em" }}
+                    placeholder="Ingresá o escaneá la serie..."
+                    value={serie} onChange={e=>setSerie(e.target.value)}/>
+                  <Bb label="📷 ESCANEAR" onClick={()=>setShowScan(true)} ghost small color={B.blue}/>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 3 — Cierre ST (solo si resolvio + servicio técnico) */}
+          {paso===3 && (
+            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              <div>
+                <FL label="Descripción del problema" req/>
+                <textarea className="field" rows={3} style={{ resize:"vertical" }}
+                  placeholder="Describí el problema que tenía el equipo..."
+                  value={formCierre.descripcion_problema}
+                  onChange={e=>setFormCierre(f=>({...f,descripcion_problema:e.target.value}))}/>
+              </div>
+              <div>
+                <FL label="Cómo lo resolviste" req/>
+                <textarea className="field" rows={3} style={{ resize:"vertical" }}
+                  placeholder="Describí la solución que aplicaste..."
+                  value={formCierre.como_resolvio}
+                  onChange={e=>setFormCierre(f=>({...f,como_resolvio:e.target.value}))}/>
+              </div>
+              <div>
+                <FL label="¿Requirió soporte N2?" req/>
+                <div style={{ display:"flex", gap:10 }}>
+                  {[["SÍ", true, B.red],["NO", false, B.green]].map(([l,v,c])=>(
+                    <button key={l} onClick={()=>setFormCierre(f=>({...f,requirio_n2:v}))}
+                      style={{ flex:1, padding:"12px 0",
+                        border:`1px solid ${formCierre.requirio_n2===v?c:B.border}`,
+                        background:formCierre.requirio_n2===v?c+"22":B.deep,
+                        color:formCierre.requirio_n2===v?c:B.t2,
+                        cursor:"pointer", fontSize:14, fontWeight:700, transition:"all .15s" }}>
+                      {formCierre.requirio_n2===v?"◉ ":"○ "}{l}
+                    </button>
+                  ))}
+                </div>
+                {formCierre.requirio_n2===true && (
+                  <div style={{ marginTop:8, padding:"8px 12px", background:B.redDim,
+                    border:`1px solid ${B.red}33`, fontSize:11, color:B.red }}>
+                    ⚠ Caso registrado con soporte N2 para análisis posterior
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Botón continuar/finalizar */}
+          <button onClick={continuar} disabled={!puedeAvanzar||saving}
+            style={{ width:"100%", marginTop:28, padding:"16px 0",
+              background:puedeAvanzar&&!saving?B.green:B.t3,
+              border:"none", cursor:puedeAvanzar&&!saving?"pointer":"not-allowed",
+              fontFamily:"'Orbitron',sans-serif", fontWeight:900, fontSize:14,
+              color:"#050507", letterSpacing:".1em", transition:"all .2s" }}>
+            {saving ? "GUARDANDO..." :
+              paso===1 ? "CONTINUAR →" :
+              paso===2 && resolvio && esServicioTecnico ? "CONTINUAR →" :
+              "✓ FINALIZAR CASO"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
 
 const EscanerBarras = ({ onScan, onClose }) => {
   const videoRef = useRef(null);
@@ -1494,63 +1907,60 @@ const EST_COLOR={
 const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   const [caso,setCaso]        = useState(casoInit);
   const [loading,setLoading]  = useState(false);
+  const [confirmando,setConf] = useState(false);
   const [nota,setNota]        = useState("");
-  const [showInstr,setShowInstr] = useState(false);
+  const [showInstr,setShowInstr]   = useState(false);
   const [showCierre,setShowCierre] = useState(false);
   const [encuestaActiva,setEncuestaActiva] = useState(null);
   const [encuestasDelCaso,setEncuestasDelCaso] = useState([]);
-  // Modales de acción
   const [showPausar,setShowPausar]     = useState(false);
   const [showCancelar,setShowCancelar] = useState(false);
-  const [showFinalizar,setShowFinalizar] = useState(false);
+  const [showFinalizar,setShowFinalizar] = useState(false); // pantalla completa
   const [showRecoord,setShowRecoord]   = useState(false);
-  // Contador de tiempo
-  const [tiempoSegundos,setTiempoSeg] = useState(caso.tiempo_total_seg||0);
+  // Pantalla de instrucciones completa
+  const [pantallaInstr,setPantallaInstr] = useState(false);
+  const [tiempoSegundos,setTiempoSeg] = useState(casoInit.tiempo_total_seg||0);
   const timerRef = useRef(null);
 
   const tp  = TIPOS_PROCESO.find(t=>t.codigo===caso.tipo_proceso);
   const emp = EMPRESAS.find(e=>e.codigo===caso.empresa_id);
   const vencido = caso.sla_deadline&&new Date(caso.sla_deadline)<new Date();
   const pct = caso.sla_deadline?Math.max(0,Math.min(100,100-(Date.now()-new Date(caso.created_at))/(new Date(caso.sla_deadline)-new Date(caso.created_at))*100)):100;
-
   const esRolTecnico = perfil?.rol==="TECNICO";
   const esRolSuperior = !esRolTecnico;
-  const esServicioTecnico = caso.tipo_proceso==="SERVICIO_TECNICO";
+  const esServicioTecnico = ["SERVICIO_TECNICO","SOPORTE"].includes((caso.tipo_proceso||"").toUpperCase());
   const tieneInstr = !!(caso.instrucciones_especiales?.texto||caso.instrucciones_especiales?.adjuntos?.length);
   const yaConfirmado = !!caso.instrucciones_especiales?.confirmado_por;
+  const estadoColor=EST_COLOR[caso.estado]?.(B)||B.t3;
 
-  // Cargar encuestas del caso
   useEffect(()=>{
     supabase.from("casos_encuestas").select("*, encuesta:encuesta_id(*)")
-      .eq("caso_id",caso.id)
-      .then(({data})=>setEncuestasDelCaso(data||[]));
+      .eq("caso_id",caso.id).then(({data})=>setEncuestasDelCaso(data||[]));
   },[caso.id]);
 
-  // Arrancar contador si está EN PROCESO
   useEffect(()=>{
     if(caso.estado==="EN_PROCESO"){
       timerRef.current=setInterval(()=>setTiempoSeg(s=>s+1),1000);
-    } else {
-      clearInterval(timerRef.current);
-    }
+    } else { clearInterval(timerRef.current); }
     return()=>clearInterval(timerRef.current);
   },[caso.estado]);
 
-  // Cuando técnico abre el caso y está ASIGNADO → pasa a EN PROCESO automáticamente
   useEffect(()=>{
     if(esRolTecnico && caso.estado==="ASIGNADO"){
-      // Verificar instrucciones primero
-      if(tieneInstr && !yaConfirmado) return; // espera confirmación
-      (async()=>{
-        await cambiarEstadoDirecto("EN_PROCESO","Técnico inició la atención del caso");
-      })();
+      if(tieneInstr && !yaConfirmado){
+        setPantallaInstr(true); // mostrar pantalla completa
+        return;
+      }
+      (async()=>{ await cambiarEstadoDirecto("EN_PROCESO","Técnico inició la atención del caso"); })();
+    }
+    // Si ya está EN PROCESO y tiene instrucciones sin confirmar
+    if(esRolTecnico && caso.estado==="EN_PROCESO" && tieneInstr && !yaConfirmado){
+      setPantallaInstr(true);
     }
   },[]);
 
   const fmtTiempo=(s)=>{
-    const h=Math.floor(s/3600);
-    const m=Math.floor((s%3600)/60);
-    const sg=s%60;
+    const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sg=s%60;
     return `${h>0?h+"h ":""}${m}min ${sg}seg`;
   };
 
@@ -1558,8 +1968,7 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     const entrada={id:Date.now(),tipo,texto,usuario:user.email,ts:new Date().toISOString()};
     const nuevo=[...(caso.historial||[]),entrada];
     await supabase.from("casos").update({historial:nuevo}).eq("id",caso.id);
-    setCaso(c=>({...c,historial:nuevo}));
-    return nuevo;
+    setCaso(c=>({...c,historial:nuevo})); return nuevo;
   };
 
   const actualizarCaso=async(updates,msgHistorial,tipoHistorial="ESTADO")=>{
@@ -1568,10 +1977,8 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     const payload={...updates,historial:h,updated_at:new Date().toISOString()};
     await supabase.from("casos").update(payload).eq("id",caso.id);
     const casActualizado={...caso,...payload};
-    setCaso(casActualizado);
-    if(onUpdate) onUpdate(casActualizado);
-    setLoading(false);
-    return casActualizado;
+    setCaso(casActualizado); if(onUpdate) onUpdate(casActualizado);
+    setLoading(false); return casActualizado;
   };
 
   const cambiarEstadoDirecto=async(nuevoEstado,msg)=>{
@@ -1579,18 +1986,18 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     toast(`Estado: ${nuevoEstado}`);
   };
 
-  // ── ACCIONES ──────────────────────────────────────────────
-
   const confirmarInstrucciones=async()=>{
-    setLoading(true);
+    if(confirmando) return; setConf(true);
     const instrActualizadas={...caso.instrucciones_especiales,confirmado_por:user.email,confirmado_ts:new Date().toISOString()};
     await supabase.from("casos").update({instrucciones_especiales:instrActualizadas}).eq("id",caso.id);
     await addHistorial("INSTRUCCIONES","✓ Técnico confirmó lectura de instrucciones especiales");
-    setCaso(c=>({...c,instrucciones_especiales:instrActualizadas}));
-    toast("✓ Instrucciones confirmadas");
-    setLoading(false);
-    // Ahora sí pasa a EN PROCESO
-    if(caso.estado==="ASIGNADO") await cambiarEstadoDirecto("EN_PROCESO","Técnico inició la atención del caso");
+    const casActualizado={...caso,instrucciones_especiales:instrActualizadas};
+    setCaso(casActualizado); if(onUpdate) onUpdate(casActualizado);
+    toast("✓ Instrucciones confirmadas"); setConf(false);
+    setPantallaInstr(false); // cerrar pantalla completa
+    if(["ASIGNADO"].includes(caso.estado)){
+      await cambiarEstadoDirecto("EN_PROCESO","Técnico inició la atención del caso");
+    }
   };
 
   const guardarInstrucciones=async(payload)=>{
@@ -1598,21 +2005,14 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     const accion=caso.instrucciones_especiales?.texto?"INSTRUCCIONES EDITADAS":"INSTRUCCIONES CARGADAS";
     await supabase.from("casos").update({instrucciones_especiales:payload}).eq("id",caso.id);
     await addHistorial("INSTRUCCIONES",accion+" por "+user.email);
-    setCaso(c=>({...c,instrucciones_especiales:payload}));
-    toast("✓ Instrucciones guardadas");
-    setLoading(false);
+    setCaso(c=>({...c,instrucciones_especiales:payload})); toast("✓ Instrucciones guardadas"); setLoading(false);
   };
 
   const pausar=async(motivo)=>{
     await actualizarCaso({estado:"PAUSADO",tiempo_total_seg:tiempoSegundos},`PAUSADO — Motivo: ${motivo}`,"PAUSA");
     toast("Caso pausado");
   };
-
-  const reanudar=async()=>{
-    await cambiarEstadoDirecto("EN_PROCESO","Caso reanudado");
-    toast("Caso reanudado — contador reiniciado");
-  };
-
+  const reanudar=async()=>{ await cambiarEstadoDirecto("EN_PROCESO","Caso reanudado"); toast("Caso reanudado"); };
   const cancelar=async(motivo)=>{
     await actualizarCaso({estado:"CANCELADO",tiempo_total_seg:tiempoSegundos},`CANCELADO — Motivo: ${motivo}`,"CANCELACION");
     toast("Caso cancelado");
@@ -1623,12 +2023,11 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
       setShowFinalizar(false); setShowCierre(true); return;
     }
     await actualizarCaso(
-      {estado:"FINALIZADO",tiempo_total_seg:tiempoSegundos,resolvio},
+      {estado:"FINALIZADO",tiempo_total_seg:tiempoSegundos,resolvio:resolvio===true},
       `FINALIZADO — ${resolvio?"Problema resuelto":"No resuelto"}`,
       "FINALIZACION"
     );
     toast(resolvio?"✓ Caso finalizado — problema resuelto":"Caso finalizado — no resuelto");
-    // Mostrar encuestas pendientes
     const pendientes=encuestasDelCaso.filter(e=>!e.completada);
     if(pendientes.length>0) setEncuestaActiva(pendientes[0]);
   };
@@ -1636,59 +2035,45 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   const guardarCierre=async(formCierre)=>{
     setLoading(true);
     const updates={
-      cierre_descripcion_problema: formCierre.descripcion_problema,
-      cierre_como_resolvio:        formCierre.como_resolvio,
-      cierre_modelo_terminal:      formCierre.modelo_terminal,
-      cierre_serie_terminal:       formCierre.serie_terminal,
-      cierre_requirio_n2:          formCierre.requirio_n2,
-      cierre_completado:           true,
-      cierre_at:                   new Date().toISOString(),
-      estado:                      "FINALIZADO",
-      resolvio:                    true,
-      tiempo_total_seg:            tiempoSegundos,
+      cierre_descripcion_problema:formCierre.descripcion_problema,
+      cierre_como_resolvio:formCierre.como_resolvio,
+      cierre_modelo_terminal:formCierre.modelo_terminal,
+      cierre_serie_terminal:formCierre.serie_terminal,
+      cierre_requirio_n2:formCierre.requirio_n2,
+      cierre_completado:true, cierre_at:new Date().toISOString(),
+      estado:"FINALIZADO", resolvio:true, tiempo_total_seg:tiempoSegundos,
     };
     const h=[...(caso.historial||[]),{id:Date.now(),tipo:"CIERRE",
       texto:`Caso resuelto · Modelo: ${formCierre.modelo_terminal} · N2: ${formCierre.requirio_n2?"Sí":"No"}`,
       usuario:user.email,ts:new Date().toISOString()}];
     await supabase.from("casos").update({...updates,historial:h}).eq("id",caso.id);
     const casActualizado={...caso,...updates,historial:h};
-    setCaso(casActualizado);
-    if(onUpdate) onUpdate(casActualizado);
-    setShowCierre(false);
-    toast("✓ Caso finalizado correctamente");
+    setCaso(casActualizado); if(onUpdate) onUpdate(casActualizado);
+    setShowCierre(false); toast("✓ Caso finalizado correctamente");
     const pendientes=encuestasDelCaso.filter(e=>!e.completada);
     if(pendientes.length>0) setEncuestaActiva(pendientes[0]);
     setLoading(false);
   };
 
   const recoordinar=async({nuevaFecha,nuevaFranja,motivo})=>{
-    const updates={
-      estado:"ASIGNADO", // reasigna al mismo técnico
-      franja_horaria:nuevaFranja,
-      fecha_recoordinacion:nuevaFecha,
-      tiempo_total_seg:tiempoSegundos,
-    };
-    await actualizarCaso(updates,
-      `RECOORDINADO — Nueva fecha: ${nuevaFecha} · Franja: ${nuevaFranja} · Motivo: ${motivo}`,
-      "RECOORDINACION");
-    toast("✓ Caso recoordinado — el técnico mantiene la asignación");
+    await actualizarCaso({
+      estado:"ASIGNADO", franja_horaria:nuevaFranja, rango_horario:nuevaFranja,
+      fecha_recoordinacion:nuevaFecha, tiempo_total_seg:tiempoSegundos,
+    },`RECOORDINADO — Nueva fecha: ${nuevaFecha} · Franja: ${nuevaFranja} · Motivo: ${motivo}`,"RECOORDINACION");
+    toast("✓ Caso recoordinado");
   };
 
   const agregarNota=async()=>{
-    if(!nota.trim()) return;
-    setLoading(true);
-    await addHistorial("NOTA",nota.trim());
-    setNota(""); setLoading(false);
-    toast("Nota registrada");
+    if(!nota.trim()) return; setLoading(true);
+    await addHistorial("NOTA",nota.trim()); setNota(""); setLoading(false); toast("Nota registrada");
   };
 
   const guardarEncuestaConfig=async(encuestaId,respuestas)=>{
-    await supabase.from("casos_encuestas").update({
-      completada:true,respuestas,completada_at:new Date().toISOString()
-    }).eq("caso_id",caso.id).eq("encuesta_id",encuestaId);
+    await supabase.from("casos_encuestas").update({completada:true,respuestas,completada_at:new Date().toISOString()})
+      .eq("caso_id",caso.id).eq("encuesta_id",encuestaId);
     await addHistorial("ENCUESTA","Encuesta completada por el técnico");
-    const pendientes=encuestasDelCaso.filter(e=>!e.completada&&e.encuesta_id!==encuestaId);
     setEncuestasDelCaso(prev=>prev.map(e=>e.encuesta_id===encuestaId?{...e,completada:true}:e));
+    const pendientes=encuestasDelCaso.filter(e=>!e.completada&&e.encuesta_id!==encuestaId);
     setEncuestaActiva(pendientes.length>0?pendientes[0]:null);
     toast("+20 XP · Encuesta completada ✓");
   };
@@ -1700,26 +2085,41 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     INSTRUCCIONES:B=>B.orange,CIERRE:B=>B.green,ASIGNACION:B=>B.blue,
     PAUSA:B=>B.purple,CANCELACION:B=>B.red,FINALIZACION:B=>B.green,RECOORDINACION:B=>B.teal};
 
-  const estadoColor = EST_COLOR[caso.estado]?.(B)||B.t3;
+  // ── PANTALLA COMPLETA DE INSTRUCCIONES ──
+  if(pantallaInstr && tieneInstr && !yaConfirmado){
+    return <PantallaInstrucciones caso={caso} onConfirmar={confirmarInstrucciones} confirmando={confirmando}/>;
+  }
+
+  // ── PANTALLA COMPLETA DE FINALIZAR ──
+  if(showFinalizar){
+    return <PantallaFinalizar
+      caso={caso} user={user} perfil={perfil}
+      onVolver={()=>setShowFinalizar(false)}
+      onFinalizado={async(updates,resolvio)=>{
+        const h=[...(caso.historial||[]),{id:Date.now(),tipo:"FINALIZACION",
+          texto:`FINALIZADO — ${resolvio?"Problema resuelto":"No resuelto"} · Modelo: ${updates.cierre_modelo_terminal||""} · Serie: ${updates.cierre_serie_terminal||""}`,
+          usuario:user.email,ts:new Date().toISOString()}];
+        await supabase.from("casos").update({...updates,historial:h,updated_at:new Date().toISOString()}).eq("id",caso.id);
+        const casActualizado={...caso,...updates,historial:h};
+        setCaso(casActualizado); if(onUpdate) onUpdate(casActualizado);
+        toast("✓ Caso finalizado");
+        setShowFinalizar(false);
+        onBack(); // volver a lista de casos
+      }}
+    />;
+  }
 
   return(
     <div style={{padding:"0 0 40px"}}>
-      {/* Modales */}
       {showInstr&&<ModalInstrucciones caso={caso} user={user} onClose={()=>setShowInstr(false)} onSave={guardarInstrucciones}/>}
       {showCierre&&<ModalCierre caso={caso} user={user} onClose={()=>setShowCierre(false)} onGuardar={guardarCierre}/>}
       {encuestaActiva&&<ModalEncuestaConfig encuesta={encuestaActiva.encuesta} caso={caso} user={user} onClose={()=>setEncuestaActiva(null)} onSave={guardarEncuestaConfig}/>}
-
-      {/* Modal Pausar */}
       {showPausar&&<ModalTextoLibre titulo="⏸ PAUSAR CASO" label="Motivo de la pausa" placeholder="Explicá por qué pausás el caso..." onClose={()=>setShowPausar(false)} onGuardar={async(txt)=>{await pausar(txt);setShowPausar(false);}}/>}
-      {/* Modal Cancelar */}
       {showCancelar&&<ModalTextoLibre titulo="✗ CANCELAR CASO" label="Motivo de la cancelación" placeholder="Explicá por qué cancelás el caso..." color={B.red} onClose={()=>setShowCancelar(false)} onGuardar={async(txt)=>{await cancelar(txt);setShowCancelar(false);}}/>}
-      {/* Modal Finalizar */}
-      {showFinalizar&&<ModalFinalizar onClose={()=>setShowFinalizar(false)} onGuardar={finalizar}/>}
-      {/* Modal Recoordinar */}
       {showRecoord&&<ModalRecoordinar onClose={()=>setShowRecoord(false)} onGuardar={async(data)=>{await recoordinar(data);setShowRecoord(false);}}/>}
 
-      {/* ── INSTRUCCIONES ESPECIALES — siempre arriba ── */}
-      <BloqueInstrucciones instrucciones={caso.instrucciones_especiales} onConfirmar={confirmarInstrucciones} yaConfirmado={yaConfirmado} esRolTecnico={esRolTecnico}/>
+      {/* Instrucciones confirmadas — badge en cabezal */}
+      <BloqueInstrucciones instrucciones={caso.instrucciones_especiales} onConfirmar={confirmarInstrucciones} yaConfirmado={yaConfirmado} esRolTecnico={false}/>
 
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
@@ -1731,71 +2131,46 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
             {caso.tier&&<Tg label={caso.tier} color={{VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green}[caso.tier]||B.t2}/>}
             <Tg label={caso.estado} color={estadoColor}/>
             {caso.es_incidente&&<Tg label={`INC ${caso.incidente_id||""}`} color={B.red}/>}
-            {tieneInstr&&<Tg label={yaConfirmado?"⚠ LEÍDAS":"⚠ INSTRUCCIONES"} color={yaConfirmado?B.green:B.orange}/>}
+            {tieneInstr&&yaConfirmado&&<Tg label="⚠ INSTRUCCIONES LEÍDAS" color={B.green}/>}
           </div>
           <div style={{fontSize:12,color:B.t2,marginTop:4}}>{caso.razon_social} {caso.rut?`· RUT: ${caso.rut}`:""}</div>
         </div>
-        {/* Contador de tiempo */}
         <div style={{textAlign:"right",background:B.card,border:`1px solid ${caso.estado==="EN_PROCESO"?B.yellow:B.border}`,padding:"8px 14px"}}>
           <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>TIEMPO EN CAMPO</div>
-          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:16,fontWeight:700,
-            color:caso.estado==="EN_PROCESO"?B.yellow:B.t2}}>
+          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:16,fontWeight:700,color:caso.estado==="EN_PROCESO"?B.yellow:B.t2}}>
             {fmtTiempo(tiempoSegundos)}
           </div>
           {caso.estado==="EN_PROCESO"&&<div style={{fontSize:8,color:B.yellow}} className="live">● CONTANDO</div>}
         </div>
       </div>
 
-      {/* ── PANEL DE ACCIONES DEL TÉCNICO ── */}
-      {(esRolTecnico||esRolSuperior)&&(
-        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
-          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ ACCIONES</div>
-          <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-            {/* EN PROCESO */}
-            {caso.estado==="PAUSADO"&&(
-              <Bb label="▶ REANUDAR" onClick={reanudar} color={B.blue}/>
-            )}
-            {/* PAUSAR */}
-            {caso.estado==="EN_PROCESO"&&(
-              <Bb label="⏸ PAUSAR" onClick={()=>setShowPausar(true)} color={B.purple} ghost/>
-            )}
-            {/* FINALIZAR */}
-            {["EN_PROCESO","PAUSADO"].includes(caso.estado)&&(
-              <Bb label="🏁 FINALIZAR" onClick={()=>setShowFinalizar(true)} color={B.green}/>
-            )}
-            {/* RECOORDINAR */}
-            {["EN_PROCESO","PAUSADO","ASIGNADO"].includes(caso.estado)&&(
-              <Bb label="📅 RECOORDINAR" onClick={()=>setShowRecoord(true)} color={B.teal} ghost/>
-            )}
-            {/* CANCELAR */}
-            {["EN_PROCESO","PAUSADO","ASIGNADO"].includes(caso.estado)&&(
-              <Bb label="✗ CANCELAR" onClick={()=>setShowCancelar(true)} color={B.red} ghost/>
-            )}
-            {/* INSTRUCCIONES (supervisor/director) */}
-            {esRolSuperior&&(
-              <Bb label={tieneInstr?"✎ INSTRUCCIONES":"+ INSTRUCCIONES"} onClick={()=>setShowInstr(true)} ghost small color={B.orange}/>
-            )}
-          </div>
-          {caso.estado==="EN_PROCESO"&&(
-            <div style={{marginTop:12}}>
-              <div style={{display:"flex",gap:8}}>
-                <input className="field" style={{flex:1}} placeholder="Agregar nota al historial..."
-                  value={nota} onChange={e=>setNota(e.target.value)}
-                  onKeyDown={e=>e.key==="Enter"&&agregarNota()}/>
-                <Bb label="NOTA" onClick={agregarNota} disabled={!nota.trim()||loading} small ghost/>
-              </div>
-            </div>
-          )}
+      {/* Acciones */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ ACCIONES</div>
+        <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+          {caso.estado==="PAUSADO"&&<Bb label="▶ REANUDAR" onClick={reanudar} color={B.blue}/>}
+          {caso.estado==="EN_PROCESO"&&<Bb label="⏸ PAUSAR" onClick={()=>setShowPausar(true)} color={B.purple} ghost/>}
+          {["EN_PROCESO","PAUSADO"].includes(caso.estado)&&<Bb label="🏁 FINALIZAR" onClick={()=>setShowFinalizar(true)} color={B.green}/>}
+          {["EN_PROCESO","PAUSADO","ASIGNADO"].includes(caso.estado)&&<Bb label="📅 RECOORDINAR" onClick={()=>setShowRecoord(true)} color={B.teal} ghost/>}
+          {["EN_PROCESO","PAUSADO","ASIGNADO"].includes(caso.estado)&&<Bb label="✗ CANCELAR" onClick={()=>setShowCancelar(true)} color={B.red} ghost/>}
+          {esRolSuperior&&<Bb label={tieneInstr?"✎ INSTRUCCIONES":"+ INSTRUCCIONES"} onClick={()=>setShowInstr(true)} ghost small color={B.orange}/>}
         </div>
-      )}
+        {caso.estado==="EN_PROCESO"&&(
+          <div style={{marginTop:12,display:"flex",gap:8}}>
+            <input className="field" style={{flex:1}} placeholder="Agregar nota al historial..."
+              value={nota} onChange={e=>setNota(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&agregarNota()}/>
+            <Bb label="NOTA" onClick={agregarNota} disabled={!nota.trim()||loading} small ghost/>
+          </div>
+        )}
+      </div>
 
-      {/* ── DATOS DEL CASO ── */}
+      {/* Datos */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
         <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
           <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ DATOS DEL CLIENTE</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[["Terminal",caso.numero_serie],["RUT",caso.rut],["Razón Social",caso.razon_social],
-              ["Teléfono",caso.telefono],["Rubro",caso.rubro],["Dirección",caso.direccion]].map(([l,v])=>v&&(
+            {[["Terminal",caso.numero_serie],["RUT",caso.rut],["Razón Social",caso.razon_social],["Teléfono",caso.telefono],["Rubro",caso.rubro],["Dirección",caso.direccion]].map(([l,v])=>v&&(
               <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
               <div style={{fontSize:12,color:B.t1,marginTop:2}}>{v}</div></div>
             ))}
@@ -1804,9 +2179,7 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
         <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
           <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ DATOS OPERATIVOS</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[["Empresa",emp?.nombre||caso.empresa_id],["Departamento",caso.departamento],
-              ["Localidad",caso.localidad],["Franja",caso.franja_horaria||caso.rango_horario],
-              ["Prioridad",caso.prioridad],["Creado",fmtD(caso.created_at)]].map(([l,v])=>v&&(
+            {[["Empresa",emp?.nombre||caso.empresa_id],["Departamento",caso.departamento],["Localidad",caso.localidad],["Franja",caso.franja_horaria||caso.rango_horario],["Prioridad",caso.prioridad],["Creado",fmtD(caso.created_at)]].map(([l,v])=>v&&(
               <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
               <div style={{fontSize:12,color:B.t1,marginTop:2}}>{v}</div></div>
             ))}
@@ -1818,23 +2191,20 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
                 <span style={{fontSize:10,color:vencido?B.red:B.green,fontWeight:700}}>{vencido?"⚠ VENCIDO":"✓ EN TIEMPO"}</span>
               </div>
               <div style={{height:4,background:B.deep,borderRadius:2}}>
-                <div style={{height:4,width:`${pct}%`,background:vencido?B.red:pct<30?B.orange:B.green,borderRadius:2,transition:"width .3s"}}/>
+                <div style={{height:4,width:`${pct}%`,background:vencido?B.red:pct<30?B.orange:B.green,borderRadius:2}}/>
               </div>
-              <div style={{fontSize:10,color:B.t3,marginTop:4}}>Vence: {fmtD(caso.sla_deadline)}</div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Datos de cierre técnico */}
+      {/* Cierre técnico */}
       {caso.cierre_completado&&(
         <div style={{background:`${B.green}11`,border:`1px solid ${B.green}33`,borderLeft:`3px solid ${B.green}`,padding:"12px 16px",marginBottom:16}}>
           <div style={{fontSize:10,color:B.green,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>✅ CIERRE TÉCNICO</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[["Problema",caso.cierre_descripcion_problema],["Solución",caso.cierre_como_resolvio],
-              ["Modelo",caso.cierre_modelo_terminal],["Serie",caso.cierre_serie_terminal],
-              ["Soporte N2",caso.cierre_requirio_n2?"✓ SÍ REQUIRIÓ":"✗ NO REQUIRIÓ"]].map(([l,v])=>v&&(
-              <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
+            {[["Problema",caso.cierre_descripcion_problema],["Solución",caso.cierre_como_resolvio],["Modelo",caso.cierre_modelo_terminal],["Serie",caso.cierre_serie_terminal],["Soporte N2",caso.cierre_requirio_n2?"✓ SÍ":"✗ NO"]].map(([l,v])=>v&&(
+              <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600}}>{l}</div>
               <div style={{fontSize:12,color:l==="Soporte N2"&&caso.cierre_requirio_n2?B.red:B.t1,fontWeight:l==="Soporte N2"?700:400,marginTop:2}}>{v}</div></div>
             ))}
           </div>
@@ -1863,8 +2233,7 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
         {historial.length===0&&<div style={{color:B.t3,fontSize:12,textAlign:"center",padding:20}}>Sin entradas</div>}
         <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:320,overflowY:"auto"}}>
           {[...historial].reverse().map(h=>(
-            <div key={h.id} style={{display:"flex",gap:10,padding:"8px 10px",background:B.deep,border:`1px solid ${B.border}`,
-              borderLeft:`3px solid ${HIST_COL[h.tipo]?.(B)||B.t3}`}}>
+            <div key={h.id} style={{display:"flex",gap:10,padding:"8px 10px",background:B.deep,border:`1px solid ${B.border}`,borderLeft:`3px solid ${HIST_COL[h.tipo]?.(B)||B.t3}`}}>
               <span style={{fontSize:16,flexShrink:0}}>{HIST_ICON[h.tipo]||"📌"}</span>
               <div style={{flex:1}}>
                 <div style={{fontSize:12,color:HIST_COL[h.tipo]?.(B)||B.t1,fontWeight:600}}>{h.texto}</div>
@@ -1877,8 +2246,6 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     </div>
   );
 };
-
-// ─── MODAL TEXTO LIBRE (pausar / cancelar) ──────────────────
 const ModalTextoLibre=({titulo,label,placeholder,color=B.orange,onClose,onGuardar})=>{
   const [texto,setTexto]=useState(""); const [saving,setSaving]=useState(false);
   return(
@@ -3802,11 +4169,17 @@ export default function App(){
   useEffect(()=>{
     if(!session)return;
     (async()=>{
-      const{data}=await supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(200);
-      setCasos(data||[]);
-      // Cargar perfil completo del usuario
+      // Cargar perfil primero para saber el rol
       const{data:p}=await supabase.from("usuarios").select("*").eq("auth_id",session.user.id).maybeSingle();
       if(p){ setPerfil(p); if(p.minutos_recordatorio) setMinutosAntes(p.minutos_recordatorio); }
+      // BUG6: técnico solo ve sus casos activos (no finalizados/cancelados)
+      let query=supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(500);
+      if(p?.rol==="TECNICO"){
+        query=query.eq("tecnico_id",p.auth_id||p.id)
+          .not("estado","in","(FINALIZADO,CANCELADO)");
+      }
+      const{data}=await query;
+      setCasos(data||[]);
     })();
   },[session]);
 
@@ -3832,7 +4205,12 @@ export default function App(){
   };
 
   const recargarCasos=async()=>{
-    const{data}=await supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(200);
+    let query=supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(500);
+    if(perfil?.rol==="TECNICO"){
+      query=query.eq("tecnico_id",perfil.auth_id||perfil.id)
+        .not("estado","in","(FINALIZADO,CANCELADO)");
+    }
+    const{data}=await query;
     setCasos(data||[]);
   };
 
@@ -3863,7 +4241,7 @@ export default function App(){
         <main style={{flex:1,overflowY:"auto",padding:"24px 28px"}}>
           {view==="mision"&&<Mision casos={casos} setView={setView}/>}
           {view==="ruta"&&<MiRutaDelDia user={user} toast={toast} perfil={perfil}/>}
-          {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);setView("detalle");}} onNew={()=>setView("nuevo")}/>}
+          {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);setView("detalle");}} onNew={()=>setView("nuevo")}/>}
           {view==="nuevo"&&<NuevoCaso onCancel={()=>setView("casos")} loading={false} onSave={async(f)=>{
             const tp=TIPOS_PROCESO.find(t=>t.codigo===f.tipo_proceso);
             const instrEsp = f.tiene_instrucciones && f.instrucciones_texto?.trim()
