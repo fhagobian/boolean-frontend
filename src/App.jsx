@@ -1054,9 +1054,10 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
                     overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                     {c.razon_social||"Sin nombre"}
                   </div>
-                  <div style={{fontSize:12,color:B.t3,marginTop:1}}>
-                    {c.numero||c.id_externo}
-                    {c.tier&&<span style={{marginLeft:8,color:({VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green})[c.tier]||B.t3,fontWeight:700}}>{c.tier}</span>}
+                  <div style={{fontSize:12,color:B.t3,marginTop:1,display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {c.numero_serie&&<span>📟 {c.numero_serie}</span>}
+                    {c.rubro&&<span>🏪 {c.rubro}</span>}
+                    {c.tier&&<span style={{color:({VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green})[c.tier]||B.t3,fontWeight:700}}>{c.tier}</span>}
                   </div>
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
@@ -1088,10 +1089,10 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
                     {c.prioridad}
                   </span>
                 </div>
-                {/* Técnico asignado (solo para no técnicos) */}
-                {!esRolTecnico&&tec&&(
-                  <div style={{fontSize:12,color:B.green,fontWeight:600}}>
-                    👤 {tec.nombre} {tec.apellido}
+                {/* Técnico asignado — visible para Director, Regional y Supervisor */}
+                {["DIRECTOR","REGIONAL","SUPERVISOR"].includes(perfil?.rol)&&(
+                  <div style={{fontSize:12,color:tec?B.green:B.t3,fontWeight:600}}>
+                    👤 {tec?`${tec.nombre} ${tec.apellido}`:"Sin asignar"}
                   </div>
                 )}
               </div>
@@ -3002,14 +3003,6 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
             {caso.es_incidente&&<Tg label={`INC ${caso.incidente_id||""}`} color={B.red}/>}
             {tieneInstr&&yaConfirmado&&<Tg label="⚠ INSTRUCCIONES LEÍDAS" color={B.green}/>}
           </div>
-          <div style={{fontSize:12,color:B.t2,marginTop:4}}>{caso.razon_social} {caso.rut?`· RUT: ${caso.rut}`:""}</div>
-        </div>
-        <div style={{textAlign:"right",background:B.card,border:`1px solid ${caso.estado==="EN_PROCESO"?B.yellow:B.border}`,padding:"8px 14px"}}>
-          <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>TIEMPO EN CAMPO</div>
-          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:16,fontWeight:700,color:caso.estado==="EN_PROCESO"?B.yellow:B.t2}}>
-            {fmtTiempo(tiempoSegundos)}
-          </div>
-          {caso.estado==="EN_PROCESO"&&<div style={{fontSize:8,color:B.yellow}} className="live">● CONTANDO</div>}
         </div>
       </div>
 
@@ -3039,10 +3032,28 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
         <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
           <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ DATOS DEL CLIENTE</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[["Terminal",caso.numero_serie],["RUT",caso.rut],["Razón Social",caso.razon_social],["Teléfono",caso.telefono],["Rubro",caso.rubro],["Dirección",caso.direccion]].map(([l,v])=>v&&(
+            {[["Terminal",caso.numero_serie],["RUT",caso.rut],["Razón Social",caso.razon_social],["Rubro",caso.rubro],["Dirección",caso.direccion]].map(([l,v])=>v&&(
               <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
               <div style={{fontSize:12,color:B.t1,marginTop:2}}>{v}</div></div>
             ))}
+            {caso.telefono&&(
+              <div>
+                <div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>TELÉFONO</div>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:2}}>
+                  <span style={{fontSize:12,color:B.t1}}>{caso.telefono}</span>
+                  <button onClick={()=>{
+                    const num=(caso.telefono||"").replace(/\D/g,"");
+                    const numUY=num.startsWith("598")?num:"598"+num;
+                    window.open(`https://wa.me/${numUY}`,"_blank");
+                  }} style={{background:"#001a00",border:"1px solid #25D36644",
+                    color:"#25D366",cursor:"pointer",padding:"3px 10px",
+                    fontSize:11,fontWeight:700,borderRadius:2,display:"flex",
+                    alignItems:"center",gap:5,flexShrink:0}}>
+                    💬 WhatsApp
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
