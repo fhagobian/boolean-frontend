@@ -2736,10 +2736,6 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     }
   },[]);
 
-  const fmtTiempo=(s)=>{
-    const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sg=s%60;
-    return `${h>0?h+"h ":""}${m}min ${sg}seg`;
-  };
 
   const addHistorial=async(tipo,texto)=>{
     const entrada={id:Date.now(),tipo,texto,usuario:user.email,ts:new Date().toISOString()};
