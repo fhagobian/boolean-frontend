@@ -831,6 +831,24 @@ const Mision = ({casos,setView,user,perfil}) => {
 };
 
 
+const COLUMNAS_STD = [
+  {id:"tipo",      label:"TIPO",         ancho:50,  visible:true},
+  {id:"terminal",  label:"TERMINAL",     ancho:110, visible:true},
+  {id:"razon",     label:"RAZÓN SOCIAL", ancho:160, visible:true},
+  {id:"rut",       label:"RUT",          ancho:110, visible:true},
+  {id:"estado",    label:"ESTADO",       ancho:110, visible:true},
+  {id:"prioridad", label:"PRIORIDAD",    ancho:90,  visible:true},
+  {id:"franja",    label:"FRANJA",       ancho:100, visible:true},
+  {id:"telefono",  label:"TEL.",         ancho:100, visible:true},
+  {id:"direccion", label:"DIRECCIÓN",    ancho:160, visible:true},
+  {id:"localidad", label:"LOCALIDAD",    ancho:110, visible:true},
+  {id:"depto",     label:"DEPTO",        ancho:100, visible:true},
+];
+
+const TIPO_ICONO = {
+  INSTALACION:"📦", SERVICIO_TECNICO:"🔧", RETIRO:"🔄", VISITA_PROACTIVA:"👁"
+};
+
 const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
   const [search,   setSearch]   = useState("");
   const [fE,       setFE]       = useState([]);   // estados seleccionados
