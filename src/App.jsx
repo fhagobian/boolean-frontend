@@ -2682,19 +2682,13 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   const [showRecoord,setShowRecoord]   = useState(false);
   const [pantallaInstr,setPantallaInstr] = useState(false);
 
-  // ── CONTADOR DE TIEMPO ──────────────────────────────────────
-  // Calcula el tiempo real: tiempo acumulado + tiempo desde que inició EN_PROCESO
-  const calcularTiempoInicial = (c) => {
-    const acumulado = c.tiempo_total_seg || 0;
-    if(c.estado === "EN_PROCESO" && c.tecnico_inicio_at){
-      const segsDesdeInicio = Math.floor((Date.now() - new Date(c.tecnico_inicio_at).getTime()) / 1000);
-      return acumulado + Math.max(0, segsDesdeInicio);
-    }
-    return acumulado;
-  };
+  // Tiempo guardado en DB — sin contador en vivo por ahora
+  const tiempoSegundos = caso.tiempo_total_seg || 0;
 
-  const [tiempoSegundos,setTiempoSeg] = useState(()=>calcularTiempoInicial(casoInit));
-  const timerRef = useRef(null);
+  const fmtTiempo=(s)=>{
+    const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sg=s%60;
+    return `${h>0?h+"h ":""}${m}min ${sg}seg`;
+  };
 
   const tp  = TIPOS_PROCESO.find(t=>t.codigo===caso.tipo_proceso);
   const emp = EMPRESAS.find(e=>e.codigo===caso.empresa_id);
@@ -2712,40 +2706,33 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
       .eq("caso_id",caso.id).then(({data})=>setEncuestasDelCaso(data||[]));
   },[caso.id]);
 
-  useEffect(()=>{
-    if(caso.estado==="EN_PROCESO"){
-      // Recalcular base correcta cada vez que el estado cambia a EN_PROCESO
-      setTiempoSeg(calcularTiempoInicial(caso));
-      timerRef.current=setInterval(()=>setTiempoSeg(s=>s+1),1000);
-    } else {
-      clearInterval(timerRef.current);
-    }
-    return()=>clearInterval(timerRef.current);
-  },[caso.estado]);
 
   const autoStartRef = useRef(false);
   useEffect(()=>{
     if(autoStartRef.current) return;
     autoStartRef.current = true;
-    // Solo auto-inicia si es técnico, está ASIGNADO y NO tiene tecnico_inicio_at
-    // (ese campo se guarda en Supabase para que persista entre montajes)
-    if(esRolTecnico && caso.estado==="ASIGNADO" && !caso.tecnico_inicio_at){
-      if(tieneInstr && !yaConfirmado){ setPantallaInstr(true); return; }
+    if(!esRolTecnico) return;
+    // Mostrar instrucciones si no fueron confirmadas
+    if(tieneInstr && !yaConfirmado){
+      setPantallaInstr(true);
+      return;
+    }
+    // Solo auto-iniciar si está ASIGNADO y no tiene tecnico_inicio_at
+    // tecnico_inicio_at es el flag persistido en DB — si existe, ya fue iniciado antes
+    if(caso.estado==="ASIGNADO" && !caso.tecnico_inicio_at){
       (async()=>{
         const ts = new Date().toISOString();
-        await supabase.from("casos").update({
+        const {error} = await supabase.from("casos").update({
           estado:"EN_PROCESO",
           tecnico_inicio_at: ts,
           updated_at: ts,
         }).eq("id",caso.id);
-        const casActualizado={...caso,estado:"EN_PROCESO",tecnico_inicio_at:ts};
-        setCaso(casActualizado);
-        if(onUpdate) onUpdate(casActualizado);
-        toast("Estado: EN_PROCESO");
+        if(!error){
+          const casActualizado={...caso,estado:"EN_PROCESO",tecnico_inicio_at:ts};
+          setCaso(casActualizado);
+          if(onUpdate) onUpdate(casActualizado);
+        }
       })();
-    }
-    if(esRolTecnico && caso.estado==="EN_PROCESO" && tieneInstr && !yaConfirmado){
-      setPantallaInstr(true);
     }
   },[]);
 
@@ -2765,10 +2752,17 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     setLoading(true);
     const h=[...(caso.historial||[]),{id:Date.now(),tipo:tipoHistorial,texto:msgHistorial,usuario:user.email,ts:new Date().toISOString()}];
     const payload={...updates,historial:h,updated_at:new Date().toISOString()};
-    await supabase.from("casos").update(payload).eq("id",caso.id);
+    const {error} = await supabase.from("casos").update(payload).eq("id",caso.id);
+    if(error){
+      toast("Error al guardar: "+error.message);
+      setLoading(false);
+      return null;
+    }
     const casActualizado={...caso,...payload};
-    setCaso(casActualizado); if(onUpdate) onUpdate(casActualizado);
-    setLoading(false); return casActualizado;
+    setCaso(casActualizado);
+    if(onUpdate) onUpdate(casActualizado);
+    setLoading(false);
+    return casActualizado;
   };
 
   const cambiarEstadoDirecto=async(nuevoEstado,msg)=>{
