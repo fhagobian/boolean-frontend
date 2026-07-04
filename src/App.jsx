@@ -851,14 +851,10 @@ const TIPO_ICONO = {
 
 const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
   const [search,   setSearch]   = useState("");
-  const [fE,       setFE]       = useState([]);   // estados seleccionados
-  const [fP,       setFP]       = useState([]);   // prioridades
-  const [fT,       setFT]       = useState([]);   // tipos
-  const [fEmp,     setFEmp]     = useState([]);   // empresas
-  const [fTier,    setFTier]    = useState([]);   // tiers
-  const [fAsig,    setFAsig]    = useState([]);   // asignacion
-  const [sortCol,  setSortCol]  = useState("created_at");
-  const [sortDir,  setSortDir]  = useState("desc");
+  const [fE,       setFE]       = useState([]);
+  const [fP,       setFP]       = useState([]);
+  const [fT,       setFT]       = useState([]);
+  const [fAsig,    setFAsig]    = useState([]);
   const [selIds,   setSelIds]   = useState(new Set());
   const [tecnicos, setTecnicos] = useState([]);
   const [tecSel,   setTecSel]   = useState("");
@@ -866,14 +862,8 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
   const [encuestasMasivo,setEncMasivo] = useState([]);
   const [encuestaSel,setEncSel] = useState("");
   const [activandoEnc,setActEnc]= useState(false);
-  const [columnas, setColumnas] = useState(()=>{
-    try{ const s=localStorage.getItem("boolean_cols_"+user?.id);
-      return s?JSON.parse(s):COLUMNAS_STD; }
-    catch{ return COLUMNAS_STD; }
-  });
-  const [showColConfig, setShowColConfig] = useState(false);
-  const [showRefIconos, setShowRefIconos] = useState(false);
 
+  const isMobile = useMobile();
   const esRolTecnico = perfil?.rol==="TECNICO";
 
   useEffect(()=>{
@@ -883,50 +873,30 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
       .then(({data})=>setEncMasivo(data||[]));
   },[]);
 
-  const guardarColumnas = (cols) => {
-    setColumnas(cols);
-    try{ localStorage.setItem("boolean_cols_"+user?.id, JSON.stringify(cols)); }catch{}
-  };
-
-  const vistaEstandar = () => guardarColumnas(COLUMNAS_STD);
-
-  // Filtro múltiple helper
-  const matchFiltro = (arr, val) => arr.length===0 || arr.includes(val);
+  const matchFiltro = (arr,val) => arr.length===0||arr.includes(val);
 
   const fil = casos.filter(c=>{
-    if(!matchFiltro(fT, c.tipo_proceso)) return false;
-    if(!matchFiltro(fE, c.estado)) return false;
-    if(!matchFiltro(fP, c.prioridad)) return false;
-    if(!matchFiltro(fEmp, c.empresa_id)) return false;
-    if(!matchFiltro(fTier, c.tier)) return false;
-    if(fAsig.length>0){
-      if(fAsig.includes("ASIGNADO")&&!c.tecnico_id) return false;
-      if(fAsig.includes("SIN_ASIGNAR")&&c.tecnico_id) return false;
-    }
+    if(!matchFiltro(fT,c.tipo_proceso)) return false;
+    if(!matchFiltro(fE,c.estado)) return false;
+    if(!matchFiltro(fP,c.prioridad)) return false;
+    if(fAsig.includes("ASIGNADO")&&!c.tecnico_id) return false;
+    if(fAsig.includes("SIN_ASIGNAR")&&c.tecnico_id) return false;
     if(search){
       const q=search.toLowerCase();
-      return (c.numero||"").toLowerCase().includes(q)||
-             (c.razon_social||"").toLowerCase().includes(q)||
-             (c.rut||"").toLowerCase().includes(q)||
+      return (c.razon_social||"").toLowerCase().includes(q)||
+             (c.numero||"").toLowerCase().includes(q)||
              (c.direccion||"").toLowerCase().includes(q)||
              (c.localidad||"").toLowerCase().includes(q)||
-             (c.numero_serie||"").toLowerCase().includes(q);
+             (c.rut||"").toLowerCase().includes(q);
     }
     return true;
-  }).sort((a,b)=>{
-    let va=a[sortCol]||""; let vb=b[sortCol]||"";
-    return sortDir==="asc"?(va>vb?1:-1):(va<vb?1:-1);
   });
-
-  const toggleSort=(col)=>{
-    if(sortCol===col) setSortDir(d=>d==="asc"?"desc":"asc");
-    else{ setSortCol(col); setSortDir("asc"); }
-  };
 
   const toggleSel=(id,e)=>{
     e.stopPropagation();
     setSelIds(prev=>{ const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
   };
+
   const toggleAll=()=>{
     if(selIds.size===fil.length) setSelIds(new Set());
     else setSelIds(new Set(fil.map(c=>c.id)));
@@ -951,50 +921,53 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
     if(!encuestaSel||selIds.size===0) return; setActEnc(true);
     for(const id of selIds){
       await supabase.from("casos_encuestas").insert({
-        caso_id:id, encuesta_id:encuestaSel,
-        activada_por:user?.email, activada_at:new Date().toISOString()
+        caso_id:id,encuesta_id:encuestaSel,
+        activada_por:user?.email,activada_at:new Date().toISOString()
       });
     }
     setActEnc(false); setEncSel(""); setSelIds(new Set());
     if(onRecargar) await onRecargar();
   };
 
-  // Componente de filtro múltiple
-  const FiltroMultiple = ({label, opciones, valor, onChange}) => {
-    const [open, setOpen] = useState(false);
-    const ref = useRef(null);
+  // Filtro múltiple
+  const FiltroMultiple=({label,opciones,valor,onChange})=>{
+    const [open,setOpen]=useState(false);
+    const ref=useRef(null);
     useEffect(()=>{
       const h=(e)=>{ if(ref.current&&!ref.current.contains(e.target)) setOpen(false); };
       document.addEventListener("mousedown",h); return()=>document.removeEventListener("mousedown",h);
     },[]);
-    return (
+    return(
       <div ref={ref} style={{position:"relative"}}>
         <button onClick={()=>setOpen(o=>!o)}
-          style={{padding:"6px 12px",background:valor.length>0?B.orangeDim:B.deep,
+          style={{padding:"10px 14px",background:valor.length>0?B.orangeDim:B.deep,
             border:`1px solid ${valor.length>0?B.orange:B.border}`,color:valor.length>0?B.orange:B.t2,
-            cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>
-          {label}{valor.length>0&&<span style={{background:B.orange,color:"#050507",borderRadius:"50%",
-            width:16,height:16,fontSize:9,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:6,borderRadius:2,
+            whiteSpace:"nowrap",minHeight:44}}>
+          {label}
+          {valor.length>0&&<span style={{background:B.orange,color:"#050507",borderRadius:"50%",
+            width:18,height:18,fontSize:10,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center"}}>
             {valor.length}</span>}
-          <span style={{fontSize:8}}>▼</span>
+          <span style={{fontSize:10}}>▼</span>
         </button>
         {open&&(
-          <div style={{position:"absolute",top:"100%",left:0,zIndex:200,minWidth:160,
-            background:B.panel,border:`1px solid ${B.border}`,boxShadow:"0 8px 24px #00000066",padding:6}}>
+          <div style={{position:"absolute",top:"100%",left:0,zIndex:200,minWidth:180,
+            background:B.panel,border:`1px solid ${B.border}`,padding:6,marginTop:4,
+            boxShadow:"0 8px 24px #00000088",borderRadius:2}}>
             {opciones.map(([v,l])=>(
-              <label key={v} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",
-                cursor:"pointer",fontSize:11,color:valor.includes(v)?B.orange:B.t2,
-                background:valor.includes(v)?B.orangeDim:"transparent"}}>
+              <label key={v} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",
+                cursor:"pointer",fontSize:14,color:valor.includes(v)?B.orange:B.t2,
+                background:valor.includes(v)?B.orangeDim:"transparent",borderRadius:2}}>
                 <input type="checkbox" checked={valor.includes(v)}
                   onChange={()=>onChange(valor.includes(v)?valor.filter(x=>x!==v):[...valor,v])}
-                  style={{accentColor:B.orange,width:13,height:13}}/>
+                  style={{accentColor:B.orange,width:16,height:16}}/>
                 {l}
               </label>
             ))}
             {valor.length>0&&(
               <button onClick={()=>onChange([])}
-                style={{width:"100%",marginTop:4,padding:"4px 0",background:"none",
-                  border:`1px solid ${B.border}`,color:B.t3,cursor:"pointer",fontSize:10}}>
+                style={{width:"100%",marginTop:4,padding:"8px 0",background:"none",
+                  border:`1px solid ${B.border}`,color:B.t3,cursor:"pointer",fontSize:12,borderRadius:2}}>
                 Limpiar
               </button>
             )}
@@ -1004,93 +977,198 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
     );
   };
 
-  const colsVisibles = columnas.filter(c=>c.visible);
-  const empresasSeleccionadas=[...new Set([...selIds].map(id=>casos.find(c=>c.id===id)?.empresa_id).filter(Boolean))];
-  const tecnicosFiltrados=tecnicos.filter(t=>empresasSeleccionadas.length===0||empresasSeleccionadas.every(emp=>t.empresa_codigo===emp));
-  const TIER_C_L={VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green};
+  // Colores por prioridad
+  const PRIO_BG = {CRITICA:"#1a0000",ALTA:"#1a0a00",MEDIA:"#001a1a",BAJA:"#001a00"};
+  const PRIO_BORDER = {CRITICA:B.red,ALTA:B.orange,MEDIA:B.blue,BAJA:B.green};
 
-  const renderCelda=(col,c)=>{
-    const tec=tecnicos.find(t=>(t.auth_id||t.id)===c.tecnico_id);
-    const sl=slaInfo(c.sla_deadline,c.estado);
-    switch(col.id){
-      case "tipo": return (
-        <span title={c.tipo_proceso} style={{fontSize:20,cursor:"default"}}>
-          {TIPO_ICONO[c.tipo_proceso]||"◈"}
-        </span>
-      );
-      case "terminal": return <span className="mono" style={{fontSize:11,color:B.orange,fontWeight:700}}>{c.numero_serie||c.numero||"—"}</span>;
-      case "razon":    return <div style={{fontSize:11,fontWeight:600,lineHeight:1.3}}>{c.razon_social||"—"}</div>;
-      case "rut":      return <span className="mono" style={{fontSize:10,color:B.t2}}>{c.rut||"—"}</span>;
-      case "estado": {
-        const cr = cuentaRegresiva(c);
-        return (
-          <div>
-            <Tg label={c.estado||"—"} color={EC[c.estado]||B.t3}/>
-            {cr&&<div style={{fontSize:10,color:B.teal,fontWeight:700,marginTop:3}}>{cr}</div>}
-          </div>
-        );
-      }
-      case "prioridad":return <Tg label={c.prioridad||"—"} color={PC[c.prioridad]||B.t2}/>;
-      case "franja":   return <span style={{fontSize:10,color:"#CC7700",fontWeight:600}}>{c.franja_horaria||c.rango_horario||"—"}</span>;
-      case "telefono": return c.telefono
-        ? <a href={`tel:${c.telefono}`} onClick={e=>e.stopPropagation()}
-            style={{color:B.blue,fontWeight:700,fontSize:11,textDecoration:"none"}}>📞 {c.telefono}</a>
-        : <span style={{color:B.t3}}>—</span>;
-      case "direccion":return <span style={{fontSize:10,color:B.t2}}>{c.direccion||"—"}</span>;
-      case "localidad":return <span style={{fontSize:11,color:B.t1}}>{c.localidad||"—"}</span>;
-      case "depto":    return <span style={{fontSize:11,color:B.t2}}>{c.departamento||"—"}</span>;
-      default: return "—";
-    }
+  // WhatsApp helper
+  const abrirWhatsApp=(tel)=>{
+    if(!tel) return;
+    const num = tel.replace(/\D/g,"");
+    const numUY = num.startsWith("598")?num:"598"+num;
+    window.open(`https://wa.me/${numUY}`,"_blank");
   };
 
+  const cr = (c) => cuentaRegresiva(c);
+
+  // ── VISTA MOBILE — tarjetas ─────────────────────────────
+  if(isMobile) return (
+    <div style={{padding:"12px 12px 80px"}}>
+      {/* Header */}
+      <div style={{marginBottom:14}}>
+        <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>GESTIÓN DE</div>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:B.t1}}>
+          CASOS
+          <span style={{fontSize:13,color:B.t3,marginLeft:10,fontWeight:400}}>{fil.length} de {casos.length}</span>
+        </div>
+      </div>
+
+      {/* Búsqueda */}
+      <input className="field" placeholder="🔍 Buscar razón social, dirección..."
+        style={{width:"100%",marginBottom:10,fontSize:15,padding:"12px 14px",boxSizing:"border-box"}}
+        value={search} onChange={e=>setSearch(e.target.value)}/>
+
+      {/* Filtros en fila scrolleable */}
+      <div style={{display:"flex",gap:8,overflowX:"auto",marginBottom:14,paddingBottom:4}}>
+        <FiltroMultiple label="Estado" valor={fE} onChange={setFE}
+          opciones={ESTADOS.map(s=>[s,s])}/>
+        <FiltroMultiple label="Tipo" valor={fT} onChange={setFT}
+          opciones={TIPOS_PROCESO.map(t=>[t.codigo,`${TIPO_ICONO[t.codigo]} ${t.nombre}`])}/>
+        <FiltroMultiple label="Prioridad" valor={fP} onChange={setFP}
+          opciones={PRIORS.map(p=>[p,p])}/>
+        {!esRolTecnico&&<FiltroMultiple label="Asignación" valor={fAsig} onChange={setFAsig}
+          opciones={[["ASIGNADO","✓ Asignados"],["SIN_ASIGNAR","○ Sin asignar"]]}/>}
+      </div>
+
+      {/* Tarjetas */}
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {fil.map(c=>{
+          const tp = TIPOS_PROCESO.find(t=>t.codigo===c.tipo_proceso);
+          const tec = tecnicos.find(t=>(t.auth_id||t.id)===c.tecnico_id);
+          const prioColor = PRIO_BORDER[c.prioridad]||B.t3;
+          const prioBg = PRIO_BG[c.prioridad]||B.card;
+          const cuenta = cr(c);
+          const sl = slaInfo(c.sla_deadline,c.estado);
+          const sel = selIds.has(c.id);
+          return(
+            <div key={c.id}
+              onClick={()=>onSelect(c)}
+              style={{
+                background: sel?B.orangeDim:prioBg,
+                border:`1px solid ${sel?B.orange:prioColor}`,
+                borderLeft:`4px solid ${prioColor}`,
+                borderRadius:2, overflow:"hidden",
+                cursor:"pointer",
+              }}>
+              {/* Cabezal */}
+              <div style={{padding:"12px 14px 8px",display:"flex",alignItems:"flex-start",gap:10}}>
+                {!esRolTecnico&&(
+                  <div onClick={e=>toggleSel(c.id,e)} style={{paddingTop:2,flexShrink:0}}>
+                    <input type="checkbox" checked={sel} onChange={()=>{}}
+                      style={{width:18,height:18,accentColor:B.orange,cursor:"pointer"}}/>
+                  </div>
+                )}
+                <div style={{fontSize:28,flexShrink:0,lineHeight:1}}>{tp?.icono||"◈"}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:15,fontWeight:700,color:B.t1,
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {c.razon_social||"Sin nombre"}
+                  </div>
+                  <div style={{fontSize:12,color:B.t3,marginTop:1}}>
+                    {c.numero||c.id_externo}
+                    {c.tier&&<span style={{marginLeft:8,color:({VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green})[c.tier]||B.t3,fontWeight:700}}>{c.tier}</span>}
+                  </div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <Tg label={c.estado||"—"} color={EC[c.estado]||B.t3}/>
+                  {cuenta&&<div style={{fontSize:10,color:B.teal,fontWeight:700,marginTop:3}}>{cuenta}</div>}
+                </div>
+              </div>
+
+              {/* Datos */}
+              <div style={{padding:"0 14px 10px",display:"flex",flexDirection:"column",gap:5}}>
+                {c.direccion&&(
+                  <div style={{fontSize:13,color:B.t2,display:"flex",gap:6,alignItems:"flex-start"}}>
+                    <span style={{flexShrink:0}}>📍</span>
+                    <span>{c.direccion}{c.localidad?` · ${c.localidad}`:""}{c.departamento?` · ${c.departamento}`:""}</span>
+                  </div>
+                )}
+                <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                  {c.franja_horaria&&(
+                    <span style={{fontSize:12,color:"#CC7700",fontWeight:600}}>
+                      🕐 {c.franja_horaria||c.rango_horario}
+                    </span>
+                  )}
+                  {c.sla_deadline&&(
+                    <span style={{fontSize:12,color:sl.color,fontWeight:600}}>
+                      ⏱ {sl.label}
+                    </span>
+                  )}
+                  <span style={{fontSize:12,fontWeight:700,color:prioColor}}>
+                    {c.prioridad}
+                  </span>
+                </div>
+                {/* Técnico asignado (solo para no técnicos) */}
+                {!esRolTecnico&&tec&&(
+                  <div style={{fontSize:12,color:B.green,fontWeight:600}}>
+                    👤 {tec.nombre} {tec.apellido}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer — teléfono WhatsApp */}
+              {c.telefono&&(
+                <div style={{borderTop:`1px solid ${prioColor}33`,padding:"8px 14px"}}
+                  onClick={e=>e.stopPropagation()}>
+                  <button
+                    onClick={e=>{ e.stopPropagation(); abrirWhatsApp(c.telefono); }}
+                    style={{
+                      display:"flex",alignItems:"center",gap:8,
+                      background:"#001a00",border:"1px solid #25D36644",
+                      color:"#25D366",cursor:"pointer",padding:"8px 14px",
+                      fontSize:14,fontWeight:700,borderRadius:2,width:"100%",
+                      justifyContent:"center",
+                    }}>
+                    <span style={{fontSize:20}}>💬</span>
+                    WhatsApp · {c.telefono}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {fil.length===0&&(
+          <div style={{textAlign:"center",padding:40,color:B.t3}}>
+            <div style={{fontSize:40,marginBottom:12}}>◎</div>
+            <div style={{fontSize:14}}>Sin casos</div>
+          </div>
+        )}
+      </div>
+
+      {/* Barra de acciones masivas */}
+      {selIds.size>0&&!esRolTecnico&&(
+        <div style={{position:"fixed",bottom:70,left:0,right:0,
+          background:B.panel,borderTop:`2px solid ${B.orange}`,
+          padding:"12px 16px",zIndex:100,boxShadow:`0 -8px 32px ${B.orange}22`}}>
+          <div style={{fontSize:13,fontWeight:900,color:B.orange,
+            fontFamily:"'Orbitron',sans-serif",marginBottom:10}}>
+            {selIds.size} CASO{selIds.size>1?"S":""} SEL.
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{display:"flex",gap:8}}>
+              <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)}
+                style={{flex:1,fontSize:14}}>
+                <option value="">👤 Asignar técnico...</option>
+                {tecnicos.map(t=>{
+                  const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
+                  return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} — {carga} casos</option>;
+                })}
+              </select>
+              <Bb label={asignando?"...":"⚡"} onClick={asignarMasivo}
+                disabled={!tecSel||asignando} small/>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <select className="field" value={encuestaSel} onChange={e=>setEncSel(e.target.value)}
+                style={{flex:1,fontSize:14}}>
+                <option value="">📋 Activar encuesta...</option>
+                {encuestasMasivo.map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}
+              </select>
+              <Bb label={activandoEnc?"...":"📋"} onClick={activarEncuestaMasivo}
+                disabled={!encuestaSel||activandoEnc} small ghost color={B.purple}/>
+            </div>
+            <Bb label="✕ CANCELAR SELECCIÓN" onClick={()=>setSelIds(new Set())}
+              ghost small color={B.t2} full/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // ── VISTA DESKTOP — tabla ───────────────────────────────
   return (
     <div style={{padding:20,height:"100%",overflowY:"auto",paddingBottom:selIds.size>0?100:20}}>
-
       {/* Modal configuración columnas */}
-      {showColConfig&&(
-        <Modal title="⚙ CONFIGURAR COLUMNAS" onClose={()=>setShowColConfig(false)} width={420}>
-          <div style={{marginBottom:14,fontSize:11,color:B.t2}}>
-            Activá o desactivá las columnas que querés ver. Arrastrá para reordenar.
-          </div>
-          {columnas.map((col,i)=>(
-            <div key={col.id} style={{display:"flex",alignItems:"center",gap:10,
-              padding:"8px 10px",marginBottom:4,background:B.deep,border:`1px solid ${B.border}`}}>
-              <span style={{color:B.t3,cursor:"move",fontSize:14}}>⠿</span>
-              <label style={{display:"flex",alignItems:"center",gap:8,flex:1,cursor:"pointer"}}>
-                <input type="checkbox" checked={col.visible}
-                  onChange={()=>guardarColumnas(columnas.map((c,j)=>j===i?{...c,visible:!c.visible}:c))}
-                  style={{accentColor:B.orange,width:14,height:14}}/>
-                <span style={{fontSize:12,color:col.visible?B.t1:B.t3}}>{col.label}</span>
-              </label>
-              <div style={{display:"flex",gap:4}}>
-                {i>0&&<button onClick={()=>{const a=[...columnas];[a[i-1],a[i]]=[a[i],a[i-1]];guardarColumnas(a);}}
-                  style={{background:"none",border:"none",color:B.t3,cursor:"pointer",fontSize:12}}>▲</button>}
-                {i<columnas.length-1&&<button onClick={()=>{const a=[...columnas];[a[i],a[i+1]]=[a[i+1],a[i]];guardarColumnas(a);}}
-                  style={{background:"none",border:"none",color:B.t3,cursor:"pointer",fontSize:12}}>▼</button>}
-              </div>
-            </div>
-          ))}
-          <div style={{display:"flex",gap:10,marginTop:14}}>
-            <Bb label="VISTA ESTÁNDAR" onClick={()=>{vistaEstandar();setShowColConfig(false);}} ghost small color={B.t2}/>
-            <Bb label="LISTO" onClick={()=>setShowColConfig(false)}/>
-          </div>
-        </Modal>
-      )}
-
-      {/* Referencia de íconos */}
-      {showRefIconos&&(
-        <Modal title="REFERENCIA DE ÍCONOS" onClose={()=>setShowRefIconos(false)} width={340}>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {Object.entries(TIPO_ICONO).map(([tipo,icono])=>(
-              <div key={tipo} style={{display:"flex",alignItems:"center",gap:14,
-                padding:"8px 12px",background:B.deep,border:`1px solid ${B.border}`}}>
-                <span style={{fontSize:24}}>{icono}</span>
-                <span style={{fontSize:13,color:B.t1,fontWeight:600}}>{tipo.replace("_"," ")}</span>
-              </div>
-            ))}
-          </div>
-        </Modal>
-      )}
+      {false&&null}
 
       {/* Header */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
@@ -1103,9 +1181,6 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
           </div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-          <Bb label="?" onClick={()=>setShowRefIconos(true)} ghost small color={B.t3} title="Referencia de íconos"/>
-          <Bb label="⚙ COLUMNAS" onClick={()=>setShowColConfig(true)} ghost small color={B.t2}/>
-          <Bb label="↺ ESTÁNDAR" onClick={vistaEstandar} ghost small color={B.t2}/>
           {selIds.size>0&&<Bb label="✕" onClick={()=>setSelIds(new Set())} ghost small color={B.t2}/>}
           {!esRolTecnico&&<Bb label="+ NUEVO CASO" onClick={onNew}/>}
         </div>
@@ -1113,54 +1188,58 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
 
       {/* Filtros */}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
-        <input className="field" placeholder="🔍 Número, razón social, RUT, dirección..."
+        <input className="field" placeholder="🔍 Buscar..."
           style={{flex:2,minWidth:200}} value={search} onChange={e=>setSearch(e.target.value)}/>
-        <FiltroMultiple label="Estado" valor={fE} onChange={setFE}
-          opciones={ESTADOS.map(s=>[s,s])}/>
+        <FiltroMultiple label="Estado" valor={fE} onChange={setFE} opciones={ESTADOS.map(s=>[s,s])}/>
         <FiltroMultiple label="Tipo" valor={fT} onChange={setFT}
-          opciones={TIPOS_PROCESO.map(t=>[t.codigo,`${TIPO_ICONO[t.codigo]||"◈"} ${t.nombre}`])}/>
-        <FiltroMultiple label="Prioridad" valor={fP} onChange={setFP}
-          opciones={PRIORS.map(p=>[p,p])}/>
-        <FiltroMultiple label="Tier" valor={fTier} onChange={setFTier}
-          opciones={["VIP","T1a","T1b","T2"].map(t=>[t,t])}/>
-        {!esRolTecnico&&<FiltroMultiple label="Empresa" valor={fEmp} onChange={setFEmp}
-          opciones={EMPRESAS.map(e=>[e.codigo,e.nombre])}/>}
-        <FiltroMultiple label="Asignación" valor={fAsig} onChange={setFAsig}
-          opciones={[["ASIGNADO","✓ Asignados"],["SIN_ASIGNAR","○ Sin asignar"]]}/>
+          opciones={TIPOS_PROCESO.map(t=>[t.codigo,`${TIPO_ICONO[t.codigo]} ${t.nombre}`])}/>
+        <FiltroMultiple label="Prioridad" valor={fP} onChange={setFP} opciones={PRIORS.map(p=>[p,p])}/>
+        {!esRolTecnico&&<FiltroMultiple label="Asignación" valor={fAsig} onChange={setFAsig}
+          opciones={[["ASIGNADO","✓ Asignados"],["SIN_ASIGNAR","○ Sin asignar"]]}/>}
       </div>
 
       {/* Tabla */}
       <div className="card" style={{overflow:"auto"}}>
-        <table style={{tableLayout:"fixed"}}>
+        <table>
           <thead>
             <tr>
-              <th style={{width:36}}>
+              {!esRolTecnico&&<th style={{width:36}}>
                 <input type="checkbox" checked={selIds.size===fil.length&&fil.length>0}
                   onChange={toggleAll} style={{width:14,height:14,accentColor:B.orange,cursor:"pointer"}}/>
-              </th>
-              {colsVisibles.map(col=>(
-                <th key={col.id} style={{width:col.ancho,cursor:"pointer",whiteSpace:"nowrap",userSelect:"none"}}
-                  onClick={()=>toggleSort(col.id)}>
-                  {col.label}{sortCol===col.id?(sortDir==="asc"?" ▲":" ▼"):""}
-                </th>
-              ))}
+              </th>}
+              {["TIPO","RAZÓN SOCIAL","ESTADO","PRIOR.","FRANJA","SLA","TÉCNICO"].map(h=><th key={h}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
             {fil.map(c=>{
+              const tp=TIPOS_PROCESO.find(t=>t.codigo===c.tipo_proceso);
+              const sl=slaInfo(c.sla_deadline,c.estado);
+              const tec=tecnicos.find(t=>(t.auth_id||t.id)===c.tecnico_id);
               const sel=selIds.has(c.id);
+              const cuenta=cr(c);
               return(
                 <tr key={c.id} style={{cursor:"pointer",background:sel?B.orangeDim:"transparent"}}
                   onClick={()=>onSelect(c)}>
-                  <td onClick={e=>toggleSel(c.id,e)}>
+                  {!esRolTecnico&&<td onClick={e=>toggleSel(c.id,e)}>
                     <input type="checkbox" checked={sel} onChange={()=>{}}
                       style={{width:14,height:14,accentColor:B.orange,cursor:"pointer"}}/>
+                  </td>}
+                  <td><span title={c.tipo_proceso} style={{fontSize:18}}>{tp?.icono||"◈"}</span></td>
+                  <td>
+                    <div style={{fontSize:12,fontWeight:600}}>{c.razon_social||"—"}</div>
+                    <div style={{fontSize:10,color:B.t3}}>{c.numero||c.id_externo}</div>
                   </td>
-                  {colsVisibles.map(col=>(
-                    <td key={col.id} style={{overflow:"hidden",textOverflow:"ellipsis",maxWidth:col.ancho}}>
-                      {renderCelda(col,c)}
-                    </td>
-                  ))}
+                  <td>
+                    <Tg label={c.estado||"—"} color={EC[c.estado]||B.t3}/>
+                    {cuenta&&<div style={{fontSize:10,color:B.teal,fontWeight:700,marginTop:3}}>{cuenta}</div>}
+                  </td>
+                  <td><Tg label={c.prioridad||"—"} color={PC[c.prioridad]||B.t2}/></td>
+                  <td style={{fontSize:11,color:"#CC7700",fontWeight:600}}>{c.franja_horaria||c.rango_horario||"—"}</td>
+                  <td><span style={{fontSize:11,fontWeight:700,color:sl.color}}>{sl.label}</span></td>
+                  <td>{tec
+                    ?<span style={{fontSize:11,color:B.green,fontWeight:700}}>{tec.nombre}</span>
+                    :<span style={{fontSize:11,color:B.t3}}>Sin asignar</span>}
+                  </td>
                 </tr>
               );
             })}
@@ -1173,8 +1252,8 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
         )}
       </div>
 
-      {/* Barra de acciones masivas */}
-      {selIds.size>0&&(
+      {/* Barra de acciones masivas desktop */}
+      {selIds.size>0&&!esRolTecnico&&(
         <div style={{position:"fixed",bottom:0,left:210,right:0,background:B.panel,
           borderTop:`2px solid ${B.orange}`,padding:"10px 20px",
           display:"flex",alignItems:"center",gap:12,zIndex:100,flexWrap:"wrap",
@@ -1182,34 +1261,26 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
           <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,color:B.orange,flexShrink:0}}>
             {selIds.size} CASO{selIds.size>1?"S":""} SEL.
           </div>
-          {empresasSeleccionadas.length>1&&(
-            <div style={{fontSize:10,color:B.yellow,background:B.yellowDim,padding:"3px 8px"}}>
-              ⚠ {empresasSeleccionadas.length} empresas
-            </div>
-          )}
-          {!esRolTecnico&&<>
-            <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)} style={{flex:1,maxWidth:260}}>
-              <option value="">👤 Asignar técnico...</option>
-              {(tecnicosFiltrados.length>0?tecnicosFiltrados:tecnicos).map(t=>{
-                const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
-                return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} ({t.empresa_codigo}) — {carga} casos</option>;
-              })}
-            </select>
-            <Bb label={asignando?"...":"⚡ ASIGNAR"} onClick={asignarMasivo} disabled={!tecSel||asignando} small/>
-            <div style={{width:1,height:28,background:B.border}}/>
-            <select className="field" value={encuestaSel} onChange={e=>setEncSel(e.target.value)} style={{flex:1,maxWidth:200}}>
-              <option value="">📋 Activar encuesta...</option>
-              {encuestasMasivo.map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}
-            </select>
-            <Bb label={activandoEnc?"...":"📋 ACTIVAR"} onClick={activarEncuestaMasivo} disabled={!encuestaSel||activandoEnc} small ghost color={B.purple}/>
-          </>}
+          <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)} style={{flex:1,maxWidth:260}}>
+            <option value="">👤 Asignar técnico...</option>
+            {tecnicos.map(t=>{
+              const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
+              return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} ({t.empresa_codigo}) — {carga} casos</option>;
+            })}
+          </select>
+          <Bb label={asignando?"...":"⚡ ASIGNAR"} onClick={asignarMasivo} disabled={!tecSel||asignando} small/>
+          <div style={{width:1,height:28,background:B.border}}/>
+          <select className="field" value={encuestaSel} onChange={e=>setEncSel(e.target.value)} style={{flex:1,maxWidth:200}}>
+            <option value="">📋 Encuesta...</option>
+            {encuestasMasivo.map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}
+          </select>
+          <Bb label={activandoEnc?"...":"📋"} onClick={activarEncuestaMasivo} disabled={!encuestaSel||activandoEnc} small ghost color={B.purple}/>
           <Bb label="✕" onClick={()=>setSelIds(new Set())} ghost small color={B.t2}/>
         </div>
       )}
     </div>
   );
 };
-
 
 const NuevoCaso = ({onSave,onCancel,loading}) => {
   const [f,setF]=useState({tipo_proceso:"SOPORTE",prioridad:"MEDIUM",descripcion:"",numero_serie:"",rut:"",razon_social:"",departamento:"",localidad:"",direccion:"",telefono:"",rubro:"",empresa_id:"",rango_horario:"Sin restricción",es_incidente:false,incidente_id:"",sla_horas:4,tiene_instrucciones:false,instrucciones_texto:""});
