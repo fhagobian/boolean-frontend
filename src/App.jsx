@@ -2278,6 +2278,129 @@ const PERIODOS = [
   {id:"mes",   label:"MES",    icono:"🗓"},
 ];
 
+// ═══════════════════════════════════════════════════════════
+// GESTOR DE MOTIVOS — Configurable por Director
+// ═══════════════════════════════════════════════════════════
+const GestorMotivos = ({ toast }) => {
+  const TIPOS = [
+    {id:"PAUSA",          label:"⏸ Motivos de Pausa",          color:B.purple},
+    {id:"CANCELACION",    label:"✗ Motivos de Cancelación",     color:B.red},
+    {id:"RECOORDINACION", label:"📅 Motivos de Recoordinación", color:B.teal},
+  ];
+  const [tab,      setTab]      = useState("PAUSA");
+  const [motivos,  setMotivos]  = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [nuevo,    setNuevo]    = useState("");
+  const [saving,   setSaving]   = useState(false);
+
+  useEffect(()=>{ cargar(); },[tab]);
+
+  const cargar=async()=>{
+    setLoading(true);
+    const{data}=await supabase.from("motivos_config")
+      .select("*").eq("tipo",tab).order("orden");
+    setMotivos(data||[]); setLoading(false);
+  };
+
+  const agregar=async()=>{
+    if(!nuevo.trim()) return;
+    setSaving(true);
+    const orden=(motivos.length>0?Math.max(...motivos.map(m=>m.orden)):0)+1;
+    await supabase.from("motivos_config").insert({
+      tipo:tab, texto:nuevo.trim(), activo:true, orden
+    });
+    setNuevo(""); await cargar(); toast("✓ Motivo agregado");
+    setSaving(false);
+  };
+
+  const toggleActivo=async(m)=>{
+    await supabase.from("motivos_config").update({activo:!m.activo}).eq("id",m.id);
+    await cargar();
+  };
+
+  const eliminar=async(id)=>{
+    await supabase.from("motivos_config").delete().eq("id",id);
+    await cargar(); toast("Motivo eliminado");
+  };
+
+  const tabActual = TIPOS.find(t=>t.id===tab);
+
+  return(
+    <div>
+      {/* Tabs por tipo */}
+      <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+        {TIPOS.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)}
+            style={{padding:"12px 16px",textAlign:"left",
+              border:`2px solid ${tab===t.id?t.color:B.border}`,
+              background:tab===t.id?t.color+"22":B.deep,
+              color:tab===t.id?t.color:B.t2,
+              cursor:"pointer",fontSize:14,fontWeight:700,borderRadius:2,
+              transition:"all .15s"}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Lista de motivos del tipo seleccionado */}
+      <div style={{background:B.card,border:`1px solid ${tabActual?.color}44`,padding:16,borderRadius:2}}>
+        <div style={{fontSize:10,color:tabActual?.color,fontWeight:700,
+          letterSpacing:".12em",marginBottom:14}}>
+          ◈ {tabActual?.label.toUpperCase()}
+        </div>
+
+        {loading ? <Spin/> : (
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
+            {motivos.length===0&&(
+              <div style={{textAlign:"center",padding:20,color:B.t3,fontSize:12}}>
+                Sin motivos configurados. Agregá el primero.
+              </div>
+            )}
+            {motivos.map((m,i)=>(
+              <div key={m.id} style={{
+                display:"flex",alignItems:"center",gap:10,
+                padding:"10px 14px",
+                background:m.activo?B.deep:"#0a0a0a",
+                border:`1px solid ${m.activo?B.border:"#1a1a1a"}`,
+                borderRadius:2,opacity:m.activo?1:0.5,
+              }}>
+                <span style={{fontSize:12,color:B.t3,minWidth:20,fontFamily:"'Orbitron',sans-serif"}}>
+                  {i+1}
+                </span>
+                <span style={{flex:1,fontSize:14,color:m.activo?B.t1:B.t3}}>
+                  {m.texto}
+                </span>
+                <button onClick={()=>toggleActivo(m)}
+                  style={{background:"none",border:`1px solid ${B.border}`,
+                    color:m.activo?B.green:B.t3,cursor:"pointer",
+                    padding:"4px 10px",fontSize:11,borderRadius:2,flexShrink:0}}>
+                  {m.activo?"✓ ACTIVO":"INACTIVO"}
+                </button>
+                <button onClick={()=>eliminar(m.id)}
+                  style={{background:"none",border:"none",color:B.red,
+                    cursor:"pointer",fontSize:18,padding:"0 4px",flexShrink:0}}>
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Agregar nuevo motivo */}
+        <div style={{display:"flex",gap:8}}>
+          <input className="field" style={{flex:1,fontSize:14}}
+            placeholder={`Nuevo motivo de ${tabActual?.label.toLowerCase().replace("motivos de ","")}...`}
+            value={nuevo} onChange={e=>setNuevo(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&agregar()}/>
+          <Bb label={saving?"...":"+ AGREGAR"} onClick={agregar}
+            disabled={!nuevo.trim()||saving} small
+            color={tabActual?.color||B.orange}/>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const GestorMisiones = ({ toast }) => {
   const [misiones,  setMisiones]  = useState([]);
   const [loading,   setLoading]   = useState(true);
@@ -3213,9 +3336,16 @@ const PantallaAccion = ({color, icono, titulo, subtitulo, pasoActual, totalPasos
 
 // ─── OVERLAY PAUSAR ─────────────────────────────────────────
 const OverlayPausar = ({ caso, onVolver, onGuardar }) => {
-  const [motivo, setMotivo] = useState("");
-  const [saving, setSaving] = useState(false);
-  const MOTIVOS = ["Sin partes disponibles","Esperando autorización","Sin acceso al local","Almuerzo / descanso","Complejidad técnica inesperada","Falta de conectividad"];
+  const [motivo,   setMotivo]  = useState("");
+  const [motivos,  setMotivos] = useState([]);
+  const [saving,   setSaving]  = useState(false);
+
+  useEffect(()=>{
+    supabase.from("motivos_config").select("*")
+      .eq("tipo","PAUSA").eq("activo",true).order("orden")
+      .then(({data})=>setMotivos(data||[]));
+  },[]);
+
   return (
     <PantallaAccion
       color={B.purple} icono="⏸" titulo="PAUSAR CASO"
@@ -3228,17 +3358,17 @@ const OverlayPausar = ({ caso, onVolver, onGuardar }) => {
       onBoton={async()=>{ setSaving(true); await onGuardar(motivo); setSaving(false); }}>
       <div style={{marginBottom:8,fontSize:16,fontWeight:700,color:"#ccc"}}>¿Por qué pausás?</div>
       <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
-        {MOTIVOS.map(m=>(
-          <button key={m} onClick={()=>setMotivo(m)}
+        {motivos.map(m=>(
+          <button key={m.id} onClick={()=>setMotivo(m.texto)}
             style={{
               padding:"18px 16px", textAlign:"left",
-              border:`2px solid ${motivo===m?B.purple:"#2a2a2a"}`,
-              background:motivo===m?B.purple+"22":"#0e0e14",
-              color:motivo===m?B.purple:"#ccc",
+              border:`2px solid ${motivo===m.texto?B.purple:"#2a2a2a"}`,
+              background:motivo===m.texto?B.purple+"22":"#0e0e14",
+              color:motivo===m.texto?B.purple:"#ccc",
               cursor:"pointer", fontSize:15, borderRadius:2,
               display:"flex", alignItems:"center", gap:14, transition:"all .15s",
             }}>
-            <span style={{fontSize:22,flexShrink:0}}>{motivo===m?"◉":"○"}</span>{m}
+            <span style={{fontSize:22,flexShrink:0}}>{motivo===m.texto?"◉":"○"}</span>{m.texto}
           </button>
         ))}
       </div>
@@ -3253,10 +3383,16 @@ const OverlayPausar = ({ caso, onVolver, onGuardar }) => {
 
 // ─── OVERLAY CANCELAR — 2 pasos ─────────────────────────────
 const OverlayCancelar = ({ caso, onVolver, onGuardar }) => {
-  const [paso, setPaso] = useState(1);
-  const [motivo, setMotivo] = useState("");
-  const [saving, setSaving] = useState(false);
-  const MOTIVOS = ["El comercio no abrió","Equipo irreparable","Caso duplicado","Cliente canceló","Error en la orden"];
+  const [paso,    setPaso]    = useState(1);
+  const [motivo,  setMotivo]  = useState("");
+  const [motivos, setMotivos] = useState([]);
+  const [saving,  setSaving]  = useState(false);
+
+  useEffect(()=>{
+    supabase.from("motivos_config").select("*")
+      .eq("tipo","CANCELACION").eq("activo",true).order("orden")
+      .then(({data})=>setMotivos(data||[]));
+  },[]);
 
   if(paso===1) return (
     <PantallaAccion
@@ -3269,17 +3405,17 @@ const OverlayCancelar = ({ caso, onVolver, onGuardar }) => {
       onBoton={()=>setPaso(2)}>
       <div style={{marginBottom:8,fontSize:16,fontWeight:700,color:"#ccc"}}>¿Por qué cancelás?</div>
       <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
-        {MOTIVOS.map(m=>(
-          <button key={m} onClick={()=>setMotivo(m)}
+        {motivos.map(m=>(
+          <button key={m.id} onClick={()=>setMotivo(m.texto)}
             style={{
               padding:"18px 16px", textAlign:"left",
-              border:`2px solid ${motivo===m?B.red:"#2a2a2a"}`,
-              background:motivo===m?B.red+"22":"#0e0e14",
-              color:motivo===m?B.red:"#ccc",
+              border:`2px solid ${motivo===m.texto?B.red:"#2a2a2a"}`,
+              background:motivo===m.texto?B.red+"22":"#0e0e14",
+              color:motivo===m.texto?B.red:"#ccc",
               cursor:"pointer", fontSize:15, borderRadius:2,
               display:"flex", alignItems:"center", gap:14, transition:"all .15s",
             }}>
-            <span style={{fontSize:22}}>{motivo===m?"◉":"○"}</span>{m}
+            <span style={{fontSize:22}}>{motivo===m.texto?"◉":"○"}</span>{m.texto}
           </button>
         ))}
       </div>
@@ -3315,11 +3451,18 @@ const OverlayCancelar = ({ caso, onVolver, onGuardar }) => {
 
 // ─── OVERLAY RECOORDINAR — 3 pasos ──────────────────────────
 const OverlayRecoordinar = ({ caso, onVolver, onGuardar }) => {
-  const [paso,   setPaso]   = useState(1);
-  const [fecha,  setFecha]  = useState("");
-  const [franja, setFranja] = useState("");
-  const [motivo, setMotivo] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [paso,    setPaso]    = useState(1);
+  const [fecha,   setFecha]   = useState("");
+  const [franja,  setFranja]  = useState("");
+  const [motivo,  setMotivo]  = useState("");
+  const [motivos, setMotivos] = useState([]);
+  const [saving,  setSaving]  = useState(false);
+
+  useEffect(()=>{
+    supabase.from("motivos_config").select("*")
+      .eq("tipo","RECOORDINACION").eq("activo",true).order("orden")
+      .then(({data})=>setMotivos(data||[]));
+  },[]);
   const FRANJAS = [
     {id:"FH1 (8-12)",  label:"FH1", hora:"08:00 – 12:00", icono:"🌅"},
     {id:"FH2 (12-16)", label:"FH2", hora:"12:00 – 16:00", icono:"☀️"},
@@ -3396,8 +3539,23 @@ const OverlayRecoordinar = ({ caso, onVolver, onGuardar }) => {
         <div>🕐 <strong style={{color:B.teal}}>{franja}</strong></div>
       </div>
       <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:12}}>¿Por qué recoordinás?</div>
-      <textarea className="field" rows={5}
-        placeholder="Explicá el motivo de la recoordinación..."
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
+        {motivos.map(m=>(
+          <button key={m.id} onClick={()=>setMotivo(m.texto)}
+            style={{
+              padding:"16px 16px", textAlign:"left",
+              border:`2px solid ${motivo===m.texto?B.teal:"#2a2a2a"}`,
+              background:motivo===m.texto?B.teal+"22":"#0e0e14",
+              color:motivo===m.texto?B.teal:"#ccc",
+              cursor:"pointer", fontSize:15, borderRadius:2,
+              display:"flex", alignItems:"center", gap:14, transition:"all .15s",
+            }}>
+            <span style={{fontSize:22,flexShrink:0}}>{motivo===m.texto?"◉":"○"}</span>{m.texto}
+          </button>
+        ))}
+      </div>
+      <textarea className="field" rows={4}
+        placeholder="O escribí otro motivo..."
         value={motivo} onChange={e=>setMotivo(e.target.value)}
         style={{fontSize:16,resize:"none"}}/>
     </PantallaAccion>
@@ -4669,6 +4827,7 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
   const TABS=[
     {id:"notificaciones",label:"🔔 NOTIFICACIONES"},
     {id:"encuestas",label:"📋 ENCUESTAS"},
+    {id:"motivos",label:"💬 MOTIVOS"},
     {id:"procesos",label:"PROCESOS & SLA"},
     {id:"misiones",label:"MISIONES"},
     {id:"sistema",label:"SISTEMA"},
@@ -4690,6 +4849,9 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
       )}
       {tab==="encuestas"&&(
         <GestorEncuestas user={user} toast={toast}/>
+      )}
+      {tab==="motivos"&&(
+        <GestorMotivos toast={toast}/>
       )}
       {tab==="procesos"&&(
         <div>
