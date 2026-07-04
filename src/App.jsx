@@ -33,10 +33,10 @@ const EMPRESAS = [
 ];
 
 const TIPOS_PROCESO = [
-  {codigo:"INSTALACION",nombre:"Instalación",                icono:"📦",color:"#00E87A",sla:24},
-  {codigo:"SOPORTE",    nombre:"Soporte Técnico",            icono:"🔧",color:"#00A8FF",sla:4},
-  {codigo:"RETIRO",     nombre:"Retiro de Terminal",         icono:"🔄",color:"#FF6B00",sla:8},
-  {codigo:"PROACTIVO",  nombre:"Servicio Técnico Proactivo", icono:"👁",color:"#9B6DFF",sla:48},
+  {codigo:"INSTALACION",      nombre:"Instalación",              icono:"📦",color:"#00E87A",sla:24},
+  {codigo:"SERVICIO_TECNICO", nombre:"Servicio Técnico",         icono:"🔧",color:"#00A8FF",sla:4},
+  {codigo:"RETIRO",           nombre:"Retiro de Terminal",       icono:"🔄",color:"#FF6B00",sla:8},
+  {codigo:"VISITA_PROACTIVA", nombre:"Visita Técnica Proactiva", icono:"👁",color:"#9B6DFF",sla:48},
 ];
 
 const ESTADOS = ["PENDIENTE","ASIGNADO","EN_PROCESO","PAUSADO","FINALIZADO","CANCELADO","RECOORDINADO"];
@@ -465,166 +465,371 @@ const MobileMoreMenu = ({menu, view, setView, onLogout, user, perfil}) => {
   );
 };
 
-const Mision = ({casos,setView}) => {
-  const [time,setTime]=useState(new Date());
-  useEffect(()=>{const t=setInterval(()=>setTime(new Date()),1000);return()=>clearInterval(t);},[]);
-  const total=casos.length;
-  const breach=casos.filter(c=>c.sla_deadline&&new Date(c.sla_deadline)<new Date()&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
-  const slaComp=total?Math.round(((total-breach)/total)*100):100;
-  const installs=casos.filter(c=>c.tipo_proceso==="INSTALACION").length;
-  const incidentes=casos.filter(c=>c.es_incidente&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
-  const MISIONES=[
-    {titulo:"Instalar terminales del día",prog:installs,meta:15,xp:250,icono:"📦",done:installs>=15},
-    {titulo:"Resolver incidentes críticos",prog:Math.min(incidentes,3),meta:3,xp:150,icono:"🔥",done:incidentes>=3},
-    {titulo:"Cumplir SLA diario ≥ 95%",prog:slaComp,meta:100,xp:100,icono:"⏱",done:slaComp>=95},
-    {titulo:"Completar 5 retiros",prog:casos.filter(c=>c.tipo_proceso==="RETIRO"&&c.estado==="CANCELADO").length,meta:5,xp:80,icono:"🔄",done:casos.filter(c=>c.tipo_proceso==="RETIRO"&&c.estado==="CANCELADO").length>=5},
-  ];
+// ─── LOGO SVG BOOLEAN ────────────────────────────────────────
+const LogoBoolean = ({size=1}) => (
+  <svg width={280*size} height={60*size} viewBox="0 0 280 60" style={{display:"block"}}>
+    <defs>
+      <linearGradient id="metalGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.95"/>
+        <stop offset="40%" stopColor="#FF6B00" stopOpacity="0.9"/>
+        <stop offset="100%" stopColor="#CC4400" stopOpacity="1"/>
+      </linearGradient>
+      <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stopColor="#FF6B00" stopOpacity="0"/>
+        <stop offset="50%" stopColor="#FF6B00" stopOpacity="0.6"/>
+        <stop offset="100%" stopColor="#FF6B00" stopOpacity="0"/>
+      </linearGradient>
+      <filter id="glow">
+        <feGaussianBlur stdDeviation="1.5" result="blur"/>
+        <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+      </filter>
+    </defs>
+    {/* Glow line under text */}
+    <rect x="0" y="54" width="280" height="1.5" fill="url(#glowGrad)" opacity="0.8"/>
+    {/* Circuit dots */}
+    {[10,30,50,230,250,270].map((x,i)=>(
+      <circle key={i} cx={x*size} cy={8*size} r={2*size} fill="#FF6B00" opacity="0.5"/>
+    ))}
+    {/* BOOLEAN text */}
+    <text x="140" y="46" textAnchor="middle"
+      fontFamily="'Orbitron',sans-serif" fontWeight="900"
+      fontSize={42*size} fill="url(#metalGrad)"
+      filter="url(#glow)" letterSpacing={2*size}>
+      BOOLEAN
+    </text>
+    {/* Gate symbol - AND gate on B */}
+    <g transform={`translate(${4*size},${18*size}) scale(${0.6*size})`} opacity="0.7">
+      <path d="M0,0 L0,20 Q20,20 20,10 Q20,0 0,0" fill="none" stroke="#FF6B00" strokeWidth="1.5"/>
+      <line x1="0" y1="5" x2="-6" y2="5" stroke="#FF6B00" strokeWidth="1.2"/>
+      <line x1="0" y1="15" x2="-6" y2="15" stroke="#FF6B00" strokeWidth="1.2"/>
+      <line x1="20" y1="10" x2="26" y2="10" stroke="#FF6B00" strokeWidth="1.2"/>
+    </g>
+    {/* Gate symbol - OR gate on last O */}
+    <g transform={`translate(${240*size},${18*size}) scale(${0.6*size})`} opacity="0.7">
+      <path d="M0,0 Q5,10 0,20 Q15,20 22,10 Q15,0 0,0" fill="none" stroke="#FF6B00" strokeWidth="1.5"/>
+      <line x1="0" y1="5" x2="-6" y2="5" stroke="#FF6B00" strokeWidth="1.2"/>
+      <line x1="0" y1="15" x2="-6" y2="15" stroke="#FF6B00" strokeWidth="1.2"/>
+      <line x1="22" y1="10" x2="28" y2="10" stroke="#FF6B00" strokeWidth="1.2"/>
+    </g>
+  </svg>
+);
+
+// ─── XP POR ACCIÓN ───────────────────────────────────────────
+const XP_ACCIONES = [
+  {accion:"Instalación completada",     xp:150, icono:"📦"},
+  {accion:"Servicio técnico resuelto",  xp:120, icono:"🔧"},
+  {accion:"Retiro completado",          xp:80,  icono:"🔄"},
+  {accion:"Visita proactiva",           xp:60,  icono:"👁"},
+  {accion:"SLA cumplido",               xp:50,  icono:"⏱"},
+  {accion:"Encuesta completada",        xp:20,  icono:"📋"},
+  {accion:"Caso recoordinado",          xp:10,  icono:"📅"},
+];
+
+// ─── COMPONENTE MISIÓN ───────────────────────────────────────
+const Mision = ({casos,setView,user,perfil}) => {
+  const [time,setTime]       = useState(new Date());
+  const [mensaje,setMensaje] = useState(null);
+  const [editMsg,setEditMsg] = useState(false);
+  const [nuevoMsg,setNuevoMsg]= useState("");
+  const [misiones,setMisiones]= useState([]);
+  const [saving,setSaving]   = useState(false);
+
+  const esDirector = perfil?.rol==="DIRECTOR";
+  const esTecnico  = perfil?.rol==="TECNICO";
+
+  useEffect(()=>{
+    const t=setInterval(()=>setTime(new Date()),1000);
+    return()=>clearInterval(t);
+  },[]);
+
+  useEffect(()=>{
+    // Cargar mensaje activo
+    supabase.from("mensajes_director").select("*")
+      .eq("activo",true).order("created_at",{ascending:false}).limit(1)
+      .then(({data})=>{ if(data?.length) setMensaje(data[0]); });
+    // Cargar misiones activas
+    supabase.from("misiones_config").select("*").eq("activa",true)
+      .then(({data})=>setMisiones(data||[]));
+  },[]);
+
+  // Calcular progreso de una misión para el usuario actual
+  const calcProgreso = (m) => {
+    const misCasos = esTecnico
+      ? casos.filter(c=>c.tecnico_id===(perfil?.auth_id||perfil?.id))
+      : casos;
+    const finalizados = misCasos.filter(c=>c.estado==="FINALIZADO");
+    switch(m.metrica){
+      case "instalaciones":      return finalizados.filter(c=>c.tipo_proceso==="INSTALACION").length;
+      case "servicios_tecnicos": return finalizados.filter(c=>c.tipo_proceso==="SERVICIO_TECNICO").length;
+      case "visitas_proactivas": return finalizados.filter(c=>c.tipo_proceso==="VISITA_PROACTIVA").length;
+      case "retiros":            return finalizados.filter(c=>c.tipo_proceso==="RETIRO").length;
+      case "casos_totales":      return finalizados.length;
+      case "sla_cumplido":
+        const total = finalizados.length;
+        const enTiempo = finalizados.filter(c=>c.sla_deadline&&new Date(c.fecha_cierre||c.updated_at)<new Date(c.sla_deadline)).length;
+        return total ? Math.round(enTiempo/total*100) : 0;
+      default: return 0;
+    }
+  };
+
+  // Indicadores según rol
+  const total       = casos.length;
+  const activos     = casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
+  const enProceso   = casos.filter(c=>c.estado==="EN_PROCESO").length;
+  const finalizados = casos.filter(c=>c.estado==="FINALIZADO").length;
+  const breach      = casos.filter(c=>c.sla_deadline&&new Date(c.sla_deadline)<new Date()&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
+  const slaComp     = total ? Math.round(((total-breach)/total)*100) : 100;
+  const pendientes  = casos.filter(c=>c.estado==="PENDIENTE").length;
+  const sinAsignar  = casos.filter(c=>!c.tecnico_id&&c.estado==="PENDIENTE").length;
+
+  const guardarMensaje = async() => {
+    setSaving(true);
+    // Desactivar mensajes anteriores
+    await supabase.from("mensajes_director").update({activo:false}).eq("activo",true);
+    if(nuevoMsg.trim()){
+      const{data}=await supabase.from("mensajes_director").insert({
+        texto:nuevoMsg.trim(), activo:true,
+        autor:user?.email, created_at:new Date().toISOString()
+      }).select().single();
+      setMensaje(data);
+    } else {
+      setMensaje(null);
+    }
+    setEditMsg(false); setSaving(false);
+    setNuevoMsg("");
+  };
+
   return (
-    <div style={{height:"100%",display:"flex",flexDirection:"column",overflow:"hidden"}}>
-      <div style={{padding:"12px 20px 10px",borderBottom:`1px solid ${B.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
-        <div>
-          <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em",marginBottom:2}}>CENTRO DE MANDO · MISIÓN ACTIVA</div>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:17,fontWeight:900,background:`linear-gradient(90deg,${B.t1},${B.orange})`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>MISIÓN DEL DÍA</div>
-        </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:B.orange}}>{time.toLocaleTimeString("es-UY",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</div>
-          <div style={{fontSize:9,color:B.t3}}>{time.toLocaleDateString("es-UY",{weekday:"long",day:"numeric",month:"long"})}</div>
+    <div style={{maxWidth:700,margin:"0 auto",padding:"0 0 40px"}}>
+
+      {/* ── LOGO ── */}
+      <div style={{textAlign:"center",padding:"20px 0 8px"}}>
+        <LogoBoolean size={0.9}/>
+        <div style={{fontSize:10,color:B.t3,letterSpacing:".22em",marginTop:6,
+          fontFamily:"'Orbitron',sans-serif"}}>
+          LA LÓGICA QUE CONVIERTE DECISIONES EN RESULTADOS
         </div>
       </div>
-      <div style={{flex:1,overflowY:"auto",padding:"14px 20px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
-        <div className="card fade-in" style={{padding:16,borderTop:`2px solid ${B.orange}`}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-            <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em"}}>MISIONES ACTIVAS</div>
-            <div className="hex float" style={{width:42,height:48,background:`linear-gradient(135deg,${B.orange},${B.amber})`,fontSize:20}}>★</div>
-          </div>
-          {MISIONES.map((m,i)=>(
-            <div key={i} style={{marginBottom:11,opacity:m.done?.6:1}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                <div style={{display:"flex",alignItems:"center",gap:7}}>
-                  <span style={{fontSize:13}}>{m.icono}</span>
-                  <span style={{fontSize:11,fontWeight:m.done?400:700,color:m.done?B.t3:B.t1,textDecoration:m.done?"line-through":"none"}}>{m.titulo}</span>
-                </div>
-                <span style={{fontSize:10,color:B.amber,fontFamily:"'Orbitron',sans-serif",fontWeight:700,flexShrink:0,marginLeft:6}}>+{m.xp}</span>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <div className="mission-bar" style={{flex:1}}><div className="mission-fill" style={{width:`${Math.min(100,(m.prog/m.meta)*100)}%`}}/></div>
-                <span style={{fontSize:9,color:B.t2,fontFamily:"'Share Tech Mono',monospace",minWidth:36,textAlign:"right"}}>{m.prog}/{m.meta}</span>
-              </div>
-              {m.done&&<div style={{fontSize:8,color:B.green,fontWeight:700,letterSpacing:".1em",marginTop:2}}>✓ COMPLETADA · +{m.xp} XP</div>}
+
+      {/* ── MENSAJE DEL DIRECTOR ── */}
+      {(mensaje||esDirector)&&(
+        <div style={{margin:"16px 0",background:"#1A0400",
+          border:`1px solid ${B.orange}`,padding:"14px 16px",position:"relative"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:mensaje?8:0}}>
+            <span style={{fontSize:18,flexShrink:0}}>📢</span>
+            <div style={{fontSize:10,fontWeight:700,color:B.orange,
+              fontFamily:"'Orbitron',sans-serif",letterSpacing:".1em"}}>
+              MENSAJE DE OPERACIONES
             </div>
-          ))}
+            {esDirector&&(
+              <button onClick={()=>{setNuevoMsg(mensaje?.texto||"");setEditMsg(true);}}
+                style={{marginLeft:"auto",background:"none",border:`1px solid ${B.orange}44`,
+                  color:B.orange,cursor:"pointer",padding:"4px 10px",fontSize:10,flexShrink:0}}>
+                {mensaje?"✎ EDITAR":"+ NUEVO"}
+              </button>
+            )}
+          </div>
+          {mensaje&&(
+            <div style={{fontSize:15,color:"#fff",fontWeight:600,lineHeight:1.6}}>
+              {mensaje.texto}
+            </div>
+          )}
+          {!mensaje&&esDirector&&(
+            <div style={{fontSize:12,color:B.t3,fontStyle:"italic"}}>
+              Sin mensaje activo. Tocá "+ NUEVO" para escribir uno.
+            </div>
+          )}
         </div>
-        <div className="card fade-in" style={{padding:16}}>
-          <div style={{fontSize:10,color:B.t2,fontWeight:700,letterSpacing:".1em",marginBottom:12}}>INDICADORES CLAVE</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-            {[{label:"INSTALACIONES",value:installs||128,delta:"▲ 12%",color:B.orange},{label:"SLA CUMPLIDO",value:`${slaComp}%`,delta:"▲ 5%",color:B.green,circle:true},{label:"INCIDENTES",value:incidentes||7,delta:"▼ 13%",color:B.red},{label:"TÉCNICOS",value:42,delta:"▲ 7%",color:B.blue}].map(k=>(
-              <div key={k.label} style={{background:B.deep,padding:"10px 11px",border:`1px solid ${B.border}`}}>
-                <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",marginBottom:5}}>{k.label}</div>
-                {k.circle?(
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <div style={{width:34,height:34,borderRadius:"50%",border:`3px solid ${k.color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,fontFamily:"'Orbitron',sans-serif",color:k.color}}>{k.value}</div>
-                    <span style={{fontSize:10,color:k.delta.startsWith("▲")?B.green:B.red,fontWeight:700}}>{k.delta}</span>
+      )}
+
+      {/* Modal editar mensaje */}
+      {editMsg&&(
+        <Modal title="📢 MENSAJE DE OPERACIONES" onClose={()=>setEditMsg(false)} width={500}>
+          <div style={{marginBottom:14}}>
+            <FL label="Mensaje (dejá vacío para eliminar el actual)"/>
+            <textarea className="field" rows={4}
+              placeholder="Ej: INCIDENTE DE ERROR DE CONEXIÓN GPRS — Todos los técnicos revisar conectividad"
+              value={nuevoMsg} onChange={e=>setNuevoMsg(e.target.value)}
+              style={{fontSize:14,resize:"vertical"}}/>
+          </div>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:10,
+            paddingTop:14,borderTop:`1px solid ${B.border}`}}>
+            <Bb label="CANCELAR" onClick={()=>setEditMsg(false)} ghost small color={B.t2}/>
+            <Bb label={saving?"GUARDANDO...":"PUBLICAR"} onClick={guardarMensaje} disabled={saving}/>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── HORA Y FECHA ── */}
+      <div style={{textAlign:"center",marginBottom:20}}>
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:36,
+          fontWeight:700,color:B.orange,letterSpacing:".06em",
+          textShadow:`0 0 20px ${B.orange}66`}}>
+          {time.toLocaleTimeString("es-UY",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}
+        </div>
+        <div style={{fontSize:12,color:B.t3,marginTop:2,letterSpacing:".08em"}}>
+          {time.toLocaleDateString("es-UY",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).toUpperCase()}
+        </div>
+      </div>
+
+      {/* ── MISIONES ACTIVAS ── */}
+      {misiones.length>0&&(
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,
+            letterSpacing:".14em",marginBottom:12,fontFamily:"'Orbitron',sans-serif"}}>
+            ◈ MISIONES ACTIVAS
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {misiones.map(m=>{
+              const progreso = calcProgreso(m);
+              const pct = Math.min(100,Math.round(progreso/m.objetivo*100));
+              const completada = pct>=100;
+              return (
+                <div key={m.id} style={{background:B.card,
+                  border:`1px solid ${completada?B.green:B.border}`,
+                  borderLeft:`3px solid ${completada?B.green:B.orange}`,
+                  padding:"14px 16px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",
+                    alignItems:"flex-start",marginBottom:8}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:B.t1}}>{m.nombre}</div>
+                      <div style={{fontSize:10,color:B.t3,marginTop:2}}>
+                        {({dia:"HOY",semana:"ESTA SEMANA",mes:"ESTE MES"})[m.periodo]} · {m.metrica==="sla_cumplido"?`Meta: ${m.objetivo}%`:`Meta: ${m.objetivo}`}
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,
+                        fontWeight:900,color:completada?B.green:B.orange}}>
+                        {progreso}{m.metrica==="sla_cumplido"?"%":""} / {m.objetivo}{m.metrica==="sla_cumplido"?"%":""}
+                      </div>
+                      <div style={{fontSize:10,color:B.green,marginTop:1}}>+{m.xp} XP</div>
+                    </div>
                   </div>
-                ):(
-                  <div>
-                    <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:22,fontWeight:900,color:k.color,lineHeight:1}}>{k.value}</div>
-                    <div style={{fontSize:10,color:k.delta.startsWith("▲")?B.green:B.red,fontWeight:700,marginTop:2}}>{k.delta}</div>
+                  <div style={{height:6,background:B.deep,borderRadius:3}}>
+                    <div style={{height:6,width:`${pct}%`,
+                      background:completada?B.green:`linear-gradient(90deg,${B.orange},${B.amber})`,
+                      borderRadius:3,transition:"width .5s"}}/>
                   </div>
-                )}
+                  {completada&&(
+                    <div style={{marginTop:8,fontSize:11,color:B.green,fontWeight:700}}>
+                      ✓ MISIÓN COMPLETADA · +{m.xp} XP desbloqueado
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── INDICADORES DE ALTO IMPACTO ── */}
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,
+          letterSpacing:".14em",marginBottom:12,fontFamily:"'Orbitron',sans-serif"}}>
+          ◈ INDICADORES CLAVE
+        </div>
+        {esTecnico ? (
+          // Vista técnico — sus propios datos
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            {[
+              {label:"MIS CASOS HOY",    val:casos.length,          color:B.blue,   icono:"📋"},
+              {label:"EN PROCESO",       val:enProceso,             color:B.yellow, icono:"⚡"},
+              {label:"FINALIZADOS HOY",  val:finalizados,           color:B.green,  icono:"✅"},
+              {label:"SLA CUMPLIDO",     val:`${slaComp}%`,         color:slaComp>=90?B.green:B.red, icono:"⏱"},
+            ].map(k=>(
+              <div key={k.label} style={{background:B.card,border:`1px solid ${B.border}`,
+                borderLeft:`3px solid ${k.color}`,padding:"14px 14px"}}>
+                <div style={{fontSize:10,color:B.t3,fontWeight:700,letterSpacing:".08em",marginBottom:6}}>
+                  {k.icono} {k.label}
+                </div>
+                <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:26,
+                  fontWeight:900,color:k.color}}>{k.val}</div>
               </div>
             ))}
           </div>
-        </div>
-        <div className="card fade-in" style={{padding:16,borderTop:`2px solid ${B.amber}`,background:B.amber+"06"}}>
-          <div style={{fontSize:10,color:B.amber,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>⚡ LOGRO DESBLOQUEADO</div>
-          <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:12}}>
-            <div className="hex float" style={{width:50,height:58,background:`linear-gradient(135deg,${B.orange},${B.amber})`,fontSize:24,flexShrink:0}}>⚡</div>
-            <div>
-              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:900,color:B.amber,lineHeight:1.2}}>MAESTRO OPERATIVO</div>
-              <div style={{fontSize:10,color:B.t2,marginTop:4}}>250 instalaciones completadas</div>
-              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,fontWeight:900,color:B.orange,marginTop:5}}>+500 XP</div>
-            </div>
+        ) : (
+          // Vista Director/Supervisor — datos globales
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            {[
+              {label:"CASOS ACTIVOS",    val:activos,               color:B.blue,   icono:"📋"},
+              {label:"EN CAMPO AHORA",   val:enProceso,             color:B.yellow, icono:"⚡"},
+              {label:"SIN ASIGNAR",      val:sinAsignar,            color:sinAsignar>0?B.red:B.green, icono:"⚠"},
+              {label:"SLA VENCIDO",      val:breach,                color:breach>0?B.red:B.green, icono:"🚨"},
+              {label:"FINALIZADOS HOY",  val:finalizados,           color:B.green,  icono:"✅"},
+              {label:"SLA CUMPLIDO",     val:`${slaComp}%`,         color:slaComp>=90?B.green:B.red, icono:"⏱"},
+            ].map(k=>(
+              <div key={k.label} style={{background:B.card,border:`1px solid ${B.border}`,
+                borderLeft:`3px solid ${k.color}`,padding:"14px 14px"}}>
+                <div style={{fontSize:10,color:B.t3,fontWeight:700,letterSpacing:".08em",marginBottom:6}}>
+                  {k.icono} {k.label}
+                </div>
+                <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:26,
+                  fontWeight:900,color:k.color}}>{k.val}</div>
+              </div>
+            ))}
           </div>
-          <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em",marginBottom:7}}>RANKING GLOBAL</div>
-          {[{n:1,name:"Diego Cayetano",xp:9100,c:B.amber},{n:2,name:"Lucía Pereyra",xp:7200,c:"#C0C0C0"},{n:3,name:"Martín Sosa",xp:5800,c:"#CD7F32"}].map(r=>(
-            <div key={r.n} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",borderBottom:`1px solid ${B.border}22`}}>
-              <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,fontWeight:900,color:r.c,minWidth:14}}>{r.n}</span>
-              <span style={{fontSize:11,flex:1}}>{r.name}</span>
-              <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:r.c}}>{r.xp.toLocaleString()} XP</span>
+        )}
+      </div>
+
+      {/* ── XP POR ACCIÓN ── */}
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,
+          letterSpacing:".14em",marginBottom:12,fontFamily:"'Orbitron',sans-serif"}}>
+          ◈ XP POR ACCIÓN
+        </div>
+        <div style={{background:B.card,border:`1px solid ${B.border}`,overflow:"hidden"}}>
+          {XP_ACCIONES.map((a,i)=>(
+            <div key={a.accion} style={{
+              display:"flex",alignItems:"center",gap:12,
+              padding:"12px 16px",
+              borderBottom:i<XP_ACCIONES.length-1?`1px solid ${B.border}22`:"none",
+              background:i%2===0?"transparent":B.deep+"44",
+            }}>
+              <span style={{fontSize:20,flexShrink:0}}>{a.icono}</span>
+              <span style={{fontSize:13,color:B.t1,flex:1}}>{a.accion}</span>
+              <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,
+                fontWeight:900,color:B.green,flexShrink:0}}>+{a.xp} XP</span>
             </div>
           ))}
         </div>
-        <div className="card fade-in" style={{padding:14}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <div style={{fontSize:10,color:B.t2,fontWeight:700,letterSpacing:".1em"}}>CASOS RECIENTES</div>
-            <button className="btn" onClick={()=>setView("casos")} style={{background:"none",color:B.orange,fontSize:10,fontWeight:700,padding:0}}>VER TODOS →</button>
-          </div>
-          {casos.length===0&&<div style={{textAlign:"center",color:B.t3,padding:16,fontSize:12}}>Sin casos aún. ¡Creá el primero!</div>}
-          {casos.slice(0,5).map(c=>{const tp=TIPOS_PROCESO.find(t=>t.codigo===c.tipo_proceso);return(
-            <div key={c.id} style={{display:"flex",gap:8,padding:"6px 0",borderBottom:`1px solid ${B.border}22`,alignItems:"center"}}>
-              <span style={{fontSize:15,flexShrink:0}}>{tp?.icono||"◈"}</span>
-              <div style={{flex:1,minWidth:0}}>
-                <div className="mono" style={{fontSize:10,color:B.orange,fontWeight:700}}>{c.numero}</div>
-                <div style={{fontSize:11,color:B.t2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.razon_social||c.descripcion||"—"}</div>
-              </div>
-              <Tg label={c.estado||"ABIERTO"} color={EC[c.estado]||B.t3}/>
-            </div>
-          );})}
-        </div>
-        <div className="card fade-in" style={{padding:14}}>
-          <div style={{fontSize:10,color:B.t2,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>XP POR ACCIÓN</div>
-          {[["Instalación completada","📦",100,B.green],["Soporte resuelto","🔧",50,B.blue],["Cumplimiento SLA","⏱",30,B.blue],["Cierre de incidente","🔥",80,B.orange],["Encuesta completada","📋",20,B.purple],["Capacitación","🎓",150,B.amber]].map(([a,ic,xp,c])=>(
-            <div key={a} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${B.border}22`,alignItems:"center"}}>
-              <span style={{fontSize:12,color:B.t2}}>{ic} {a}</span>
-              <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:700,color:c}}>+{xp}</span>
-            </div>
-          ))}
-        </div>
-        <div className="card fade-in" style={{padding:14}}>
-          <div style={{fontSize:10,color:B.t2,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>EMPRESAS</div>
-          {EMPRESAS.map(e=>{const count=casos.filter(c=>c.empresa_id===e.codigo).length;return(
-            <div key={e.codigo} style={{display:"flex",alignItems:"center",gap:9,padding:"5px 0",borderBottom:`1px solid ${B.border}22`}}>
-              <div style={{width:7,height:7,borderRadius:"50%",background:e.color,flexShrink:0}}/>
-              <span style={{fontSize:12,flex:1,color:B.t2}}>{e.nombre}</span>
-              <span style={{fontSize:11,fontWeight:700,color:e.color,fontFamily:"'Share Tech Mono',monospace"}}>{count}</span>
-            </div>
-          );})}
-        </div>
       </div>
-      <div className="kpi-bar">
-        {[{icon:"👥",label:"TÉCNICOS",value:"42",delta:"▲7%",c:B.blue},{icon:"📦",label:"INSTALACIONES",value:String(installs||128),delta:"▲12%",c:B.orange},{icon:"⚠",label:"INCIDENTES",value:String(incidentes||7),delta:"▼13%",c:B.red},{icon:"⏱",label:"SLA NACIONAL",value:`${slaComp}%`,delta:"▲5%",c:B.green},{icon:"✓",label:"RESUELTOS",value:String(casos.filter(c=>c.estado==="FINALIZADO").length),delta:"",c:B.green},{icon:"★",label:"XP TOTAL",value:"18.250",delta:"",c:B.amber}].map(k=>(
-          <div key={k.label} className="kpi-item">
-            <span style={{fontSize:15}}>{k.icon}</span>
-            <div>
-              <div style={{fontSize:8,color:B.t3,fontWeight:700,letterSpacing:".09em",textTransform:"uppercase"}}>{k.label}</div>
-              <div style={{display:"flex",alignItems:"baseline",gap:5}}>
-                <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:k.c}}>{k.value}</span>
-                {k.delta&&<span style={{fontSize:9,color:k.delta.startsWith("▲")?B.green:B.red,fontWeight:700}}>{k.delta}</span>}
-              </div>
-            </div>
+
+      {/* ── EMPRESAS (solo Director/Supervisor) ── */}
+      {!esTecnico&&(
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,
+            letterSpacing:".14em",marginBottom:12,fontFamily:"'Orbitron',sans-serif"}}>
+            ◈ CASOS POR EMPRESA
           </div>
-        ))}
-      </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {EMPRESAS.map(e=>{
+              const empCasos=casos.filter(c=>c.empresa_id===e.codigo);
+              const empActivos=empCasos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
+              if(!empCasos.length) return null;
+              return (
+                <div key={e.codigo} style={{background:B.card,
+                  border:`1px solid ${B.border}`,
+                  borderLeft:`3px solid ${e.color}`,
+                  padding:"10px 16px",
+                  display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,fontWeight:700,color:e.color}}>{e.nombre}</div>
+                    <div style={{fontSize:10,color:B.t3,marginTop:2}}>{empCasos.length} casos totales</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:14,fontWeight:700,color:B.t1}}>{empActivos}</div>
+                    <div style={{fontSize:9,color:B.t3}}>activos</div>
+                  </div>
+                </div>
+              );
+            }).filter(Boolean)}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-const COLUMNAS_STD = [
-  {id:"tipo",     label:"TIPO",      ancho:50,  visible:true},
-  {id:"terminal", label:"TERMINAL",  ancho:110, visible:true},
-  {id:"razon",    label:"RAZÓN SOCIAL", ancho:160, visible:true},
-  {id:"rut",      label:"RUT",       ancho:110, visible:true},
-  {id:"estado",   label:"ESTADO",    ancho:110, visible:true},
-  {id:"prioridad",label:"PRIORIDAD", ancho:90,  visible:true},
-  {id:"franja",   label:"FRANJA",    ancho:100, visible:true},
-  {id:"telefono", label:"TEL.",      ancho:100, visible:true},
-  {id:"direccion",label:"DIRECCIÓN", ancho:160, visible:true},
-  {id:"localidad",label:"LOCALIDAD", ancho:110, visible:true},
-  {id:"depto",    label:"DEPTO",     ancho:100, visible:true},
-];
 
-const TIPO_ICONO = {
-  INSTALACION:"📦", SERVICIO_TECNICO:"🔧", RETIRO:"🔄", VISITA_PROACTIVA:"👁"
-};
 
 const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
   const [search,   setSearch]   = useState("");
@@ -1965,6 +2170,284 @@ const ModalEncuestaConfig = ({ encuesta, caso, user, onClose, onSave }) => {
 // ═══════════════════════════════════════════════════════════════
 // GESTIÓN DE ENCUESTAS — en Configuración
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// GESTOR DE MISIONES — Configurable por Director
+// ═══════════════════════════════════════════════════════════
+const METRICAS_MISION = [
+  {id:"instalaciones",     label:"Instalaciones completadas"},
+  {id:"servicios_tecnicos",label:"Servicios técnicos resueltos"},
+  {id:"visitas_proactivas",label:"Visitas técnicas proactivas"},
+  {id:"retiros",           label:"Retiros completados"},
+  {id:"casos_totales",     label:"Casos totales finalizados"},
+  {id:"sla_cumplido",      label:"SLA cumplido (%)"},
+];
+
+const PERIODOS = [
+  {id:"dia",   label:"DÍA",    icono:"📅"},
+  {id:"semana",label:"SEMANA", icono:"📆"},
+  {id:"mes",   label:"MES",    icono:"🗓"},
+];
+
+const GestorMisiones = ({ toast }) => {
+  const [misiones,  setMisiones]  = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [editando,  setEditando]  = useState(null); // null | "nueva" | mision
+  const [empresas,  setEmpresas]  = useState([]);
+  const [form, setForm] = useState({
+    nombre:"", descripcion:"", periodo:"dia",
+    metrica:"instalaciones", objetivo:10, xp:100,
+    aplica_a:"todos", empresa_id:null, activa:true,
+  });
+
+  useEffect(()=>{
+    cargar();
+    supabase.from("empresas_config").select("*")
+      .then(({data})=>setEmpresas(data||[]));
+  },[]);
+
+  const cargar=async()=>{
+    const{data}=await supabase.from("misiones_config")
+      .select("*").order("created_at",{ascending:false});
+    setMisiones(data||[]); setLoading(false);
+  };
+
+  const guardar=async()=>{
+    if(editando==="nueva"){
+      await supabase.from("misiones_config").insert({...form,created_at:new Date().toISOString()});
+    } else {
+      await supabase.from("misiones_config").update({...form,updated_at:new Date().toISOString()}).eq("id",editando.id);
+    }
+    await cargar(); setEditando(null);
+    toast("✓ Misión guardada");
+  };
+
+  const toggleActiva=async(m)=>{
+    await supabase.from("misiones_config").update({activa:!m.activa}).eq("id",m.id);
+    await cargar();
+  };
+
+  const eliminar=async(id)=>{
+    if(!window.confirm("¿Eliminar esta misión?")) return;
+    await supabase.from("misiones_config").delete().eq("id",id);
+    await cargar(); toast("Misión eliminada");
+  };
+
+  const abrirNueva=()=>{
+    setForm({nombre:"",descripcion:"",periodo:"dia",metrica:"instalaciones",objetivo:10,xp:100,aplica_a:"todos",empresa_id:null,activa:true});
+    setEditando("nueva");
+  };
+
+  const abrirEditar=(m)=>{
+    setForm({nombre:m.nombre,descripcion:m.descripcion||"",periodo:m.periodo,
+      metrica:m.metrica,objetivo:m.objetivo,xp:m.xp,
+      aplica_a:m.aplica_a||"todos",empresa_id:m.empresa_id,activa:m.activa});
+    setEditando(m);
+  };
+
+  const s=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const completo = form.nombre.trim() && form.objetivo>0 && form.xp>0;
+
+  // ── FORMULARIO ──────────────────────────────────────────
+  if(editando) return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+        <button onClick={()=>setEditando(null)}
+          style={{background:"none",border:`1px solid ${B.border}`,color:B.t2,
+            cursor:"pointer",padding:"6px 12px",fontSize:11,fontFamily:"'Orbitron',sans-serif"}}>
+          ← VOLVER
+        </button>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:B.t1}}>
+          {editando==="nueva"?"NUEVA MISIÓN":`EDITANDO: ${editando.nombre}`}
+        </div>
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:600}}>
+        {/* Nombre */}
+        <div>
+          <FL label="Nombre de la misión" req/>
+          <input className="field" value={form.nombre}
+            onChange={e=>s("nombre",e.target.value)}
+            placeholder="Ej: Instalar 10 terminales esta semana"/>
+        </div>
+
+        {/* Descripción */}
+        <div>
+          <FL label="Descripción (opcional)"/>
+          <input className="field" value={form.descripcion}
+            onChange={e=>s("descripcion",e.target.value)}
+            placeholder="Detalle adicional de la misión"/>
+        </div>
+
+        {/* Período */}
+        <div>
+          <FL label="Período" req/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+            {PERIODOS.map(p=>(
+              <button key={p.id} onClick={()=>s("periodo",p.id)}
+                style={{padding:"14px 10px",textAlign:"center",
+                  border:`2px solid ${form.periodo===p.id?B.orange:B.border}`,
+                  background:form.periodo===p.id?B.orangeDim:B.deep,
+                  color:form.periodo===p.id?B.orange:B.t2,
+                  cursor:"pointer",borderRadius:2,transition:"all .15s"}}>
+                <div style={{fontSize:24,marginBottom:4}}>{p.icono}</div>
+                <div style={{fontSize:12,fontWeight:700}}>{p.label}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Métrica */}
+        <div>
+          <FL label="¿Qué se mide?" req/>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {METRICAS_MISION.map(m=>(
+              <button key={m.id} onClick={()=>s("metrica",m.id)}
+                style={{padding:"12px 16px",textAlign:"left",
+                  border:`2px solid ${form.metrica===m.id?B.orange:B.border}`,
+                  background:form.metrica===m.id?B.orangeDim:B.deep,
+                  color:form.metrica===m.id?B.orange:B.t2,
+                  cursor:"pointer",borderRadius:2,fontSize:13,
+                  display:"flex",alignItems:"center",gap:10,transition:"all .15s"}}>
+                <span style={{fontSize:16}}>{form.metrica===m.id?"◉":"○"}</span>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Objetivo y XP */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+          <div>
+            <FL label="Objetivo (número)" req/>
+            <input className="field" type="number" min={1}
+              value={form.objetivo} onChange={e=>s("objetivo",parseInt(e.target.value)||1)}
+              style={{fontSize:20,textAlign:"center",fontFamily:"'Orbitron',sans-serif",fontWeight:700,color:B.orange}}/>
+            <div style={{fontSize:10,color:B.t3,marginTop:4,textAlign:"center"}}>
+              {form.metrica==="sla_cumplido"?"%":"cantidad"}
+            </div>
+          </div>
+          <div>
+            <FL label="XP al completar" req/>
+            <input className="field" type="number" min={10}
+              value={form.xp} onChange={e=>s("xp",parseInt(e.target.value)||10)}
+              style={{fontSize:20,textAlign:"center",fontFamily:"'Orbitron',sans-serif",fontWeight:700,color:B.green}}/>
+            <div style={{fontSize:10,color:B.t3,marginTop:4,textAlign:"center"}}>puntos XP</div>
+          </div>
+        </div>
+
+        {/* Aplica a */}
+        <div>
+          <FL label="¿A quién aplica?" req/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            {[["todos","🌐 Todos los técnicos"],["empresa","🏢 Por empresa"]].map(([v,l])=>(
+              <button key={v} onClick={()=>s("aplica_a",v)}
+                style={{padding:"14px 12px",
+                  border:`2px solid ${form.aplica_a===v?B.blue:B.border}`,
+                  background:form.aplica_a===v?B.blue+"22":B.deep,
+                  color:form.aplica_a===v?B.blue:B.t2,
+                  cursor:"pointer",borderRadius:2,fontSize:13,fontWeight:700,
+                  transition:"all .15s"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+          {form.aplica_a==="empresa"&&(
+            <div>
+              <FL label="Empresa"/>
+              <select className="field" value={form.empresa_id||""}
+                onChange={e=>s("empresa_id",e.target.value||null)}>
+                <option value="">Seleccioná una empresa...</option>
+                {EMPRESAS.map(e=>(
+                  <option key={e.codigo} value={e.codigo}>{e.nombre}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Activa */}
+        <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",
+          background:B.card,border:`1px solid ${B.border}`}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:700,color:B.t1}}>Misión activa</div>
+            <div style={{fontSize:11,color:B.t3}}>Los técnicos la verán en su Dashboard</div>
+          </div>
+          <button onClick={()=>s("activa",!form.activa)}
+            style={{width:52,height:28,borderRadius:14,border:"none",cursor:"pointer",
+              background:form.activa?B.green:B.t3,position:"relative",transition:"background .2s"}}>
+            <div style={{position:"absolute",top:3,left:form.activa?26:3,
+              width:22,height:22,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+          </button>
+        </div>
+
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+          <Bb label="CANCELAR" onClick={()=>setEditando(null)} ghost small color={B.t2}/>
+          <Bb label="GUARDAR MISIÓN" onClick={guardar} disabled={!completo}/>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── LISTA ────────────────────────────────────────────────
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em"}}>
+          ◈ MISIONES CONFIGURADAS
+        </div>
+        <Bb label="+ NUEVA MISIÓN" onClick={abrirNueva} small/>
+      </div>
+
+      {loading?<div style={{textAlign:"center",padding:30}}><Spin/></div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {misiones.length===0&&(
+            <div style={{textAlign:"center",padding:40,color:B.t3,fontSize:12}}>
+              Sin misiones configuradas. Creá la primera.
+            </div>
+          )}
+          {misiones.map(m=>{
+            const periodo = PERIODOS.find(p=>p.id===m.periodo);
+            const metrica = METRICAS_MISION.find(mt=>mt.id===m.metrica);
+            return (
+              <div key={m.id} style={{background:B.card,
+                border:`1px solid ${m.activa?B.orange+"44":B.border}`,
+                borderLeft:`3px solid ${m.activa?B.orange:B.t3}`,
+                padding:"14px 16px"}}>
+                <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
+                  <span style={{fontSize:24,flexShrink:0}}>{periodo?.icono||"🎯"}</span>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <div style={{fontSize:13,fontWeight:700,color:B.t1}}>{m.nombre}</div>
+                      <Tg label={m.activa?"ACTIVA":"INACTIVA"} color={m.activa?B.green:B.t3}/>
+                    </div>
+                    {m.descripcion&&<div style={{fontSize:11,color:B.t3,marginBottom:6}}>{m.descripcion}</div>}
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <Tg label={periodo?.label||m.periodo} color={B.blue}/>
+                      <Tg label={metrica?.label||m.metrica} color={B.purple}/>
+                      <Tg label={`Meta: ${m.objetivo}`} color={B.orange}/>
+                      <Tg label={`+${m.xp} XP`} color={B.green}/>
+                      <Tg label={m.aplica_a==="todos"?"🌐 Todos":m.empresa_id||"empresa"} color={B.t2}/>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                    <button onClick={()=>toggleActiva(m)}
+                      style={{background:"none",border:`1px solid ${B.border}`,
+                        color:B.t2,cursor:"pointer",padding:"4px 10px",fontSize:10}}>
+                      {m.activa?"DESACTIVAR":"ACTIVAR"}
+                    </button>
+                    <Bb label="✎" onClick={()=>abrirEditar(m)} ghost small color={B.blue}/>
+                    <Bb label="✗" onClick={()=>eliminar(m.id)} ghost small color={B.red}/>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const GestorEncuestas = ({ user, toast }) => {
   const [encuestas, setEncuestas] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2177,11 +2660,22 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   const [encuestasDelCaso,setEncuestasDelCaso] = useState([]);
   const [showPausar,setShowPausar]     = useState(false);
   const [showCancelar,setShowCancelar] = useState(false);
-  const [showFinalizar,setShowFinalizar] = useState(false); // pantalla completa
+  const [showFinalizar,setShowFinalizar] = useState(false);
   const [showRecoord,setShowRecoord]   = useState(false);
-  // Pantalla de instrucciones completa
   const [pantallaInstr,setPantallaInstr] = useState(false);
-  const [tiempoSegundos,setTiempoSeg] = useState(casoInit.tiempo_total_seg||0);
+
+  // ── CONTADOR DE TIEMPO ──────────────────────────────────────
+  // Calcula el tiempo real: tiempo acumulado + tiempo desde que inició EN_PROCESO
+  const calcularTiempoInicial = (c) => {
+    const acumulado = c.tiempo_total_seg || 0;
+    if(c.estado === "EN_PROCESO" && c.tecnico_inicio_at){
+      const segsDesdeInicio = Math.floor((Date.now() - new Date(c.tecnico_inicio_at).getTime()) / 1000);
+      return acumulado + Math.max(0, segsDesdeInicio);
+    }
+    return acumulado;
+  };
+
+  const [tiempoSegundos,setTiempoSeg] = useState(()=>calcularTiempoInicial(casoInit));
   const timerRef = useRef(null);
 
   const tp  = TIPOS_PROCESO.find(t=>t.codigo===caso.tipo_proceso);
@@ -2202,8 +2696,12 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
 
   useEffect(()=>{
     if(caso.estado==="EN_PROCESO"){
+      // Recalcular base correcta cada vez que el estado cambia a EN_PROCESO
+      setTiempoSeg(calcularTiempoInicial(caso));
       timerRef.current=setInterval(()=>setTiempoSeg(s=>s+1),1000);
-    } else { clearInterval(timerRef.current); }
+    } else {
+      clearInterval(timerRef.current);
+    }
     return()=>clearInterval(timerRef.current);
   },[caso.estado]);
 
@@ -2256,7 +2754,17 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   };
 
   const cambiarEstadoDirecto=async(nuevoEstado,msg)=>{
-    await actualizarCaso({estado:nuevoEstado,tiempo_total_seg:tiempoSegundos},msg);
+    const ts = new Date().toISOString();
+    const extras = {};
+    if(nuevoEstado === "EN_PROCESO"){
+      // Guardar cuándo inició para calcular tiempo real al re-entrar
+      extras.tecnico_inicio_at = ts;
+    } else {
+      // Al pausar/cancelar/finalizar: acumular tiempo y limpiar inicio_at
+      extras.tiempo_total_seg = tiempoSegundos;
+      extras.tecnico_inicio_at = null;
+    }
+    await actualizarCaso({estado:nuevoEstado,...extras},msg);
     toast(`Estado: ${nuevoEstado}`);
   };
 
@@ -2283,12 +2791,27 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   };
 
   const pausar=async(motivo)=>{
-    await actualizarCaso({estado:"PAUSADO",tiempo_total_seg:tiempoSegundos},`PAUSADO — Motivo: ${motivo}`,"PAUSA");
+    await actualizarCaso({
+      estado:"PAUSADO",
+      tiempo_total_seg:tiempoSegundos,
+      tecnico_inicio_at:null,
+    },`PAUSADO — Motivo: ${motivo}`,"PAUSA");
     toast("Caso pausado");
   };
-  const reanudar=async()=>{ await cambiarEstadoDirecto("EN_PROCESO","Caso reanudado"); toast("Caso reanudado"); };
+  const reanudar=async()=>{
+    const ts=new Date().toISOString();
+    await actualizarCaso({
+      estado:"EN_PROCESO",
+      tecnico_inicio_at:ts,
+    },"Caso reanudado");
+    toast("Caso reanudado");
+  };
   const cancelar=async(motivo)=>{
-    await actualizarCaso({estado:"CANCELADO",tiempo_total_seg:tiempoSegundos},`CANCELADO — Motivo: ${motivo}`,"CANCELACION");
+    await actualizarCaso({
+      estado:"CANCELADO",
+      tiempo_total_seg:tiempoSegundos,
+      tecnico_inicio_at:null,
+    },`CANCELADO — Motivo: ${motivo}`,"CANCELACION");
     toast("Caso cancelado");
   };
 
@@ -4080,44 +4603,71 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
       )}
       {tab==="procesos"&&(
         <div>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {procesos.map(p=>(
-              <div key={p.codigo} style={{background:B.card,border:`1px solid ${B.border}`,borderLeft:`3px solid ${p.color}`,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
-                <span style={{fontSize:24}}>{p.icono}</span>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ SLA POR TIPO DE PROCESO</div>
+          <div style={{fontSize:11,color:B.t2,marginBottom:16,lineHeight:1.6}}>
+            Configurá el tiempo máximo de atención para cada tipo de proceso. Se aplica a todos los casos nuevos.
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {procesos.map((p,i)=>(
+              <div key={p.codigo} style={{background:B.card,border:`1px solid ${B.border}`,
+                borderLeft:`3px solid ${p.color}`,padding:"14px 16px",
+                display:"flex",alignItems:"center",gap:14}}>
+                <span style={{fontSize:28,flexShrink:0}}>{p.icono}</span>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:700,color:B.t1}}>{p.nombre}</div>
-                  <div style={{fontSize:10,color:B.t3}}>{p.codigo}</div>
+                  <div style={{fontSize:10,color:B.t3,marginTop:2}}>{p.codigo}</div>
                 </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:22,fontWeight:900,color:p.color}}>{p.sla}h</div>
-                  <div style={{fontSize:9,color:B.t3}}>SLA</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,background:B.deep,
+                    border:`1px solid ${B.border}`,padding:"4px 10px"}}>
+                    <button onClick={()=>{
+                      const np=[...procesos];
+                      np[i]={...np[i],sla:Math.max(1,np[i].sla-1)};
+                      setProcesos(np);
+                    }} style={{background:"none",border:"none",color:B.t2,cursor:"pointer",
+                      fontSize:18,padding:"0 4px",fontWeight:700}}>−</button>
+                    <input
+                      type="number" min={1} max={168}
+                      value={p.sla}
+                      onChange={e=>{
+                        const np=[...procesos];
+                        np[i]={...np[i],sla:Math.max(1,parseInt(e.target.value)||1)};
+                        setProcesos(np);
+                      }}
+                      style={{width:48,textAlign:"center",background:"none",border:"none",
+                        color:p.color,fontFamily:"'Orbitron',sans-serif",
+                        fontSize:20,fontWeight:900,outline:"none"}}/>
+                    <button onClick={()=>{
+                      const np=[...procesos];
+                      np[i]={...np[i],sla:np[i].sla+1};
+                      setProcesos(np);
+                    }} style={{background:"none",border:"none",color:B.t2,cursor:"pointer",
+                      fontSize:18,padding:"0 4px",fontWeight:700}}>+</button>
+                  </div>
+                  <span style={{fontSize:11,color:B.t3,fontWeight:700}}>horas</span>
                 </div>
               </div>
             ))}
           </div>
-          <div style={{marginTop:12,padding:"10px 14px",background:B.orangeDim,border:`1px solid ${B.orange}22`,fontSize:11,color:B.t2}}>
-            ℹ Los valores de SLA se configuran directamente en la base de datos. Contactá al administrador para modificarlos.
+          <div style={{marginTop:14,display:"flex",justifyContent:"flex-end"}}>
+            <Bb label="GUARDAR CAMBIOS DE SLA" onClick={async()=>{
+              // Guardar en tabla config_sla (o crear si no existe)
+              for(const p of procesos){
+                await supabase.from("config_sla").upsert({
+                  tipo_proceso:p.codigo, sla_horas:p.sla, updated_at:new Date().toISOString()
+                },{onConflict:"tipo_proceso"});
+              }
+              toast("✓ SLA actualizado correctamente");
+            }}/>
+          </div>
+          <div style={{marginTop:10,padding:"10px 14px",background:B.orangeDim,
+            border:`1px solid ${B.orange}22`,fontSize:11,color:B.t2}}>
+            ℹ Los cambios aplican a casos nuevos. Los casos existentes mantienen su SLA original.
           </div>
         </div>
       )}
       {tab==="misiones"&&(
-        loading?<div style={{textAlign:"center",padding:40}}><Spin/></div>:(
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {misiones.map(m=>(
-              <div key={m.id} style={{background:B.card,border:`1px solid ${B.border}`,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
-                <span style={{fontSize:22}}>{m.icono||"🎯"}</span>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,fontWeight:700,color:B.t1}}>{m.nombre}</div>
-                  <div style={{fontSize:10,color:B.t3}}>{m.descripcion}</div>
-                </div>
-                <div style={{textAlign:"right"}}>
-                  <Tg label={`+${m.xp_reward} XP`} color={B.green}/>
-                  <div style={{fontSize:10,color:B.t3,marginTop:4}}>{m.tipo_proceso||"Todos"}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )
+        <GestorMisiones toast={toast}/>
       )}
       {tab==="sistema"&&(
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -4190,6 +4740,7 @@ export default function App(){
   // ── Redirección por rol — debe estar antes de cualquier return condicional ──
   useEffect(()=>{
     if(!perfil) return;
+    if(casoDetalle) return; // no redirigir si hay un caso abierto
     const PERMISOS={
       DIRECTOR:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","config","detalle"],
       REGIONAL:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","detalle"],
@@ -4198,7 +4749,7 @@ export default function App(){
     };
     const permitidos=PERMISOS[perfil.rol]||PERMISOS.DIRECTOR;
     if(!permitidos.includes(view)) setView("mision");
-  },[perfil,view]);
+  },[perfil,view,casoDetalle]);
 
   const toast=(msg,dur=3000)=>{
     setToastMsg(msg);
@@ -4250,9 +4801,9 @@ export default function App(){
       <div style={{display:"flex",flex:1,overflow:"hidden",height:"calc(100vh - 24px)"}}>
         <Sidebar view={view} setView={v=>{setView(v);setCasoDetalle(null);}} user={user} onLogout={()=>supabase.auth.signOut()} casos={casos} perfil={perfil}/>
         <main className={window.innerWidth<768?"mobile-main":""} style={{flex:1,overflowY:"auto",padding:window.innerWidth<768?"16px 14px":"24px 28px"}}>
-          {view==="mision"&&<Mision casos={casos} setView={setView}/>}
+          {view==="mision"&&!casoDetalle&&<Mision casos={casos} setView={setView} user={user} perfil={perfil}/>}
           {view==="ruta"&&<MiRutaDelDia user={user} toast={toast} perfil={perfil}/>}
-          {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);setView("detalle");}} onNew={()=>setView("nuevo")}/>}
+          {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);}} onNew={()=>setView("nuevo")}/>}
           {view==="nuevo"&&<NuevoCaso onCancel={()=>setView("casos")} loading={false} onSave={async(f)=>{
             const tp=TIPOS_PROCESO.find(t=>t.codigo===f.tipo_proceso);
             const instrEsp = f.tiene_instrucciones && f.instrucciones_texto?.trim()
@@ -4273,7 +4824,7 @@ export default function App(){
             if(error){toast("Error: "+error.message);}
             else{toast(`✓ Caso creado · +${tp?.xp||50} XP`);await recargarCasos();setView("casos");}
           }}/>}
-          {view==="detalle"&&casoDetalle&&<CasoDetalle
+          {casoDetalle&&<CasoDetalle
             caso={casoDetalle}
             user={user}
             toast={toast}
@@ -4281,13 +4832,12 @@ export default function App(){
             onBack={async()=>{
               setCasoDetalle(null);
               setView("casos");
-              await recargarCasos(); // recarga siempre al volver
+              await recargarCasos();
             }}
             onUpdate={(casoActualizado)=>{
               const esTecnico = perfil?.rol==="TECNICO";
               const estadosOcultos = ["FINALIZADO","CANCELADO"];
               if(esTecnico && estadosOcultos.includes(casoActualizado.estado)){
-                // Técnico no debe ver casos finalizados o cancelados
                 setCasos(prev=>prev.filter(c=>c.id!==casoActualizado.id));
               } else {
                 setCasos(prev=>prev.map(c=>c.id===casoActualizado.id?casoActualizado:c));
