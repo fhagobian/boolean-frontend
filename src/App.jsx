@@ -356,10 +356,10 @@ const Sidebar = ({view,setView,user,onLogout,casos,perfil}) => {
   // ── DESKTOP — sidebar lateral original ───────────────────
   return (
     <div style={{width:210,background:B.panel,borderRight:`1px solid ${B.border}`,display:"flex",flexDirection:"column",height:"100%",flexShrink:0}}>
-      <div style={{padding:"16px 16px 12px",borderBottom:`1px solid ${B.border}`,flexShrink:0}}>
-        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:21,fontWeight:900,color:B.orange,letterSpacing:".06em",lineHeight:1}} className="glow">BOOLEAN</div>
-        <div style={{fontSize:8,color:B.t3,letterSpacing:".1em",marginTop:4,textTransform:"uppercase",lineHeight:1.5}}>La lógica detrás de<br/>toda la operación</div>
-        <div style={{width:"100%",height:1,background:`linear-gradient(90deg,${B.orange}66,transparent)`,marginTop:10}}/>
+      <div style={{padding:"12px 16px 10px",borderBottom:`1px solid ${B.border}`,flexShrink:0}}>
+        <img src="/logo-boolean.png" alt="BOOLEAN"
+          style={{width:"100%",maxWidth:180,height:"auto",
+            filter:"drop-shadow(0 0 8px #FF6B0033)"}}/>
       </div>
       {breach>0&&(
         <div style={{margin:"8px 10px 0",background:B.redDim,border:`1px solid ${B.red}33`,borderLeft:`2px solid ${B.red}`,padding:"6px 10px",display:"flex",gap:7,alignItems:"center"}}>
@@ -467,51 +467,18 @@ const MobileMoreMenu = ({menu, view, setView, onLogout, user, perfil}) => {
 
 // ─── LOGO SVG BOOLEAN ────────────────────────────────────────
 const LogoBoolean = ({size=1}) => (
-  <svg width={280*size} height={60*size} viewBox="0 0 280 60" style={{display:"block"}}>
-    <defs>
-      <linearGradient id="metalGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.95"/>
-        <stop offset="40%" stopColor="#FF6B00" stopOpacity="0.9"/>
-        <stop offset="100%" stopColor="#CC4400" stopOpacity="1"/>
-      </linearGradient>
-      <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-        <stop offset="0%" stopColor="#FF6B00" stopOpacity="0"/>
-        <stop offset="50%" stopColor="#FF6B00" stopOpacity="0.6"/>
-        <stop offset="100%" stopColor="#FF6B00" stopOpacity="0"/>
-      </linearGradient>
-      <filter id="glow">
-        <feGaussianBlur stdDeviation="1.5" result="blur"/>
-        <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-      </filter>
-    </defs>
-    {/* Glow line under text */}
-    <rect x="0" y="54" width="280" height="1.5" fill="url(#glowGrad)" opacity="0.8"/>
-    {/* Circuit dots */}
-    {[10,30,50,230,250,270].map((x,i)=>(
-      <circle key={i} cx={x*size} cy={8*size} r={2*size} fill="#FF6B00" opacity="0.5"/>
-    ))}
-    {/* BOOLEAN text */}
-    <text x="140" y="46" textAnchor="middle"
-      fontFamily="'Orbitron',sans-serif" fontWeight="900"
-      fontSize={42*size} fill="url(#metalGrad)"
-      filter="url(#glow)" letterSpacing={2*size}>
-      BOOLEAN
-    </text>
-    {/* Gate symbol - AND gate on B */}
-    <g transform={`translate(${4*size},${18*size}) scale(${0.6*size})`} opacity="0.7">
-      <path d="M0,0 L0,20 Q20,20 20,10 Q20,0 0,0" fill="none" stroke="#FF6B00" strokeWidth="1.5"/>
-      <line x1="0" y1="5" x2="-6" y2="5" stroke="#FF6B00" strokeWidth="1.2"/>
-      <line x1="0" y1="15" x2="-6" y2="15" stroke="#FF6B00" strokeWidth="1.2"/>
-      <line x1="20" y1="10" x2="26" y2="10" stroke="#FF6B00" strokeWidth="1.2"/>
-    </g>
-    {/* Gate symbol - OR gate on last O */}
-    <g transform={`translate(${240*size},${18*size}) scale(${0.6*size})`} opacity="0.7">
-      <path d="M0,0 Q5,10 0,20 Q15,20 22,10 Q15,0 0,0" fill="none" stroke="#FF6B00" strokeWidth="1.5"/>
-      <line x1="0" y1="5" x2="-6" y2="5" stroke="#FF6B00" strokeWidth="1.2"/>
-      <line x1="0" y1="15" x2="-6" y2="15" stroke="#FF6B00" strokeWidth="1.2"/>
-      <line x1="22" y1="10" x2="28" y2="10" stroke="#FF6B00" strokeWidth="1.2"/>
-    </g>
-  </svg>
+  <img
+    src="/logo-boolean.png"
+    alt="BOOLEAN — La lógica que convierte decisiones en resultados"
+    style={{
+      width: Math.round(320*size),
+      maxWidth: "100%",
+      height: "auto",
+      display: "block",
+      margin: "0 auto",
+      filter: "drop-shadow(0 0 12px #FF6B0044)",
+    }}
+  />
 );
 
 // ─── XP POR ACCIÓN ───────────────────────────────────────────
@@ -605,10 +572,6 @@ const Mision = ({casos,setView,user,perfil}) => {
       {/* ── LOGO ── */}
       <div style={{textAlign:"center",padding:"20px 0 8px"}}>
         <LogoBoolean size={0.9}/>
-        <div style={{fontSize:10,color:B.t3,letterSpacing:".22em",marginTop:6,
-          fontFamily:"'Orbitron',sans-serif"}}>
-          LA LÓGICA QUE CONVIERTE DECISIONES EN RESULTADOS
-        </div>
       </div>
 
       {/* ── MENSAJE DEL DIRECTOR ── */}
