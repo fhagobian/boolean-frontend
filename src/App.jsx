@@ -4811,6 +4811,58 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
 // ═══════════════════════════════════════════════════════════
 // APP ROOT
 // ═══════════════════════════════════════════════════════════
+// ─── HOOK RECORDATORIOS ──────────────────────────────────────
+const useRecordatorios = (casos, user, minutosAntes) => {
+  const timersRef  = useRef([]);
+  const casosIdRef = useRef(new Set());
+
+  const FRANJA_INICIO = {
+    "FH1 (8-12)": {h:8,m:0}, "FH2 (12-16)": {h:12,m:0},
+    "FH3 (16-19)": {h:16,m:0}, "FH4 (19-22)": {h:19,m:0},
+  };
+
+  const msHastaAviso = (caso, restMin) => {
+    const franja = caso.franja_horaria||caso.rango_horario;
+    const def = FRANJA_INICIO[franja];
+    if(!def) return null;
+    const hoy = new Date();
+    const target = new Date(hoy.getFullYear(),hoy.getMonth(),hoy.getDate(),def.h,def.m,0,0);
+    const aviso = new Date(target.getTime()-restMin*60000);
+    const diff = aviso.getTime()-Date.now();
+    return diff>0?diff:null;
+  };
+
+  const programarCaso = useCallback((caso)=>{
+    if(casosIdRef.current.has(caso.id)) return;
+    const franja = caso.franja_horaria||caso.rango_horario;
+    if(!franja||!FRANJA_INICIO[franja]) return;
+    if(["FINALIZADO","CANCELADO"].includes(caso.estado||"")) return;
+    casosIdRef.current.add(caso.id);
+    const msPrinc = msHastaAviso(caso, minutosAntes);
+    if(msPrinc!==null){
+      const t = setTimeout(()=>{
+        if(Notification.permission==="granted"){
+          new Notification(`🔔 ${caso.razon_social||"Caso"}`,{
+            body:`${caso.direccion||""}\n${franja}`,
+            icon:"/favicon.ico",
+          });
+        }
+      }, msPrinc);
+      timersRef.current.push(t);
+    }
+  },[minutosAntes]);
+
+  useEffect(()=>{
+    if(Notification.permission!=="granted") return;
+    if(!casos?.length) return;
+    casos.forEach(c=>programarCaso(c));
+  },[casos,programarCaso]);
+
+  useEffect(()=>{
+    return()=>timersRef.current.forEach(t=>clearTimeout(t));
+  },[]);
+};
+
 export default function App(){
   const [session,setSession]=useState(null);
   const [loading,setLoading]=useState(true);
