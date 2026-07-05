@@ -4344,471 +4344,341 @@ const Logros=({user,toast})=>{
 };
 
 // ─── USUARIOS ────────────────────────────────────────────
-const Usuarios=({user,toast})=>{
-  const [users,setUsers]=useState([]);
-  const [loading,setLoading]=useState(true);
-  const [showNew,setShowNew]=useState(false);
-  const [form,setForm]=useState({email:"",nombre:"",rol:"tecnico",empresa_id:"",zona_id:""});
-  const [saving,setSaving]=useState(false);
-  const ROLES=["director","representante_regional","supervisor","tecnico"];
-  const ROL_LABEL={director:"Director",representante_regional:"Rep. Regional",supervisor:"Supervisor",tecnico:"Técnico de Campo"};
-  const ROL_COLOR={director:B=>B.red,representante_regional:B=>B.orange,supervisor:B=>B.blue,tecnico:B=>B.green};
+const Usuarios=({user,perfil,toast,casos})=>{
+  const [usuarios,  setUsuarios]  = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [editando,  setEditando]  = useState(null); // null | "nuevo" | usuario
+  const [filtroRol, setFiltroRol] = useState("ALL");
+  const [search,    setSearch]    = useState("");
+  const [form, setForm] = useState({
+    nombre:"", apellido:"", email:"", rol:"TECNICO",
+    empresa_codigo:"", supervisor_id:"", activo:true,
+  });
 
-  useEffect(()=>{
-    (async()=>{
-      const{data}=await supabase.from("usuarios").select("*").order("created_at",{ascending:false});
-      setUsers(data||[]);setLoading(false);
-    })();
-  },[]);
+  const esDirector   = perfil?.rol==="DIRECTOR";
+  const esRegional   = perfil?.rol==="REGIONAL";
+  const esSupervisor = perfil?.rol==="SUPERVISOR";
+  const soloLectura  = esSupervisor;
 
-  const crearUsuario=async()=>{
-    if(!form.email||!form.nombre)return;
-    setSaving(true);
-    const{error}=await supabase.from("usuarios").insert({...form,activo:true});
-    if(error){toast("Error: "+error.message);}
-    else{
-      const{data}=await supabase.from("usuarios").select("*").order("created_at",{ascending:false});
-      setUsers(data||[]);
-      setShowNew(false);setForm({email:"",nombre:"",rol:"tecnico",empresa_id:"",zona_id:""});
-      toast("Usuario creado · Enviar invitación desde Supabase Auth");
+  useEffect(()=>{ cargar(); },[]);
+
+  const cargar=async()=>{
+    setLoading(true);
+    let q = supabase.from("usuarios").select("*").order("empresa_codigo").order("rol");
+    if(esRegional||esSupervisor){
+      q = q.eq("empresa_codigo", perfil.empresa_codigo);
     }
-    setSaving(false);
+    const{data}=await q;
+    setUsuarios(data||[]);
+    setLoading(false);
   };
 
-  const JERARQUIA=["director","representante_regional","supervisor","tecnico"];
-  return(
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:18,color:B.t1}}>◈ USUARIOS</div>
-        <Bb label="+ NUEVO USUARIO" onClick={()=>setShowNew(true)} small/>
+  const supervisores = usuarios.filter(u=>u.rol==="SUPERVISOR"&&u.activo);
+  const tecnicos     = usuarios.filter(u=>u.rol==="TECNICO");
+
+  const fil = usuarios.filter(u=>{
+    if(filtroRol!=="ALL"&&u.rol!==filtroRol) return false;
+    if(search){
+      const q=search.toLowerCase();
+      return (u.nombre||"").toLowerCase().includes(q)||
+             (u.apellido||"").toLowerCase().includes(q)||
+             (u.email||"").toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const s=(k,v)=>setForm(f=>({...f,[k]:v}));
+
+  const abrirNuevo=()=>{
+    setForm({nombre:"",apellido:"",email:"",rol:"TECNICO",
+      empresa_codigo:esRegional?perfil.empresa_codigo:"",
+      supervisor_id:"",activo:true});
+    setEditando("nuevo");
+  };
+
+  const abrirEditar=(u)=>{
+    setForm({nombre:u.nombre||"",apellido:u.apellido||"",
+      email:u.email||"",rol:u.rol||"TECNICO",
+      empresa_codigo:u.empresa_codigo||"",
+      supervisor_id:u.supervisor_id||"",activo:u.activo!==false});
+    setEditando(u);
+  };
+
+  const guardar=async()=>{
+    if(editando==="nuevo"){
+      // Crear usuario en Supabase Auth via Admin API no disponible en frontend
+      // Insertamos en tabla usuarios — el email se usa para login manual
+      const{error}=await supabase.from("usuarios").insert({
+        ...form,
+        created_at:new Date().toISOString(),
+      });
+      if(error){ toast("Error: "+error.message); return; }
+      toast("✓ Usuario creado. Pedile que se registre con ese email.");
+    } else {
+      const{error}=await supabase.from("usuarios").update({
+        nombre:form.nombre, apellido:form.apellido,
+        rol:form.rol, empresa_codigo:form.empresa_codigo,
+        supervisor_id:form.supervisor_id||null,
+        activo:form.activo, updated_at:new Date().toISOString(),
+      }).eq("id",editando.id);
+      if(error){ toast("Error: "+error.message); return; }
+      toast("✓ Usuario actualizado");
+    }
+    await cargar(); setEditando(null);
+  };
+
+  const toggleActivo=async(u)=>{
+    await supabase.from("usuarios").update({activo:!u.activo}).eq("id",u.id);
+    await cargar();
+    toast(u.activo?"Usuario desactivado":"Usuario activado");
+  };
+
+  const asignarSupervisor=async(tecnicoId, supId)=>{
+    await supabase.from("usuarios").update({
+      supervisor_id: supId||null
+    }).eq("id",tecnicoId);
+    await cargar();
+    toast("✓ Supervisor asignado");
+  };
+
+  const ROL_COLOR={DIRECTOR:B.orange,REGIONAL:B.blue,SUPERVISOR:B.purple,TECNICO:B.green};
+  const ROL_ICON={DIRECTOR:"👑",REGIONAL:"🏢",SUPERVISOR:"👔",TECNICO:"🔧"};
+
+  // ── FORMULARIO ─────────────────────────────────────────
+  if(editando&&!soloLectura) return(
+    <div style={{maxWidth:600}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+        <button onClick={()=>setEditando(null)}
+          style={{background:"none",border:`1px solid ${B.border}`,color:B.t2,
+            cursor:"pointer",padding:"8px 16px",fontSize:13,fontFamily:"'Orbitron',sans-serif"}}>
+          ← VOLVER
+        </button>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,fontWeight:900,color:B.t1}}>
+          {editando==="nuevo"?"NUEVO USUARIO":`EDITANDO: ${editando.nombre} ${editando.apellido}`}
+        </div>
       </div>
-      {showNew&&(
-        <div style={{background:B.card,border:`1px solid ${B.orange}44`,padding:20,marginBottom:20}}>
-          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:14}}>◈ NUEVO USUARIO</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:14}}>
-            <div><FL label="Email" req/><input className="field" type="email" value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))}/></div>
-            <div><FL label="Nombre completo" req/><input className="field" value={form.nombre} onChange={e=>setForm(f=>({...f,nombre:e.target.value}))}/></div>
-            <div><FL label="Rol"/><select className="field" value={form.rol} onChange={e=>setForm(f=>({...f,rol:e.target.value}))}>
-              {ROLES.map(r=><option key={r} value={r}>{ROL_LABEL[r]}</option>)}</select></div>
-            <div><FL label="Empresa"/><select className="field" value={form.empresa_id} onChange={e=>setForm(f=>({...f,empresa_id:e.target.value}))}>
-              <option value="">Global</option>{EMPRESAS.map(e=><option key={e.codigo} value={e.codigo}>{e.nombre}</option>)}</select></div>
-          </div>
-          <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
-            <Bb label="CANCELAR" onClick={()=>setShowNew(false)} ghost small color={B.t2}/>
-            <Bb label={saving?"GUARDANDO...":"CREAR USUARIO"} onClick={crearUsuario} disabled={!form.email||!form.nombre||saving} small/>
+
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+          <div><FL label="Nombre" req/>
+            <input className="field" value={form.nombre}
+              onChange={e=>s("nombre",e.target.value)} placeholder="Nombre"/></div>
+          <div><FL label="Apellido" req/>
+            <input className="field" value={form.apellido}
+              onChange={e=>s("apellido",e.target.value)} placeholder="Apellido"/></div>
+        </div>
+
+        <div><FL label="Email" req/>
+          <input className="field" type="email" value={form.email}
+            onChange={e=>s("email",e.target.value)}
+            placeholder="usuario@boolean.uy"
+            disabled={editando!=="nuevo"}
+            style={{opacity:editando!=="nuevo"?0.5:1}}/></div>
+
+        <div><FL label="Rol" req/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"].map(r=>(
+              <button key={r} onClick={()=>s("rol",r)}
+                style={{padding:"12px 10px",border:`2px solid ${form.rol===r?ROL_COLOR[r]:B.border}`,
+                  background:form.rol===r?ROL_COLOR[r]+"22":B.deep,
+                  color:form.rol===r?ROL_COLOR[r]:B.t2,
+                  cursor:"pointer",fontSize:13,fontWeight:700,borderRadius:2,
+                  transition:"all .15s"}}>
+                {ROL_ICON[r]} {r}
+              </button>
+            ))}
           </div>
         </div>
-      )}
-      {loading?<div style={{textAlign:"center",padding:40}}><Spin/></div>:(
+
+        <div><FL label="Empresa" req/>
+          <select className="field" value={form.empresa_codigo}
+            onChange={e=>s("empresa_codigo",e.target.value)}
+            disabled={esRegional}>
+            <option value="">Seleccioná una empresa...</option>
+            {EMPRESAS.map(e=>(
+              <option key={e.codigo} value={e.codigo}>{e.nombre}</option>
+            ))}
+          </select>
+        </div>
+
+        {form.rol==="TECNICO"&&(
+          <div><FL label="Supervisor asignado"/>
+            <select className="field" value={form.supervisor_id}
+              onChange={e=>s("supervisor_id",e.target.value)}>
+              <option value="">Sin supervisor asignado</option>
+              {supervisores
+                .filter(su=>!form.empresa_codigo||su.empresa_codigo===form.empresa_codigo)
+                .map(su=>(
+                  <option key={su.id} value={su.id}>
+                    {su.nombre} {su.apellido} ({su.empresa_codigo})
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
+
+        <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",
+          background:B.card,border:`1px solid ${B.border}`,borderRadius:2}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:700,color:B.t1}}>Usuario activo</div>
+            <div style={{fontSize:11,color:B.t3}}>Puede iniciar sesión en el sistema</div>
+          </div>
+          <button onClick={()=>s("activo",!form.activo)}
+            style={{width:52,height:28,borderRadius:14,border:"none",cursor:"pointer",
+              background:form.activo?B.green:B.t3,position:"relative",transition:"background .2s"}}>
+            <div style={{position:"absolute",top:3,left:form.activo?26:3,
+              width:22,height:22,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+          </button>
+        </div>
+
+        <div style={{padding:"12px 14px",background:B.orangeDim,
+          border:`1px solid ${B.orange}22`,fontSize:12,color:B.t2,lineHeight:1.6}}>
+          ℹ Para que el usuario pueda iniciar sesión, debés crearlo también en
+          <strong style={{color:B.orange}}> Supabase → Authentication → Users</strong> con
+          el mismo email y contraseña <strong style={{color:B.orange}}>boolean</strong>.
+        </div>
+
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+          <Bb label="CANCELAR" onClick={()=>setEditando(null)} ghost small color={B.t2}/>
+          <Bb label="GUARDAR" onClick={guardar}
+            disabled={!form.nombre.trim()||!form.apellido.trim()||!form.email.trim()||!form.empresa_codigo}/>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── LISTA ─────────────────────────────────────────────
+  return(
+    <div style={{padding:"0 0 40px"}}>
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
         <div>
-          {JERARQUIA.map(rol=>{
-            const del_rol=users.filter(u=>u.rol===rol);
-            if(!del_rol.length)return null;
-            const col=ROL_COLOR[rol]?.(B)||B.t3;
+          <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>GESTIÓN DE</div>
+          <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>USUARIOS</h1>
+          <div style={{fontSize:11,color:B.t2,marginTop:2}}>{fil.length} de {usuarios.length} usuarios</div>
+        </div>
+        {!soloLectura&&<Bb label="+ NUEVO USUARIO" onClick={abrirNuevo}/>}
+      </div>
+
+      {/* Filtros */}
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        <input className="field" placeholder="🔍 Buscar nombre, email..."
+          style={{flex:2,minWidth:180}} value={search} onChange={e=>setSearch(e.target.value)}/>
+        <select className="field" style={{flex:1,minWidth:120}}
+          value={filtroRol} onChange={e=>setFiltroRol(e.target.value)}>
+          <option value="ALL">Todos los roles</option>
+          {["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"].map(r=>(
+            <option key={r} value={r}>{ROL_ICON[r]} {r}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Lista de usuarios */}
+      {loading?<div style={{textAlign:"center",padding:40}}><Spin/></div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {fil.map(u=>{
+            const sup = usuarios.find(s=>s.id===u.supervisor_id);
+            const casosActivos = casos.filter(c=>c.tecnico_id===(u.auth_id||u.id)&&
+              !["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
+            const initials = `${(u.nombre||"?")[0]}${(u.apellido||"?")[0]}`.toUpperCase();
             return(
-              <div key={rol} style={{marginBottom:16}}>
-                <div style={{fontSize:10,fontWeight:700,color:col,letterSpacing:".12em",marginBottom:8}}>◈ {ROL_LABEL[rol].toUpperCase()} ({del_rol.length})</div>
-                <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  {del_rol.map(u=>(
-                    <div key={u.id} style={{background:B.card,border:`1px solid ${B.border}`,borderLeft:`3px solid ${col}`,padding:"10px 14px",display:"flex",alignItems:"center",gap:12}}>
-                      <div style={{width:32,height:32,background:`${col}22`,border:`1px solid ${col}44`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:14}}>
-                        {u.nombre?.[0]?.toUpperCase()||"?"}
-                      </div>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:12,fontWeight:700,color:B.t1}}>{u.nombre||u.email}</div>
-                        <div style={{fontSize:10,color:B.t3}}>{u.email}{u.empresa_id?` · ${EMPRESAS.find(e=>e.codigo===u.empresa_id)?.nombre||u.empresa_id}`:""}</div>
-                      </div>
-                      <Tg label={u.activo?"ACTIVO":"INACTIVO"} color={u.activo?B.green:B.t3}/>
+              <div key={u.id} style={{
+                background:B.card,
+                border:`1px solid ${u.activo?B.border:"#1a1a1a"}`,
+                borderLeft:`3px solid ${u.activo?ROL_COLOR[u.rol]||B.t3:"#333"}`,
+                padding:"14px 16px",
+                opacity:u.activo?1:0.6,
+              }}>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  {/* Avatar */}
+                  <div style={{width:42,height:42,borderRadius:"50%",flexShrink:0,
+                    background:`linear-gradient(135deg,${ROL_COLOR[u.rol]||B.t3}66,${ROL_COLOR[u.rol]||B.t3}22)`,
+                    border:`2px solid ${ROL_COLOR[u.rol]||B.t3}`,
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:14,fontWeight:900,color:ROL_COLOR[u.rol]||B.t1,
+                    fontFamily:"'Orbitron',sans-serif"}}>
+                    {initials}
+                  </div>
+                  {/* Info */}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:14,fontWeight:700,color:B.t1}}>
+                        {u.nombre} {u.apellido}
+                      </span>
+                      <Tg label={`${ROL_ICON[u.rol]} ${u.rol}`} color={ROL_COLOR[u.rol]||B.t3}/>
+                      {!u.activo&&<Tg label="INACTIVO" color={B.t3}/>}
                     </div>
-                  ))}
+                    <div style={{fontSize:12,color:B.t3,marginTop:2}}>{u.email}</div>
+                    <div style={{display:"flex",gap:12,marginTop:4,flexWrap:"wrap"}}>
+                      {u.empresa_codigo&&(
+                        <span style={{fontSize:11,color:EMPRESAS.find(e=>e.codigo===u.empresa_codigo)?.color||B.t2,fontWeight:600}}>
+                          🏢 {EMPRESAS.find(e=>e.codigo===u.empresa_codigo)?.nombre||u.empresa_codigo}
+                        </span>
+                      )}
+                      {u.rol==="TECNICO"&&sup&&(
+                        <span style={{fontSize:11,color:B.purple}}>
+                          👔 {sup.nombre} {sup.apellido}
+                        </span>
+                      )}
+                      {u.rol==="TECNICO"&&casosActivos>0&&(
+                        <span style={{fontSize:11,color:B.orange,fontWeight:700}}>
+                          📋 {casosActivos} casos activos
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {/* Acciones */}
+                  {!soloLectura&&(
+                    <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      <Bb label="✎" onClick={()=>abrirEditar(u)} ghost small color={B.blue}/>
+                      <button onClick={()=>toggleActivo(u)}
+                        style={{background:"none",border:`1px solid ${B.border}`,
+                          color:u.activo?B.red:B.green,cursor:"pointer",
+                          padding:"4px 10px",fontSize:10,borderRadius:2}}>
+                        {u.activo?"DESACTIVAR":"ACTIVAR"}
+                      </button>
+                    </div>
+                  )}
                 </div>
+
+                {/* Asignación de supervisor para técnicos */}
+                {u.rol==="TECNICO"&&!soloLectura&&(
+                  <div style={{marginTop:10,paddingTop:10,
+                    borderTop:`1px solid ${B.border}22`,
+                    display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:11,color:B.t3,flexShrink:0}}>👔 Supervisor:</span>
+                    <select
+                      value={u.supervisor_id||""}
+                      onChange={e=>asignarSupervisor(u.id,e.target.value)}
+                      onClick={e=>e.stopPropagation()}
+                      style={{flex:1,background:B.deep,border:`1px solid ${B.border}`,
+                        color:B.t1,padding:"6px 10px",fontSize:12,cursor:"pointer",
+                        outline:"none",borderRadius:2}}>
+                      <option value="">Sin supervisor</option>
+                      {supervisores
+                        .filter(su=>su.empresa_codigo===u.empresa_codigo)
+                        .map(su=>(
+                          <option key={su.id} value={su.id}>
+                            {su.nombre} {su.apellido}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
               </div>
             );
           })}
-          {users.length===0&&<div style={{textAlign:"center",color:B.t3,padding:30,fontSize:12}}>Sin usuarios registrados. Los usuarios se crean desde Supabase Auth y se sincronizan aquí.</div>}
+          {fil.length===0&&(
+            <div style={{textAlign:"center",padding:40,color:B.t3}}>
+              <div style={{fontSize:32,marginBottom:10}}>👥</div>
+              <div style={{fontSize:13}}>Sin usuarios que coincidan</div>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 };
-
-// ─── NOTIFICACIONES & RECORDATORIOS ──────────────────────
-// ═══════════════════════════════════════════════════════════════
-// PUNTO 3 — MOTOR DE RECORDATORIOS POR VENTANA HORARIA
-// Web Push API nativa del browser — sin paquetes extra — sin costo
-// ═══════════════════════════════════════════════════════════════
-
-// ─── CONSTANTES DE FRANJAS ────────────────────────────────────
-const FRANJA_INICIO = {
-  "FH1 (8-12)":  { h: 8,  m: 0  },
-  "FH2 (12-16)": { h: 12, m: 0  },
-  "FH3 (16-19)": { h: 16, m: 0  },
-  "FH4 (19-22)": { h: 19, m: 0  },
-};
-
-// ─── HELPERS DE PUSH ─────────────────────────────────────────
-
-// Solicita permiso al browser una sola vez
-const pedirPermisoNotificaciones = async () => {
-  if (!("Notification" in window)) return "no_soportado";
-  if (Notification.permission === "granted") return "granted";
-  if (Notification.permission === "denied")  return "denied";
-  const result = await Notification.requestPermission();
-  return result;
-};
-
-// Muestra una notificación nativa del browser
-const mostrarNotificacion = (titulo, cuerpo, opciones = {}) => {
-  if (Notification.permission !== "granted") return;
-  const n = new Notification(titulo, {
-    body:    cuerpo,
-    icon:    "/favicon.ico",
-    badge:   "/favicon.ico",
-    tag:     opciones.tag || "boolean-recordatorio",
-    silent:  false,
-    requireInteraction: opciones.importante || false,
-    ...opciones,
-  });
-  n.onclick = () => { window.focus(); n.close(); };
-  // Auto-cerrar a los 12 segundos si no es importante
-  if (!opciones.importante) setTimeout(() => n.close(), 12000);
-};
-
-// Construye el mensaje de notificación para un caso
-const buildMsgNotif = (caso, tipo) => {
-  const TIPO_IC = { INSTALACION:"📦", SERVICIO_TECNICO:"🔧", RETIRO:"🔄", VISITA_PROACTIVA:"👁" };
-  const ic  = TIPO_IC[caso.tipo_proceso] || "◈";
-  const dir = caso.direccion ? caso.direccion.substring(0, 50) : "";
-  const com = caso.razon_social || caso.numero || "Caso";
-  const franja = caso.franja_horaria || caso.rango_horario || "";
-
-  if (tipo === "principal") {
-    return {
-      titulo: `${ic} RECORDATORIO · ${com}`,
-      cuerpo: `${dir}\n${franja}${caso.instrucciones_especiales?.texto ? "\n⚠ Tiene instrucciones especiales" : ""}`,
-    };
-  }
-  // 10 min antes
-  return {
-    titulo: `⏰ EN 10 MIN · ${com}`,
-    cuerpo: `${dir}\n${franja} — Preparate para salir`,
-  };
-};
-
-// ─── HOOK PRINCIPAL — useRecordatorios ────────────────────────
-const useRecordatorios = (casos, user, minutosAntes) => {
-  const timersRef     = useRef([]);   // IDs de setTimeout activos
-  const casosIdRef    = useRef(new Set()); // casos ya programados
-  const permRef       = useRef(Notification.permission);
-
-  // Calcula ms hasta el inicio de la franja MENOS n minutos
-  const msHastaAviso = (caso, restMin) => {
-    const franja = caso.franja_horaria || caso.rango_horario;
-    const def    = FRANJA_INICIO[franja];
-    if (!def) return null;
-    const hoy   = new Date();
-    const target = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), def.h, def.m, 0, 0);
-    const aviso  = new Date(target.getTime() - restMin * 60000);
-    const diff   = aviso.getTime() - Date.now();
-    return diff > 0 ? diff : null;   // null si ya pasó
-  };
-
-  const programarCaso = useCallback((caso) => {
-    if (casosIdRef.current.has(caso.id)) return; // ya programado
-    const franja = caso.franja_horaria || caso.rango_horario;
-    if (!franja || !FRANJA_INICIO[franja]) return;
-    if (["FINALIZADO","CANCELADO"].includes(caso.estado)) return;
-
-    casosIdRef.current.add(caso.id);
-
-    // Aviso principal (N minutos antes configurados por el técnico)
-    const msPrinc = msHastaAviso(caso, minutosAntes);
-    if (msPrinc !== null) {
-      const t1 = setTimeout(() => {
-        const { titulo, cuerpo } = buildMsgNotif(caso, "principal");
-        mostrarNotificacion(titulo, cuerpo, { tag: `boolean-${caso.id}-p`, importante: true });
-        // Notificar también al Supervisor via Supabase Realtime
-        enviarAlertaSupervision(caso, "RECORDATORIO_PRINCIPAL", user, minutosAntes);
-      }, msPrinc);
-      timersRef.current.push(t1);
-    }
-
-    // Aviso fijo 10 minutos antes
-    const ms10 = msHastaAviso(caso, 10);
-    if (ms10 !== null && minutosAntes > 10) {
-      const t2 = setTimeout(() => {
-        const { titulo, cuerpo } = buildMsgNotif(caso, "10min");
-        mostrarNotificacion(titulo, cuerpo, { tag: `boolean-${caso.id}-10` });
-        enviarAlertaSupervision(caso, "RECORDATORIO_10MIN", user, 10);
-      }, ms10);
-      timersRef.current.push(t2);
-    }
-  }, [minutosAntes, user]);
-
-  // Programa todos los casos del día al montar / al cambiar la lista
-  useEffect(() => {
-    if (permRef.current !== "granted") return;
-    if (!casos?.length) return;
-    casos.forEach(c => programarCaso(c));
-  }, [casos, programarCaso]);
-
-  // Limpia timers al desmontar
-  useEffect(() => {
-    return () => timersRef.current.forEach(t => clearTimeout(t));
-  }, []);
-};
-
-// ─── ALERTA DE SUPERVISIÓN via Supabase Realtime ──────────────
-const enviarAlertaSupervision = async (caso, tipo, user, min) => {
-  try {
-    await supabase.from("alertas_recordatorio").insert({
-      caso_id:       caso.id,
-      tecnico_id:    user.id,
-      tecnico_email: user.email,
-      tipo,
-      minutos_antes: min,
-      franja:        caso.franja_horaria || caso.rango_horario,
-      razon_social:  caso.razon_social,
-      direccion:     caso.direccion,
-      created_at:    new Date().toISOString(),
-    });
-  } catch (e) { /* no crítico — el push al técnico ya se mostró */ }
-};
-
-// ─── PANEL DE CONFIGURACIÓN DE NOTIFICACIONES ─────────────────
-const ConfigNotificaciones = ({ user, minutosAntes, setMinutosAntes, toast }) => {
-  const [permiso,   setPermiso]   = useState(Notification.permission || "default");
-  const [guardando, setGuardando] = useState(false);
-  const [testEnv,   setTestEnv]   = useState(false);
-
-  const solicitar = async () => {
-    const result = await pedirPermisoNotificaciones();
-    setPermiso(result);
-    if (result === "granted") toast("✓ Notificaciones activadas");
-    else if (result === "denied") toast("⚠ Permiso denegado — activalo desde la configuración del browser");
-  };
-
-  const guardar = async () => {
-    setGuardando(true);
-    await supabase.from("usuarios").update({ minutos_recordatorio: minutosAntes }).eq("auth_id", user.id);
-    toast(`✓ Recordatorio configurado: ${minutosAntes} min + 10 min fijos`);
-    setGuardando(false);
-  };
-
-  const testNotif = () => {
-    setTestEnv(true);
-    mostrarNotificacion(
-      "📦 RECORDATORIO DE PRUEBA · Supermercado Norte",
-      "Av. Brasil 2785 · Pocitos\nFH2 (12-16) — desde las 12:00\n⚠ Tiene instrucciones especiales",
-      { tag: "boolean-test", importante: true }
-    );
-    setTimeout(() => setTestEnv(false), 3000);
-  };
-
-  const PERM_INFO = {
-    granted: { color: B.green,  icon: "✓", label: "ACTIVAS",           sub: "Recibirás recordatorios en este dispositivo" },
-    denied:  { color: B.red,    icon: "✗", label: "BLOQUEADAS",        sub: "Activá los permisos desde la configuración del browser" },
-    default: { color: B.orange, icon: "?", label: "SIN CONFIGURAR",    sub: "Hacé clic en 'Activar' para recibir recordatorios" },
-    no_soportado: { color: B.t3, icon: "—", label: "NO SOPORTADO",     sub: "Tu browser no soporta notificaciones push" },
-  };
-  const pi = PERM_INFO[permiso] || PERM_INFO.default;
-
-  const OPCIONES_MIN = [15, 20, 30, 45, 60, 90, 120];
-
-  return (
-    <div>
-      {/* Estado del permiso */}
-      <div style={{ background: B.card, border: `1px solid ${pi.color}44`, borderLeft: `4px solid ${pi.color}`,
-        padding: 16, marginBottom: 16, display: "flex", alignItems: "center", gap: 16 }}>
-        <div style={{ width: 44, height: 44, borderRadius: "50%", background: pi.color + "22",
-          border: `2px solid ${pi.color}`, display: "flex", alignItems: "center",
-          justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{pi.icon}</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: "'Orbitron',sans-serif", fontSize: 12, fontWeight: 900,
-            color: pi.color, letterSpacing: ".08em", marginBottom: 3 }}>
-            NOTIFICACIONES {pi.label}
-          </div>
-          <div style={{ fontSize: 11, color: B.t2 }}>{pi.sub}</div>
-        </div>
-        {permiso !== "granted" && permiso !== "no_soportado" && (
-          <Bb label="ACTIVAR" onClick={solicitar} small color={B.orange}/>
-        )}
-        {permiso === "granted" && (
-          <Bb label={testEnv ? "ENVIANDO..." : "🔔 PROBAR"} onClick={testNotif} small ghost color={B.green} disabled={testEnv}/>
-        )}
-      </div>
-
-      {/* Configuración de minutos */}
-      <div style={{ background: B.card, border: `1px solid ${B.border}`, padding: 18, marginBottom: 14 }}>
-        <div style={{ fontSize: 10, color: B.orange, fontWeight: 700, letterSpacing: ".12em", marginBottom: 14 }}>
-          ◈ TIEMPO DE ANTICIPACIÓN
-        </div>
-        <div style={{ fontSize: 12, color: B.t2, marginBottom: 14, lineHeight: 1.6 }}>
-          Elegí cuántos minutos antes del inicio de la franja horaria querés recibir el primer aviso.
-          El segundo aviso llega siempre <strong style={{ color: B.t1 }}>10 minutos antes</strong>, fijo.
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-          {OPCIONES_MIN.map(min => (
-            <button key={min} onClick={() => setMinutosAntes(min)}
-              style={{ padding: "8px 16px", fontFamily: "'Orbitron',sans-serif", fontWeight: 700,
-                fontSize: 12, cursor: "pointer", transition: "all .15s",
-                background: minutosAntes === min ? B.orange : B.deep,
-                color:      minutosAntes === min ? "#050507" : B.t2,
-                border:    `1px solid ${minutosAntes === min ? B.orange : B.border}`,
-                clipPath:  "polygon(5px 0%,100% 0%,calc(100% - 5px) 100%,0% 100%)" }}>
-              {min >= 60 ? `${min / 60}h` : `${min}min`}
-            </button>
-          ))}
-        </div>
-
-        {/* Timeline visual */}
-        <div style={{ background: B.deep, border: `1px solid ${B.border}`, padding: "14px 16px", marginBottom: 14 }}>
-          <div style={{ fontSize: 9, color: B.t3, fontWeight: 700, letterSpacing: ".1em", marginBottom: 10 }}>
-            EJEMPLO — CASO CON FH2 (12:00 - 16:00)
-          </div>
-          <div style={{ position: "relative", height: 6, background: B.border, borderRadius: 3, marginBottom: 20 }}>
-            {/* Barra de tiempo */}
-            <div style={{ position: "absolute", right: 0, width: "100%", height: "100%",
-              background: `linear-gradient(90deg,${B.border},${B.green})`, borderRadius: 3 }}/>
-            {/* Marcador aviso principal */}
-            <div style={{ position: "absolute", left: `${Math.max(0, 100 - minutosAntes / 120 * 100)}%`,
-              top: -18, transform: "translateX(-50%)", textAlign: "center" }}>
-              <div style={{ fontSize: 9, color: B.orange, fontWeight: 700, whiteSpace: "nowrap",
-                background: B.orangeDim, padding: "1px 6px", border: `1px solid ${B.orange}44` }}>
-                🔔 {minutosAntes >= 60 ? `${minutosAntes / 60}h` : `${minutosAntes}min`} antes
-              </div>
-              <div style={{ width: 2, height: 18, background: B.orange, margin: "2px auto 0" }}/>
-            </div>
-            {/* Marcador 10 min */}
-            {minutosAntes > 10 && (
-              <div style={{ position: "absolute", left: `${Math.max(0, 100 - 10 / 120 * 100)}%`,
-                top: -18, transform: "translateX(-50%)", textAlign: "center" }}>
-                <div style={{ fontSize: 9, color: B.yellow, fontWeight: 700, whiteSpace: "nowrap",
-                  background: B.yellowDim, padding: "1px 6px", border: `1px solid ${B.yellow}44` }}>
-                  ⏰ 10min antes
-                </div>
-                <div style={{ width: 2, height: 18, background: B.yellow, margin: "2px auto 0" }}/>
-              </div>
-            )}
-            {/* Marcador inicio franja */}
-            <div style={{ position: "absolute", right: 0, top: -18, transform: "translateX(50%)", textAlign: "center" }}>
-              <div style={{ fontSize: 9, color: B.green, fontWeight: 700,
-                background: B.greenDim, padding: "1px 6px", border: `1px solid ${B.green}44` }}>
-                🏁 12:00
-              </div>
-              <div style={{ width: 2, height: 18, background: B.green, margin: "2px auto 0" }}/>
-            </div>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {[
-              { icon: "🔔", color: B.orange, label: `${minutosAntes >= 60 ? minutosAntes / 60 + "h" : minutosAntes + " min"} antes`, desc: `a las ${11}:${(60 - minutosAntes % 60).toString().padStart(2,"0")} — Recordatorio principal`, bold: true },
-              ...(minutosAntes > 10 ? [{ icon: "⏰", color: B.yellow, label: "10 min antes", desc: "a las 11:50 — Recordatorio final (fijo)", bold: false }] : []),
-              { icon: "🏁", color: B.green, label: "12:00", desc: "Inicio de franja FH2", bold: false },
-            ].map((ev, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontSize: 14, flexShrink: 0 }}>{ev.icon}</span>
-                <div style={{ minWidth: 90, fontSize: 10, color: ev.color, fontWeight: 700 }}>{ev.label}</div>
-                <div style={{ fontSize: 10, color: ev.bold ? B.t1 : B.t3 }}>{ev.desc}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <Bb label={guardando ? "GUARDANDO..." : "GUARDAR CONFIGURACIÓN"} onClick={guardar} disabled={guardando || permiso !== "granted"}/>
-        {permiso !== "granted" && (
-          <div style={{ fontSize: 10, color: B.t3, marginTop: 8 }}>Activá las notificaciones primero para guardar</div>
-        )}
-      </div>
-
-      {/* Info para Supervisor */}
-      <div style={{ background: B.card, border: `1px solid ${B.border}`, padding: 16, marginBottom: 14 }}>
-        <div style={{ fontSize: 10, color: B.blue, fontWeight: 700, letterSpacing: ".12em", marginBottom: 10 }}>◈ COPIA PARA SUPERVISORES</div>
-        <div style={{ fontSize: 11, color: B.t2, lineHeight: 1.7 }}>
-          Cada vez que un técnico de tu equipo recibe un recordatorio, el sistema registra una copia
-          en la tabla <span className="mono" style={{ color: B.t1 }}>alertas_recordatorio</span> de Supabase.
-          El Supervisor puede ver los recordatorios activos de su equipo desde la sección de Analítica o
-          recibir su propio aviso push si tiene el sistema abierto.
-        </div>
-        <div style={{ marginTop: 10, padding: "8px 12px", background: B.deep, border: `1px solid ${B.border}`,
-          fontSize: 10, color: B.t3, lineHeight: 1.8 }}>
-          <span style={{ color: B.blue, fontWeight: 700 }}>NOTA: </span>
-          El técnico no puede desactivar notificaciones de casos individuales. Solo puede cambiar
-          el tiempo de anticipación o revocar el permiso desde la configuración de su browser.
-        </div>
-      </div>
-
-      {/* Guía de instalación en celular */}
-      <div style={{ background: B.card, border: `1px solid ${B.border}`, padding: 16 }}>
-        <div style={{ fontSize: 10, color: B.purple, fontWeight: 700, letterSpacing: ".12em", marginBottom: 10 }}>
-          ◈ CÓMO ACTIVAR EN EL CELULAR
-        </div>
-        {[
-          { os: "Android (Chrome)", pasos: ["Abrí boole-app.vercel.app", "Tocá el ícono de candado en la barra de direcciones", "Permisos del sitio → Notificaciones → Permitir", "Volvé aquí y tocá ACTIVAR"] },
-          { os: "iPhone (Safari)", pasos: ["Abrí boole-app.vercel.app en Safari", "Tocá el botón Compartir (cuadrado con flecha)", "Seleccioná 'Agregar a pantalla de inicio'", "Abrí la app desde el ícono en la pantalla, luego tocá ACTIVAR"] },
-        ].map(g => (
-          <div key={g.os} style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: B.t1, marginBottom: 6 }}>{g.os}</div>
-            {g.pasos.map((p, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, marginBottom: 3, alignItems: "flex-start" }}>
-                <span style={{ fontSize: 9, color: B.purple, fontWeight: 900, minWidth: 16,
-                  fontFamily: "'Orbitron',sans-serif" }}>{i + 1}.</span>
-                <span style={{ fontSize: 11, color: B.t2 }}>{p}</span>
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-// ─── PANEL DE ALERTAS PARA SUPERVISOR ─────────────────────────
-const AlertasRecordatorio = ({ user }) => {
-  const [alertas, setAlertas] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from("alertas_recordatorio")
-        .select("*").order("created_at", { ascending: false }).limit(50);
-      setAlertas(data || []); setLoading(false);
-    })();
-    // Suscripción realtime para alertas nuevas
-    const sub = supabase.channel("alertas-sup")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "alertas_recordatorio" },
-        payload => setAlertas(prev => [payload.new, ...prev]))
-      .subscribe();
-    return () => supabase.removeChannel(sub);
-  }, []);
-
-  if (loading) return <div style={{ textAlign: "center", padding: 30 }}><Spin/></div>;
-
-  return (
-    <div>
-      <div style={{ fontSize: 10, color: B.orange, fontWeight: 700, letterSpacing: ".12em", marginBottom: 12 }}>
-        ◈ RECORDATORIOS DEL EQUIPO (últimos 50)
-      </div>
-      {alertas.length === 0 && (
-        <div style={{ textAlign: "center", padding: 30, color: B.t3, fontSize: 12 }}>
-          Sin recordatorios registrados hoy
-        </div>
-      )}
-      {alertas.map((a, i) => (
-        <div key={a.id || i} style={{ display: "flex", gap: 12, padding: "10px 14px", marginBottom: 6,
-          background: B.card, border: `1px solid ${B.border}`,
-          borderLeft: `3px solid ${a.tipo?.includes("10MIN") ? B.yellow : B.orange}` }}>
-          <span style={{ fontSize: 18, flexShrink: 0 }}>{a.tipo?.includes("10MIN") ? "⏰" : "🔔"}</span>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: B.t1 }}>{a.razon_social}</div>
-            <div style={{ fontSize: 10, color: B.t2 }}>{a.tecnico_email} · {a.franja} · {a.minutos_antes}min antes</div>
-          </div>
-          <div style={{ fontSize: 9, color: B.t3 }}>{fmtD(a.created_at)}</div>
-        </div>
-      ))}
-    </div>
-  );
-};
-
 
 // ─── CONFIG ──────────────────────────────────────────────
 const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
@@ -4970,6 +4840,8 @@ export default function App(){
       if(p?.rol==="TECNICO"){
         query=query.eq("tecnico_id",p.auth_id||p.id)
           .not("estado","in","(FINALIZADO,CANCELADO)");
+      } else if(p?.rol==="REGIONAL"||p?.rol==="SUPERVISOR"){
+        query=query.eq("empresa_id",p.empresa_codigo);
       }
       const{data}=await query;
       const hoy=new Date(); hoy.setHours(0,0,0,0);
@@ -5013,6 +4885,8 @@ export default function App(){
     if(perfil?.rol==="TECNICO"){
       query=query.eq("tecnico_id",perfil.auth_id||perfil.id)
         .not("estado","in","(FINALIZADO,CANCELADO)");
+    } else if(perfil?.rol==="REGIONAL"||perfil?.rol==="SUPERVISOR"){
+      query=query.eq("empresa_id",perfil.empresa_codigo);
     }
     const{data}=await query;
     const hoy=new Date(); hoy.setHours(0,0,0,0);
@@ -5100,7 +4974,7 @@ export default function App(){
           {view==="analitica"&&<Analitica user={user} toast={toast}/>}
           {view==="comunicaciones"&&<Comunicaciones user={user} toast={toast}/>}
           {view==="logros"&&<Logros user={user} toast={toast}/>}
-          {view==="usuarios"&&<Usuarios user={user} toast={toast}/>}
+          {view==="usuarios"&&<Usuarios user={user} perfil={perfil} toast={toast} casos={casos}/>}
           {view==="config"&&<Config user={user} toast={toast} minutosAntes={minutosAntes} setMinutosAntes={setMinutosAntes}/>}
         </main>
       </div>
