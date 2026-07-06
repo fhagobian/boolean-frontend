@@ -4410,7 +4410,7 @@ const calcularRutaORS = async (puntos) => {
 };
 
 // ─── MAPA DE RUTA (Leaflet) ───────────────────────────────────
-const MapaRuta = ({ base, paradas, polyline }) => {
+const MapaRuta = ({ base, paradas, polyline, destino }) => {
   const mapRef = useRef(null);
   const mapInstRef = useRef(null);
   const markersRef = useRef([]);
@@ -4500,6 +4500,18 @@ const MapaRuta = ({ base, paradas, polyline }) => {
       ).addTo(map);
     }
 
+    // Marcador destino final (si es diferente a base)
+    if (destino?.lat && destino.lat !== base?.lat) {
+      const icon = L.divIcon({
+        html: `<div style="background:#00D4B4;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid #fff;box-shadow:0 2px 8px #0008">🏁</div>`,
+        iconSize: [32, 32], iconAnchor: [16, 16], className: ""
+      });
+      const m = L.marker([destino.lat, destino.lng], { icon })
+        .addTo(map).bindPopup("🏁 Destino final");
+      markersRef.current.push(m);
+      bounds.push([destino.lat, destino.lng]);
+    }
+
     // Ajustar vista
     if (bounds.length > 0) {
       map.fitBounds(bounds, { padding: [30, 30] });
@@ -4516,54 +4528,52 @@ const MapaRuta = ({ base, paradas, polyline }) => {
 };
 
 const MiRutaDelDia = ({ user, toast, perfil }) => {
-  const [casos,      setCasos]      = useState([]);
-  const [tecnicoSel, setTecnicoSel] = useState(null);  // para supervisor
-  const [tecnicos,   setTecnicos]   = useState([]);
-  const [base,       setBase]       = useState({ lat: null, lng: null, direccion: "" });
-  const [baseTxt,    setBaseTxt]    = useState("");
-  const [editBase,   setEditBase]   = useState(false);
-  const [paradas,    setParadas]    = useState([]);
-  const [polyline,   setPolyline]   = useState([]);
-  const [rutaInfo,   setRutaInfo]   = useState(null);
-  const [calculando, setCalculando] = useState(false);
-  const [loadingPage,setLoadingPage]= useState(true);
-  const [orden,      setOrden]      = useState([]);  // índices ordenados
-  const [dragging,   setDragging]   = useState(null);
+  const [casos,       setCasos]      = useState([]);
+  const [tecnicos,    setTecnicos]   = useState([]);
+  const [tecnicoSel,  setTecnicoSel] = useState(null);
+  // Base y destino
+  const [baseTxt,     setBaseTxt]    = useState("");
+  const [destinoTxt,  setDestinoTxt] = useState("");
+  const [destinoDif,  setDestinoDif] = useState(false); // destino diferente a base
+  const [base,        setBase]       = useState({lat:null,lng:null,direccion:""});
+  const [destino,     setDestino]    = useState({lat:null,lng:null,direccion:""});
+  // Paradas y ruta
+  const [paradas,     setParadas]    = useState([]);
+  const [orden,       setOrden]      = useState([]);
+  const [polyline,    setPolyline]   = useState([]);
+  const [rutaInfo,    setRutaInfo]   = useState(null);
+  // Estados UI
+  const [loadingPage, setLoadingPage]= useState(true);
+  const [calculando,  setCalculando] = useState(false);
+  const [dragging,    setDragging]   = useState(null);
+  const [dragOver,    setDragOver]   = useState(null);
+  const [editBase,    setEditBase]   = useState(false);
 
-  const esRolTecnico = perfil?.rol==="TECNICO";
-  const esRolSupervisor = perfil?.rol==="SUPERVISOR"||perfil?.rol==="REGIONAL"||perfil?.rol==="DIRECTOR";
+  const esRolTecnico   = perfil?.rol === "TECNICO";
+  const esRolSuperior  = !esRolTecnico;
 
-  // Carga inicial
   useEffect(() => { if(perfil) cargarDatos(); }, [perfil]);
-
-  // Recalcular cuando cambian casos (caso nuevo agregado en el día)
-  useEffect(() => {
-    if (paradas.length > 0 && base.lat) calcularRuta(paradas);
-  }, [casos.length]);
 
   const cargarDatos = async () => {
     setLoadingPage(true);
     try {
-      if (esRolSupervisor) {
-        const { data: tecs } = await supabase.from("usuarios").select("*").eq("rol","TECNICO").eq("activo",true);
-        setTecnicos(tecs || []);
-        if (tecs?.length > 0) await cargarCasosTecnico(tecs[0]);
+      if(esRolSuperior) {
+        const { data: tecs } = await supabase.from("usuarios").select("*")
+          .eq("rol","TECNICO").eq("activo",true);
+        setTecnicos(tecs||[]);
+        if(tecs?.length > 0) await cargarCasosTecnico(tecs[0]);
+        else setLoadingPage(false);
       } else {
-        if (perfil?.base_operativa) {
+        // Restaurar base desde perfil si existe
+        if(perfil?.base_operativa) {
           setBaseTxt(perfil.base_operativa);
-          const coords = await geocodificarDireccion(perfil.base_operativa, "", "");
-          setBase({ ...coords, direccion: perfil.base_operativa });
+          const coords = await geocodificarDireccion(perfil.base_operativa,"","");
+          setBase({...coords, direccion:perfil.base_operativa});
         }
-        const tecId = perfil?.auth_id || perfil?.id || user.id;
-        const { data: c } = await supabase.from("casos").select("*")
-          .eq("tecnico_id", tecId)
-          .not("estado", "in", "(FINALIZADO,CANCELADO)")
-          .order("created_at", { ascending: true });
-        setCasos(c || []);
-        if (c?.length) await geocodificarYOrdenar(c, { lat: null, lng: null });
+        await cargarCasosTecnico(perfil);
       }
     } catch(e) {
-      toast("Error cargando ruta: "+e.message);
+      toast("Error cargando datos: "+e.message);
     } finally {
       setLoadingPage(false);
     }
@@ -4572,326 +4582,349 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
   const cargarCasosTecnico = async (tec) => {
     setTecnicoSel(tec);
     try {
-      if (tec.base_operativa) {
-        setBaseTxt(tec.base_operativa);
-        const coords = await geocodificarDireccion(tec.base_operativa, "", "");
-        setBase({ ...coords, direccion: tec.base_operativa });
-      }
+      const tecId = tec.auth_id || tec.id;
       const { data: c } = await supabase.from("casos").select("*")
-        .eq("tecnico_id", tec.auth_id || tec.id)
-        .not("estado", "in", "(FINALIZADO,CANCELADO)")
-        .order("created_at", { ascending: true });
-      setCasos(c || []);
-      if (c?.length) await geocodificarYOrdenar(c, base);
+        .eq("tecnico_id", tecId)
+        .not("estado","in","(FINALIZADO,CANCELADO)")
+        .order("created_at", {ascending:true});
+      const casosActivos = c||[];
+      setCasos(casosActivos);
+      if(casosActivos.length > 0) {
+        await geocodificarYOrdenar(casosActivos, base);
+      } else {
+        setParadas([]);
+        setOrden([]);
+        setPolyline([]);
+        setRutaInfo(null);
+      }
     } catch(e) {
-      console.error("Error cargando casos técnico:", e);
+      console.error("Error cargando casos:", e);
     }
   };
-
 
   const geocodificarYOrdenar = async (listaCasos, baseCoords) => {
     setCalculando(true);
-    // Geocodificar cada caso
-    const conCoords = await Promise.all(
-      listaCasos.map(async c => {
-        const coords = await geocodificarDireccion(c.direccion, c.departamento, c.localidad);
-        return { ...c, ...coords };
-      })
-    );
-    const validos = conCoords.filter(c => c.ok && c.lat);
-    const base_c  = (baseCoords?.lat) ? baseCoords : { lat: -34.9, lng: -56.18 }; // default Montevideo
-    const ordenados = ordenarPorCercania(base_c, validos);
-    setParadas(ordenados);
-    setOrden(ordenados.map((_, i) => i));
-    await calcularRuta(ordenados, base_c);
-    setCalculando(false);
-  };
-
-  const calcularRuta = async (stops, baseCoords) => {
-    const b = baseCoords || base;
-    if (!b?.lat || stops.length === 0) return;
-    const puntos = [b, ...stops.filter(s => s.lat), b];
-    const resultado = await calcularRutaORS(puntos);
-    if (resultado?.ok) {
-      setPolyline(resultado.polyline);
-      setRutaInfo({ km: resultado.totalKm, min: resultado.totalMin });
-    } else {
-      setPolyline([]);
-      setRutaInfo(null);
+    try {
+      const conCoords = await Promise.all(
+        listaCasos.map(async c => {
+          const coords = await geocodificarDireccion(c.direccion, c.departamento, c.localidad);
+          return {...c, ...coords};
+        })
+      );
+      const validos = conCoords.filter(c => c.ok && c.lat);
+      const base_c  = baseCoords?.lat ? baseCoords : {lat:-34.9, lng:-56.18};
+      const ordenados = ordenarPorCercania(base_c, validos);
+      setParadas(ordenados);
+      setOrden(ordenados.map((_,i) => i));
+      await calcularRuta(ordenados, base_c);
+    } catch(e) {
+      console.error("Error geocodificando:", e);
+    } finally {
+      setCalculando(false);
     }
   };
 
-  const guardarBase = async () => {
-    if (!baseTxt.trim()) return;
-    const coords = await geocodificarDireccion(baseTxt, "", "");
-    setBase({ ...coords, direccion: baseTxt });
-    // Guardar en perfil
-    await supabase.from("usuarios").update({ base_operativa: baseTxt }).eq("auth_id", user.id);
+  const calcularRuta = async (stops, baseCoords, destinoCoords) => {
+    const b = baseCoords || base;
+    const d = destinoCoords || (destinoDif ? destino : b);
+    if(!b?.lat || stops.length === 0) return;
+    const stopsValidos = stops.filter(s => s.lat);
+    const puntos = [b, ...stopsValidos, d].filter(p => p?.lat);
+    const resultado = await calcularRutaORS(puntos);
+    if(resultado?.ok) {
+      setPolyline(resultado.polyline);
+      setRutaInfo({
+        km: resultado.totalKm,
+        min: resultado.totalMin,
+        approx: resultado.approx||false,
+      });
+    }
+  };
+
+  // Confirmar base operativa
+  const confirmarBase = async () => {
+    if(!baseTxt.trim()) return;
+    setCalculando(true);
+    const coords = await geocodificarDireccion(baseTxt,"","");
+    if(!coords.ok) { toast("No se encontró la dirección"); setCalculando(false); return; }
+    const nuevaBase = {...coords, direccion:baseTxt};
+    setBase(nuevaBase);
     setEditBase(false);
+    // Guardar en perfil
+    await supabase.from("usuarios").update({base_operativa:baseTxt})
+      .eq("auth_id", user.id);
+    // Recalcular ruta con nueva base
+    if(paradas.length > 0) await calcularRuta(paradas, nuevaBase);
+    setCalculando(false);
     toast("✓ Base operativa guardada");
-    if (paradas.length > 0) await calcularRuta(paradas, coords);
   };
 
-  const moverParada = (desde, hacia) => {
-    const nuevo = [...paradas];
-    const [item] = nuevo.splice(desde, 1);
-    nuevo.splice(hacia, 0, item);
-    setParadas(nuevo);
-    calcularRuta(nuevo);
+  // Confirmar destino final
+  const confirmarDestino = async () => {
+    if(!destinoTxt.trim()) return;
+    setCalculando(true);
+    const coords = await geocodificarDireccion(destinoTxt,"","");
+    if(!coords.ok) { toast("No se encontró la dirección"); setCalculando(false); return; }
+    const nuevoDestino = {...coords, direccion:destinoTxt};
+    setDestino(nuevoDestino);
+    if(paradas.length > 0) await calcularRuta(paradas, base, nuevoDestino);
+    setCalculando(false);
+    toast("✓ Destino final configurado");
   };
 
-  const abrirEnMaps = () => {
-    if (!base.lat || paradas.length === 0) return;
-    const origen = `${base.lat},${base.lng}`;
-    const stops  = paradas.filter(p => p.lat).map(p => `${p.lat},${p.lng}`).join("/");
-    window.open(`https://www.google.com/maps/dir/${origen}/${stops}/${origen}`, "_blank");
+  // Reordenar manualmente con drag
+  const handleDragStart = (i) => setDragging(i);
+  const handleDragOver = (e, i) => { e.preventDefault(); setDragOver(i); };
+  const handleDrop = async (i) => {
+    if(dragging === null || dragging === i) { setDragging(null); setDragOver(null); return; }
+    const nuevo = [...orden];
+    const [item] = nuevo.splice(dragging, 1);
+    nuevo.splice(i, 0, item);
+    setOrden(nuevo);
+    setDragging(null); setDragOver(null);
+    const nuevasParadas = nuevo.map(idx => paradas[idx]);
+    setParadas(nuevasParadas);
+    setOrden(nuevasParadas.map((_,i)=>i));
+    await calcularRuta(nuevasParadas, base);
   };
 
-  const abrirEnWaze = () => {
-    if (paradas.length === 0) return;
-    const p = paradas[0];
-    window.open(`https://waze.com/ul?ll=${p.lat},${p.lng}&navigate=yes`, "_blank");
+  // Optimizar ruta automáticamente
+  const optimizarRuta = async () => {
+    setCalculando(true);
+    const reordenadas = ordenarPorCercania(base?.lat ? base : {lat:-34.9,lng:-56.18}, paradas);
+    setParadas(reordenadas);
+    setOrden(reordenadas.map((_,i)=>i));
+    await calcularRuta(reordenadas, base);
+    setCalculando(false);
+    toast("✓ Ruta optimizada automáticamente");
   };
 
-  const FRANJA_HORA = { "FH1 (8-12)": "08:00", "FH2 (12-16)": "12:00", "FH3 (16-19)": "16:00", "FH4 (19-22)": "19:00" };
-  const PRIO_C_L    = { CRITICA: B.red, ALTA: B.orange, MEDIA: B.blue, BAJA: B.green };
-  const TIER_C_L    = { VIP: B.amber, T1a: B.orange, T1b: B.blue, T2: B.green };
-  const TIPO_IC     = { INSTALACION:"📦", SERVICIO_TECNICO:"🔧", RETIRO:"🔄", VISITA_PROACTIVA:"👁" };
+  const ESTADO_COL = {ASIGNADO:B.blue, EN_PROCESO:B.yellow, PAUSADO:B.purple, RECOORDINADO:B.teal};
+  const TIPO_IC = {INSTALACION:"📦", SERVICIO_TECNICO:"🔧", RETIRO:"🔄", VISITA_PROACTIVA:"👁"};
 
-  if (loadingPage) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 400, flexDirection: "column", gap: 14 }}>
-      <Spin s={28}/><span style={{ color: B.t3, fontSize: 12 }}>Cargando casos del día...</span>
+  if(loadingPage) return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh",flexDirection:"column",gap:16}}>
+      <Spin s={36}/>
+      <div style={{fontSize:13,color:B.t3}}>Cargando módulo de ruta...</div>
     </div>
   );
 
   return (
-    <div>
+    <div style={{padding:"0 0 40px"}}>
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 9, color: B.t3, fontWeight: 700, letterSpacing: ".18em", marginBottom: 3 }}>MÓDULO DE CAMPO</div>
-          <div style={{ fontFamily: "'Orbitron',sans-serif", fontWeight: 900, fontSize: 18, color: B.t1 }}>◈ MI RUTA DEL DÍA</div>
-          <div style={{ fontSize: 11, color: B.t2, marginTop: 4 }}>
-            {paradas.length} paradas · {rutaInfo ? `${rutaInfo.km} km · ~${rutaInfo.min} min` : "Calculando ruta..."}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {base.lat && paradas.length > 0 && (
-            <>
-              <Bb label="🗺 Google Maps" onClick={abrirEnMaps} ghost small color={B.blue}/>
-              <Bb label="🔵 Waze" onClick={abrirEnWaze} ghost small color={B.purple}/>
-            </>
-          )}
-          {calculando && <div style={{ display: "flex", alignItems: "center", gap: 6, color: B.t3, fontSize: 11 }}><Spin s={14}/> Recalculando...</div>}
-        </div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MÓDULO DE</div>
+        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900}}>
+          RUTA DEL DÍA
+          {calculando&&<span style={{fontSize:11,color:B.orange,marginLeft:12,fontWeight:400}}>⟳ calculando...</span>}
+        </h1>
       </div>
 
-      {/* Selector de técnico (solo supervisor) */}
-      {esRolSupervisor && tecnicos.length > 0 && (
-        <div style={{ background: B.card, border: `1px solid ${B.border}`, padding: 14, marginBottom: 16 }}>
+      {/* Selector de técnico (para superiores) */}
+      {esRolSuperior && tecnicos.length > 0 && (
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:"12px 16px",marginBottom:16}}>
           <FL label="Ver ruta de técnico"/>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-            {tecnicos.map(t => (
-              <button key={t.id} onClick={() => cargarCasosTecnico(t)}
-                style={{ padding: "6px 14px", background: tecnicoSel?.id === t.id ? B.orange : B.deep,
-                  color: tecnicoSel?.id === t.id ? "#050507" : B.t2,
-                  border: `1px solid ${tecnicoSel?.id === t.id ? B.orange : B.border}`,
-                  cursor: "pointer", fontSize: 11, fontWeight: 700, transition: "all .15s" }}>
-                {t.nombre || t.email}
-              </button>
+          <select className="field" value={tecnicoSel?.id||""}
+            onChange={e=>{
+              const tec=tecnicos.find(t=>t.id===e.target.value);
+              if(tec) cargarCasosTecnico(tec);
+            }}>
+            {tecnicos.map(t=>(
+              <option key={t.id} value={t.id}>{t.nombre} {t.apellido} — {t.empresa_codigo}</option>
             ))}
-          </div>
+          </select>
         </div>
       )}
 
-      {/* Base operativa */}
-      <div style={{ background: B.card, border: `1px solid ${B.orange}33`, padding: 14, marginBottom: 16,
-        display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 20 }}>🏠</span>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 9, color: B.orange, fontWeight: 700, letterSpacing: ".1em", marginBottom: 4 }}>BASE OPERATIVA</div>
-          {editBase ? (
-            <div style={{ display: "flex", gap: 8 }}>
-              <input className="field" style={{ flex: 1 }} value={baseTxt}
-                onChange={e => setBaseTxt(e.target.value)}
-                placeholder="Dirección de tu base operativa..."
-                onKeyDown={e => e.key === "Enter" && guardarBase()}/>
-              <Bb label="GUARDAR" onClick={guardarBase} small/>
-              <Bb label="✕" onClick={() => setEditBase(false)} ghost small color={B.t2}/>
-            </div>
-          ) : (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 12, color: base.lat ? B.t1 : B.t3 }}>
-                {base.direccion || "Sin base configurada"}
-              </span>
-              {!esRolSupervisor && (
-                <button onClick={() => setEditBase(true)}
-                  style={{ background: "none", border: `1px solid ${B.border}`, color: B.t3,
-                    cursor: "pointer", fontSize: 10, padding: "2px 8px" }}>✎</button>
-              )}
-              {base.lat && <Dot c={B.green} s={6}/>}
+      {/* Configuración base y destino */}
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
+        {/* Base operativa */}
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:"12px 16px"}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:8}}>
+            🏠 BASE OPERATIVA (INICIO)
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <input className="field" style={{flex:1,fontSize:14}}
+              placeholder="Ej: Rivera 1234, Montevideo"
+              value={baseTxt} onChange={e=>setBaseTxt(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&confirmarBase()}/>
+            <Bb label={calculando?"...":"✓"} onClick={confirmarBase}
+              disabled={!baseTxt.trim()||calculando} small
+              color={base.lat?B.green:B.orange}/>
+          </div>
+          {base.lat&&(
+            <div style={{fontSize:11,color:B.green,marginTop:6,display:"flex",alignItems:"center",gap:6}}>
+              ✓ Geocodificado · {base.lat.toFixed(4)}, {base.lng.toFixed(4)}
             </div>
           )}
         </div>
-        {rutaInfo && (
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontFamily: "'Orbitron',sans-serif", fontSize: 18, fontWeight: 900, color: B.orange }}>{rutaInfo.km} km</div>
-            <div style={{ fontSize: 10, color: B.t3 }}>~{rutaInfo.min} min de ruta</div>
+
+        {/* Destino final */}
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:"12px 16px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <div style={{fontSize:10,color:B.teal,fontWeight:700,letterSpacing:".1em"}}>
+              🏁 DESTINO FINAL
+            </div>
+            <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",marginLeft:"auto"}}>
+              <input type="checkbox" checked={destinoDif}
+                onChange={e=>setDestinoDif(e.target.checked)}
+                style={{accentColor:B.teal,width:14,height:14}}/>
+              <span style={{fontSize:11,color:B.t2}}>Diferente a base</span>
+            </label>
+          </div>
+          {destinoDif ? (
+            <>
+              <div style={{display:"flex",gap:8}}>
+                <input className="field" style={{flex:1,fontSize:14}}
+                  placeholder="Dirección de destino final..."
+                  value={destinoTxt} onChange={e=>setDestinoTxt(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&confirmarDestino()}/>
+                <Bb label={calculando?"...":"✓"} onClick={confirmarDestino}
+                  disabled={!destinoTxt.trim()||calculando} small color={B.teal}/>
+              </div>
+              {destino.lat&&(
+                <div style={{fontSize:11,color:B.teal,marginTop:6}}>
+                  ✓ Geocodificado · {destino.lat.toFixed(4)}, {destino.lng.toFixed(4)}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{fontSize:12,color:B.t3}}>
+              La ruta termina en la base operativa
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Info de ruta */}
+      {rutaInfo&&(
+        <div style={{display:"flex",gap:10,marginBottom:16}}>
+          {[
+            {label:"DISTANCIA",val:`${rutaInfo.km} km`,color:B.orange},
+            {label:"TIEMPO EST.",val:`${rutaInfo.min} min`,color:B.blue},
+            {label:"PARADAS",val:paradas.length,color:B.green},
+          ].map(k=>(
+            <div key={k.label} style={{flex:1,background:B.card,border:`1px solid ${B.border}`,
+              padding:"10px 12px",textAlign:"center"}}>
+              <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em",marginBottom:4}}>{k.label}</div>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900,color:k.color}}>{k.val}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {rutaInfo?.approx&&(
+        <div style={{fontSize:10,color:B.t3,marginBottom:12,padding:"6px 12px",
+          background:B.deep,border:`1px solid ${B.border}`}}>
+          ⚠ Ruta aproximada (línea recta). Para rutas exactas configurá una API key de OpenRouteService.
+        </div>
+      )}
+
+      {/* Mapa */}
+      {paradas.length > 0 && (
+        <div style={{background:B.card,border:`1px solid ${B.border}`,overflow:"hidden",marginBottom:16}}>
+          <div style={{padding:"8px 14px",borderBottom:`1px solid ${B.border}`,fontSize:10,
+            color:B.orange,fontWeight:700,letterSpacing:".1em"}}>◈ MAPA DE RUTA</div>
+          <MapaRuta base={base} paradas={paradas} polyline={polyline} destino={destinoDif?destino:null}/>
+        </div>
+      )}
+
+      {/* Lista de paradas con drag & drop */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,marginBottom:16}}>
+        <div style={{padding:"10px 16px",borderBottom:`1px solid ${B.border}`,
+          display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em"}}>
+            ◈ ORDEN DE PARADAS ({paradas.length})
+          </div>
+          {paradas.length > 1&&(
+            <Bb label={calculando?"CALCULANDO...":"⚡ OPTIMIZAR RUTA"} onClick={optimizarRuta}
+              disabled={calculando} small/>
+          )}
+        </div>
+        {paradas.length === 0 ? (
+          <div style={{padding:40,textAlign:"center",color:B.t3}}>
+            <div style={{fontSize:32,marginBottom:10}}>🗺</div>
+            <div style={{fontSize:13}}>Sin casos activos para rutear</div>
+            <div style={{fontSize:11,marginTop:6}}>Los casos asignados aparecerán aquí automáticamente</div>
+          </div>
+        ) : (
+          <div>
+            {/* Base */}
+            <div style={{padding:"10px 16px",background:B.orangeDim,
+              borderBottom:`1px solid ${B.border}`,display:"flex",gap:10,alignItems:"center"}}>
+              <span style={{fontSize:18}}>🏠</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:12,fontWeight:700,color:B.orange}}>BASE OPERATIVA</div>
+                <div style={{fontSize:11,color:B.t3}}>{base.direccion||"Sin configurar"}</div>
+              </div>
+            </div>
+            {/* Paradas */}
+            {paradas.map((p, i) => (
+              <div key={p.id}
+                draggable
+                onDragStart={()=>handleDragStart(i)}
+                onDragOver={e=>handleDragOver(e,i)}
+                onDrop={()=>handleDrop(i)}
+                onDragEnd={()=>{setDragging(null);setDragOver(null);}}
+                style={{
+                  padding:"12px 16px",
+                  borderBottom:`1px solid ${B.border}`,
+                  display:"flex",gap:12,alignItems:"center",
+                  background:dragOver===i?B.orangeDim:dragging===i?"#1a1a2a":B.card,
+                  cursor:"grab",transition:"background .15s",
+                  opacity:dragging===i?0.5:1,
+                }}>
+                {/* Número */}
+                <div style={{
+                  width:32,height:32,borderRadius:"50%",flexShrink:0,
+                  background:({CRITICA:"#FF2040",ALTA:"#FF6B00",MEDIA:"#00A8FF",BAJA:"#00E87A"})[p.prioridad]||B.t3,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,color:"#050507",
+                }}>
+                  {i+1}
+                </div>
+                {/* Datos */}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:B.t1,
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {TIPO_IC[p.tipo_proceso]||"◈"} {p.razon_social}
+                  </div>
+                  <div style={{fontSize:11,color:B.t2,marginTop:2}}>
+                    📍 {p.direccion}{p.localidad?` · ${p.localidad}`:""}
+                  </div>
+                  <div style={{display:"flex",gap:8,marginTop:4,flexWrap:"wrap"}}>
+                    <Tg label={p.estado} color={ESTADO_COL[p.estado]||B.t3}/>
+                    {p.franja_horaria&&<span style={{fontSize:10,color:"#CC7700",fontWeight:600}}>🕐 {p.franja_horaria}</span>}
+                    {!p.lat&&<span style={{fontSize:10,color:B.red}}>⚠ Sin coordenadas</span>}
+                  </div>
+                </div>
+                {/* Handle drag */}
+                <div style={{color:B.t3,fontSize:18,flexShrink:0,cursor:"grab"}}>⠿</div>
+              </div>
+            ))}
+            {/* Destino */}
+            <div style={{padding:"10px 16px",background:destinoDif&&destino.lat?"#001a1a":B.deep,
+              display:"flex",gap:10,alignItems:"center"}}>
+              <span style={{fontSize:18}}>🏁</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:12,fontWeight:700,color:B.teal}}>DESTINO FINAL</div>
+                <div style={{fontSize:11,color:B.t3}}>
+                  {destinoDif&&destino.lat ? destino.direccion : base.direccion||"Base operativa"}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Sin casos */}
-      {paradas.length === 0 && !calculando && (
-        <div style={{ background: B.card, border: `1px solid ${B.border}`, padding: 40, textAlign: "center" }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>🗺</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: B.t2, marginBottom: 6 }}>Sin casos asignados para hoy</div>
-          <div style={{ fontSize: 11, color: B.t3 }}>Cuando se asignen casos aparecerán aquí ordenados por cercanía</div>
+      {/* Instrucciones drag */}
+      {paradas.length > 1&&(
+        <div style={{fontSize:11,color:B.t3,textAlign:"center",padding:"8px 0"}}>
+          ⠿ Arrastrá las paradas para reordenarlas manualmente
         </div>
-      )}
-
-      {paradas.length > 0 && (
-        <>
-          {/* Mapa */}
-          <div style={{ background: B.card, border: `1px solid ${B.border}`, overflow: "hidden", marginBottom: 16 }}>
-            <div style={{ padding: "10px 14px", borderBottom: `1px solid ${B.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 10, color: B.orange, fontWeight: 700, letterSpacing: ".1em" }}>◈ MAPA DE RUTA</span>
-              {!localStorage.getItem('ors_api_key') && (
-                <span style={{ fontSize: 9, color: B.t3 }}>
-                  Sin key ORS — ruta aproximada · <a href="https://openrouteservice.org/dev/#/signup" target="_blank"
-                    style={{ color: B.blue, textDecoration: "none" }}>Obtener key gratis →</a>
-                </span>
-              )}
-            </div>
-            <MapaRuta base={base} paradas={paradas} polyline={polyline}/>
-          </div>
-
-          {/* Lista de paradas */}
-          <div style={{ background: B.card, border: `1px solid ${B.border}`, overflow: "hidden" }}>
-            <div style={{ padding: "10px 14px", borderBottom: `1px solid ${B.border}`, display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 10, color: B.orange, fontWeight: 700, letterSpacing: ".1em" }}>◈ PARADAS EN ORDEN ÓPTIMO</span>
-              <span style={{ fontSize: 10, color: B.t3 }}>Arrastrá para reordenar</span>
-            </div>
-
-            {/* Salida */}
-            <div style={{ padding: "10px 16px", borderBottom: `1px solid ${B.border}18`,
-              display: "flex", alignItems: "center", gap: 12, background: "#0E0800" }}>
-              <div style={{ width: 28, height: 28, background: B.orange, borderRadius: "50%", display: "flex",
-                alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>🏠</div>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: B.orange }}>SALIDA — BASE OPERATIVA</div>
-                <div style={{ fontSize: 10, color: B.t3 }}>{base.direccion}</div>
-              </div>
-            </div>
-
-            {paradas.map((p, i) => {
-              const prioColor  = PRIO_C_L[p.prioridad]  || B.t2;
-              const tierColor  = TIER_C_L[p.tier]        || B.t2;
-              const franjaHora = FRANJA_HORA[p.franja_horaria] || p.rango_horario || "—";
-              const tieneInstr = !!(p.instrucciones_especiales?.texto || p.instrucciones_especiales?.adjuntos?.length);
-              return (
-                <div key={p.id}
-                  draggable={!esRolSupervisor}
-                  onDragStart={() => setDragging(i)}
-                  onDragOver={e => { e.preventDefault(); }}
-                  onDrop={() => { if (dragging !== null && dragging !== i) { moverParada(dragging, i); setDragging(null); } }}
-                  style={{ padding: "12px 16px", borderBottom: `1px solid ${B.border}18`,
-                    display: "flex", alignItems: "flex-start", gap: 12,
-                    background: dragging === i ? B.orangeDim : i % 2 === 0 ? B.cardHi : B.card,
-                    cursor: esRolSupervisor ? "default" : "grab", transition: "background .15s" }}>
-
-                  {/* Número */}
-                  <div style={{ width: 28, height: 28, background: B.deep, border: `2px solid ${prioColor}`,
-                    borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
-                    fontFamily: "'Orbitron',sans-serif", fontSize: 11, fontWeight: 900, color: prioColor, flexShrink: 0 }}>
-                    {i + 1}
-                  </div>
-
-                  {/* Info */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                      <span style={{ fontSize: 16 }}>{TIPO_IC[p.tipo_proceso] || "◈"}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: B.t1 }}>{p.razon_social || "Comercio"}</span>
-                      {tieneInstr && (
-                        <span style={{ fontSize: 9, background: B.orange + "22", color: B.orange,
-                          border: `1px solid ${B.orange}44`, padding: "1px 6px", fontWeight: 700 }}>⚠ INSTRUCCIONES</span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11, color: B.t2, marginBottom: 4 }}>{p.direccion || "—"}{p.localidad ? ` · ${p.localidad}` : ""}</div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span className="mono" style={{ fontSize: 9, color: B.t3 }}>{p.numero || p.id_externo || "—"}</span>
-                      {p.tier && <span style={{ fontSize: 9, color: tierColor, fontWeight: 700 }}>{p.tier}</span>}
-                      {p.prioridad && <Tg label={p.prioridad} color={prioColor}/>}
-                      {(p.franja_horaria || p.rango_horario) && (
-                        <span style={{ fontSize: 9, background: "#FFFFF8E8", color: "#CC7700",
-                          padding: "1px 7px", fontWeight: 700, border: "1px solid #CC770033" }}>
-                          🕐 {p.franja_horaria || p.rango_horario} {franjaHora !== "—" ? `(desde ${franjaHora})` : ""}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Distancia al siguiente */}
-                  <div style={{ textAlign: "right", flexShrink: 0, minWidth: 60 }}>
-                    <div style={{ fontSize: 9, color: B.t3 }}>al siguiente</div>
-                    <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 11, color: B.t2, fontWeight: 700 }}>
-                      {rutaInfo && p.distSig ? `${(p.distSig / 1000).toFixed(1)} km` : "—"}
-                    </div>
-                    {!esRolSupervisor && (
-                      <div style={{ display: "flex", gap: 4, marginTop: 4, justifyContent: "flex-end" }}>
-                        {i > 0 && (
-                          <button onClick={() => moverParada(i, i - 1)}
-                            style={{ background: B.border, border: "none", color: B.t2, cursor: "pointer",
-                              width: 20, height: 20, fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>▲</button>
-                        )}
-                        {i < paradas.length - 1 && (
-                          <button onClick={() => moverParada(i, i + 1)}
-                            style={{ background: B.border, border: "none", color: B.t2, cursor: "pointer",
-                              width: 20, height: 20, fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>▼</button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Regreso */}
-            <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, background: "#0E0800" }}>
-              <div style={{ width: 28, height: 28, background: B.green, borderRadius: "50%", display: "flex",
-                alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>🏁</div>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: B.green }}>REGRESO — BASE OPERATIVA</div>
-                <div style={{ fontSize: 10, color: B.t3 }}>{base.direccion}</div>
-              </div>
-              {rutaInfo && (
-                <div style={{ marginLeft: "auto", textAlign: "right" }}>
-                  <div style={{ fontFamily: "'Orbitron',sans-serif", fontSize: 16, fontWeight: 900, color: B.green }}>{rutaInfo.km} km</div>
-                  <div style={{ fontSize: 9, color: B.t3 }}>total · ~{rutaInfo.min} min</div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Info ORS key */}
-          {!localStorage.getItem('ors_api_key') && (
-            <div style={{ marginTop: 12, padding: "10px 14px", background: B.blueDim,
-              border: `1px solid ${B.blue}33`, borderLeft: `3px solid ${B.blue}`, fontSize: 11 }}>
-              <div style={{ color: B.blue, fontWeight: 700, marginBottom: 4 }}>◈ PARA RUTA ÓPTIMA REAL</div>
-              <div style={{ color: B.t2, lineHeight: 1.7 }}>
-                1. Registrate gratis en <a href="https://openrouteservice.org/dev/#/signup" target="_blank"
-                  style={{ color: B.blue }}>openrouteservice.org</a> y copiá tu API key<br/>
-                2. En tu proyecto Vercel, agregá la variable: <span className="mono" style={{ color: B.t1 }}>VITE_localStorage.getItem('ors_api_key')=tu_key</span><br/>
-                3. Redesplegá — la ruta pasará a ser calculada por calles reales
-              </div>
-            </div>
-          )}
-        </>
       )}
     </div>
   );
 };
-
 
 // ─── COMUNICACIONES ──────────────────────────────────────
 const Comunicaciones=({user,toast})=>{
