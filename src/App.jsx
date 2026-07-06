@@ -1037,6 +1037,23 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
                     <span>{c.direccion}{c.localidad?` · ${c.localidad}`:""}{c.departamento?` · ${c.departamento}`:""}</span>
                   </div>
                 )}
+                {/* Descripción/Observaciones según tipo */}
+                {(()=>{
+                  const esST = ["SERVICIO_TECNICO","SOPORTE"].includes(c.tipo_proceso);
+                  const texto = esST ? c.descripcion : c.observaciones;
+                  if(!texto) return null;
+                  return (
+                    <div style={{fontSize:13,color:"#CC8800",display:"flex",gap:6,alignItems:"flex-start",
+                      padding:"6px 10px",background:"#1a1000",border:"1px solid #CC880033",borderRadius:2}}>
+                      <span style={{flexShrink:0}}>{esST?"🔍":"📋"}</span>
+                      <span style={{lineHeight:1.5,
+                        overflow:"hidden",display:"-webkit-box",
+                        WebkitLineClamp:2,WebkitBoxOrient:"vertical",textOverflow:"ellipsis"}}>
+                        {texto}
+                      </span>
+                    </div>
+                  );
+                })()}
                 <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                   {c.franja_horaria&&(
                     <span style={{fontSize:12,color:"#CC7700",fontWeight:600}}>
@@ -1291,7 +1308,26 @@ const NuevoCaso = ({onSave,onCancel,loading}) => {
           <div><FL label="Localidad"/><input className="field" placeholder="Ciudad / Localidad" value={f.localidad} onChange={e=>s("localidad",e.target.value)}/></div>
           <div style={{gridColumn:"1/-1"}}><FL label="Dirección"/><input className="field" placeholder="Calle, número, esquina..." value={f.direccion} onChange={e=>s("direccion",e.target.value)}/></div>
         </div>
-        <div style={{marginBottom:18}}><FL label="Descripción del Problema" req/><textarea className="field" rows={3} placeholder="Describí el problema o tarea..." value={f.descripcion} onChange={e=>s("descripcion",e.target.value)} style={{resize:"vertical"}}/></div>
+        {/* Descripción del problema — obligatorio para ST, oculto para otros */}
+        {["SERVICIO_TECNICO","SOPORTE"].includes(f.tipo_proceso) && (
+          <div style={{marginBottom:18}}>
+            <FL label="Descripción del Problema" req/>
+            <textarea className="field" rows={3}
+              placeholder="Describí el problema aparente del equipo..."
+              value={f.descripcion} onChange={e=>s("descripcion",e.target.value)}
+              style={{resize:"vertical",fontSize:15}}/>
+          </div>
+        )}
+        {/* Observaciones — para Instalación, Retiro y VTP */}
+        {["INSTALACION","RETIRO","VISITA_PROACTIVA"].includes(f.tipo_proceso) && (
+          <div style={{marginBottom:18}}>
+            <FL label="Observaciones (opcional)"/>
+            <textarea className="field" rows={3}
+              placeholder="Alguna particularidad del caso que el técnico deba saber..."
+              value={f.observaciones||""} onChange={e=>s("observaciones",e.target.value)}
+              style={{resize:"vertical",fontSize:15}}/>
+          </div>
+        )}
 
         {/* ── INSTRUCCIONES ESPECIALES ── */}
         <div style={{marginBottom:18}}>
@@ -3146,29 +3182,50 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
         <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
           <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ DATOS DEL CLIENTE</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[["Terminal",caso.numero_serie],["RUT",caso.rut],["Razón Social",caso.razon_social],["Rubro",caso.rubro],["Dirección",caso.direccion]].map(([l,v])=>v&&(
-              <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
-              <div style={{fontSize:12,color:B.t1,marginTop:2}}>{v}</div></div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {[["Terminal",caso.numero_serie],["RUT",caso.rut],["Razón Social",caso.razon_social],["Rubro",caso.rubro],["Dirección",caso.direccion],["Localidad",caso.localidad],["Departamento",caso.departamento]].map(([l,v])=>v&&(
+              <div key={l} style={{display:"flex",gap:8}}>
+                <div style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em",minWidth:90,paddingTop:2}}>{l}</div>
+                <div style={{fontSize:13,color:B.t1,flex:1}}>{v}</div>
+              </div>
             ))}
             {caso.telefono&&(
-              <div>
-                <div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>TELÉFONO</div>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:2}}>
-                  <span style={{fontSize:12,color:B.t1}}>{caso.telefono}</span>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <div style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em",minWidth:90}}>TELÉFONO</div>
+                <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}>
+                  <span style={{fontSize:13,color:B.t1}}>{caso.telefono}</span>
                   <button onClick={()=>{
                     const num=(caso.telefono||"").replace(/\D/g,"");
                     const numUY=num.startsWith("598")?num:"598"+num;
                     window.open(`https://wa.me/${numUY}`,"_blank");
                   }} style={{background:"#001a00",border:"1px solid #25D36644",
-                    color:"#25D366",cursor:"pointer",padding:"3px 10px",
-                    fontSize:11,fontWeight:700,borderRadius:2,display:"flex",
-                    alignItems:"center",gap:5,flexShrink:0}}>
+                    color:"#25D366",cursor:"pointer",padding:"4px 12px",
+                    fontSize:12,fontWeight:700,borderRadius:2,
+                    display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
                     💬 WhatsApp
                   </button>
                 </div>
               </div>
             )}
+            {/* Descripción/Observaciones según tipo de proceso */}
+            {(()=>{
+              const esST = ["SERVICIO_TECNICO","SOPORTE"].includes((caso.tipo_proceso||"").toUpperCase());
+              const label = esST ? "PROBLEMA APARENTE" : "OBSERVACIONES";
+              const texto = esST ? caso.descripcion : caso.observaciones;
+              if(!texto) return null;
+              return (
+                <div style={{marginTop:4}}>
+                  <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".06em",marginBottom:6}}>
+                    {esST?"🔍":"📋"} {label}
+                  </div>
+                  <div style={{fontSize:14,color:"#CC8800",lineHeight:1.7,
+                    padding:"10px 14px",background:"#1a1000",
+                    border:"1px solid #CC880033",borderRadius:2}}>
+                    {texto}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
         <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
