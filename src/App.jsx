@@ -3057,16 +3057,45 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
     <div style={{padding:"0 0 40px"}}>
       {showInstr&&<ModalInstrucciones caso={caso} user={user} onClose={()=>setShowInstr(false)} onSave={guardarInstrucciones}/>}
       {showCierre&&<ModalCierre caso={caso} user={user} onClose={()=>setShowCierre(false)} onGuardar={guardarCierre}/>}
-      {showFinalizar&&<OverlayFinalizar caso={caso} onVolver={()=>setShowFinalizar(false)} onGuardar={async(updates)=>{
+      {showFinalizar&&<OverlayFinalizar caso={caso} onVolver={()=>setShowFinalizar(false)} onGuardar={async(updates, extras)=>{
         const h=[...(caso.historial||[]),{id:Date.now(),tipo:"FINALIZACION",
-          texto:`FINALIZADO — ${updates.resolvio?"Problema resuelto":"No resuelto"} · Modelo: ${updates.cierre_modelo_terminal||""} · Serie: ${updates.cierre_serie_terminal||""}`,
+          texto:`FINALIZADO — ${updates.resolvio?"Resuelto":"No resuelto"}${updates.cierre_modelo_terminal?` · Modelo: ${updates.cierre_modelo_terminal}`:""}${updates.cierre_serie_terminal?` · Serie: ${updates.cierre_serie_terminal}`:""}`,
           usuario:user.email,ts:new Date().toISOString()}];
         const payload={...updates,tiempo_total_seg:tiempoSegundos,historial:h,updated_at:new Date().toISOString()};
-        await supabase.from("casos").update(payload).eq("id",caso.id);
+        const{error}=await supabase.from("casos").update(payload).eq("id",caso.id);
+        if(error){ toast("Error: "+error.message); return; }
+        // Generar caso ST si VTP requiere seguimiento
+        if(extras?.generarST){
+          await supabase.from("casos").insert({
+            tipo_proceso:"SERVICIO_TECNICO",
+            empresa_id:caso.empresa_id,
+            tecnico_id:caso.tecnico_id,
+            razon_social:caso.razon_social,
+            rut:caso.rut,
+            direccion:caso.direccion,
+            localidad:caso.localidad,
+            departamento:caso.departamento,
+            telefono:caso.telefono,
+            rubro:caso.rubro,
+            numero_serie:caso.numero_serie,
+            prioridad:caso.prioridad||"MEDIA",
+            estado:"ASIGNADO",
+            fecha_visita:extras.fechaSeguimiento,
+            descripcion:`Seguimiento generado desde Visita Técnica Proactiva #${caso.numero||caso.id}`,
+            creado_por:user.id,
+            sla_horas:4,
+            sla_deadline:new Date(extras.fechaSeguimiento+"T23:59:59").toISOString(),
+            historial:[{id:Date.now(),tipo:"CREACION",
+              texto:`Caso ST generado automáticamente desde VTP #${caso.numero||caso.id}`,
+              usuario:user.email,ts:new Date().toISOString()}],
+            created_at:new Date().toISOString(),
+          });
+          toast("✓ Caso ST generado para el "+new Date(extras.fechaSeguimiento+"T12:00:00").toLocaleDateString("es-UY"));
+        }
         const casActualizado={...caso,...payload};
-        if(onUpdate) onUpdate(casActualizado); // actualiza/elimina del array ANTES de ir a la lista
+        if(onUpdate) onUpdate(casActualizado);
         toast("✓ Caso finalizado");
-        onBack(); // va directo a la lista recargada
+        onBack();
       }}/>}
       {encuestaActiva&&<ModalEncuestaConfig encuesta={encuestaActiva.encuesta} caso={caso} user={user} onClose={()=>setEncuestaActiva(null)} onSave={guardarEncuestaConfig}/>}
       {showPausar&&<OverlayPausar caso={caso} onVolver={()=>setShowPausar(false)} onGuardar={async(txt)=>{await pausar(txt);setShowPausar(false);onBack();}}/>}
@@ -3527,227 +3556,685 @@ const OverlayRecoordinar = ({ caso, onVolver, onGuardar }) => {
 
 // ─── OVERLAY FINALIZAR — hasta 7 pasos ──────────────────────
 const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
-  const [paso, setPaso]     = useState(1);
-  const [resolvio, setRes]  = useState(null);
-  const [modelo, setModelo] = useState("");
-  const [serie, setSerie]   = useState("");
-  const [descProb, setDesc] = useState("");
-  const [comoRes, setComo]  = useState("");
-  const [n2, setN2]         = useState(null);
-  const [showScan, setScan] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const tipo = caso.tipo_proceso?.toUpperCase();
+  const esST  = ["SERVICIO_TECNICO","SOPORTE"].includes(tipo);
+  const esINS = tipo === "INSTALACION";
+  const esRET = tipo === "RETIRO";
+  const esVTP = tipo === "VISITA_PROACTIVA";
 
-  const esServicioTecnico = ["SERVICIO_TECNICO","SOPORTE"].includes((caso.tipo_proceso||"").toUpperCase());
-  // Pasos: 1=resolvio 2=modelo 3=serie [4=prob 5=como 6=n2 si ST+resolvio]
-  const totalPasos = resolvio===true && esServicioTecnico ? 6 : 3;
+  // ── SERVICIO TÉCNICO ────────────────────────────────────
+  const FlujST = () => {
+    const [paso,setPaso] = useState(1);
+    const [resolvio,setRes] = useState(null);
+    const [detProb,setDetProb] = useState("");
+    const [modelo,setModelo] = useState("");
+    const [serie,setSerie] = useState("");
+    const [descProb,setDesc] = useState("");
+    const [comoRes,setComo] = useState("");
+    const [n2,setN2] = useState(null);
+    const [showScan,setScan] = useState(false);
+    const [saving,setSaving] = useState(false);
 
-  const guardar = async () => {
-    setSaving(true);
-    await onGuardar({
-      resolvio: resolvio===true,
-      cierre_modelo_terminal: modelo,
-      cierre_serie_terminal: serie,
-      ...(resolvio===true && esServicioTecnico ? {
-        cierre_descripcion_problema: descProb,
-        cierre_como_resolvio: comoRes,
-        cierre_requirio_n2: n2,
+    const totalPasos = resolvio===true ? 6 : resolvio===false ? 4 : 1;
+
+    const guardar = async() => {
+      setSaving(true);
+      await onGuardar({
+        estado:"FINALIZADO",
+        resolvio: resolvio===true,
+        cierre_modelo_terminal: modelo,
+        cierre_serie_terminal: serie,
+        cierre_descripcion_problema: resolvio===true ? descProb : detProb,
+        cierre_como_resolvio: comoRes||"",
+        cierre_requirio_n2: n2||false,
         cierre_completado: true,
         cierre_at: new Date().toISOString(),
-      } : {}),
-      estado: "FINALIZADO",
-    });
-    setSaving(false);
+      });
+      setSaving(false);
+    };
+
+    if(paso===1) return (
+      <PantallaAccion color={B.green} icono="🏁" titulo="¿RESOLVISTE?"
+        subtitulo={caso.razon_social} pasoActual={1} totalPasos={totalPasos}
+        botonLabel="SIGUIENTE →" botonDisabled={resolvio===null}
+        onVolver={onVolver} onBoton={()=>setPaso(2)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>
+          ¿Resolviste el problema del cliente?
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {[[true,"✅","SÍ, lo resolví",B.green],[false,"❌","NO pude resolverlo",B.red]].map(([val,ic,lbl,col])=>(
+            <button key={String(val)} onClick={()=>setRes(val)}
+              style={{padding:"24px 20px",border:`3px solid ${resolvio===val?col:"#2a2a2a"}`,
+                background:resolvio===val?col+"22":"#0e0e14",color:resolvio===val?col:"#ccc",
+                cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:18,transition:"all .15s"}}>
+              <span style={{fontSize:44,flexShrink:0}}>{ic}</span>
+              <span style={{fontSize:18,fontWeight:700}}>{lbl}</span>
+            </button>
+          ))}
+        </div>
+      </PantallaAccion>
+    );
+
+    // Si NO resolvió → detalla el problema
+    if(paso===2 && resolvio===false) return (
+      <PantallaAccion color={B.red} icono="📋" titulo="DETALLA EL PROBLEMA"
+        subtitulo={caso.razon_social} pasoActual={2} totalPasos={totalPasos}
+        botonLabel="SIGUIENTE →" botonDisabled={!detProb.trim()}
+        onVolver={()=>setPaso(1)} onBoton={()=>setPaso(3)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:16}}>
+          ¿Cuál era el problema que no pudiste resolver?
+        </div>
+        <textarea className="field" rows={6}
+          placeholder="Describí el problema encontrado..."
+          value={detProb} onChange={e=>setDetProb(e.target.value)}
+          style={{fontSize:16,resize:"none",lineHeight:1.7}}/>
+      </PantallaAccion>
+    );
+
+    // Modelo
+    if((paso===2&&resolvio===true)||(paso===3&&resolvio===false)) return (
+      <PantallaAccion color={B.orange} icono="🖥️" titulo="MODELO DEL EQUIPO"
+        subtitulo={caso.razon_social}
+        pasoActual={resolvio===true?2:3} totalPasos={totalPasos}
+        botonLabel="SIGUIENTE →" botonDisabled={!modelo}
+        onVolver={()=>setPaso(resolvio===true?1:2)}
+        onBoton={()=>setPaso(resolvio===true?3:4)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:20}}>¿Cuál es el modelo del equipo?</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {MODELOS_TERMINAL.map(m=>(
+            <button key={m} onClick={()=>setModelo(m)}
+              style={{padding:"20px 20px",border:`2px solid ${modelo===m?B.orange:"#2a2a2a"}`,
+                background:modelo===m?B.orangeDim:"#0e0e14",color:modelo===m?B.orange:"#ccc",
+                cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:16,
+                fontSize:17,fontWeight:modelo===m?700:400,transition:"all .15s"}}>
+              <span style={{fontSize:24}}>{modelo===m?"◉":"○"}</span>{m}
+            </button>
+          ))}
+        </div>
+      </PantallaAccion>
+    );
+
+    // Serie
+    if((paso===3&&resolvio===true)||(paso===4&&resolvio===false)) return (
+      <>
+        {showScan&&<EscanerBarras onScan={v=>{setSerie(v);setScan(false);}} onClose={()=>setScan(false)}/>}
+        <PantallaAccion color={B.orange} icono="🔢" titulo="SERIE DEL EQUIPO"
+          subtitulo={caso.razon_social}
+          pasoActual={resolvio===true?3:4} totalPasos={totalPasos}
+          botonLabel={resolvio===true?"SIGUIENTE →":"✓ FINALIZAR CASO"}
+          botonDisabled={!serie.trim()} saving={saving}
+          onVolver={()=>setPaso(resolvio===true?2:3)}
+          onBoton={async()=>{ if(resolvio===true){setPaso(4);} else {await guardar();} }}>
+          <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:20}}>Serie del equipo</div>
+          <button onClick={()=>setScan(true)}
+            style={{width:"100%",padding:"22px 0",marginBottom:16,background:"#001a33",
+              border:`2px solid ${B.blue}`,color:B.blue,cursor:"pointer",fontSize:17,fontWeight:700,
+              borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",gap:14}}>
+            <span style={{fontSize:32}}>📷</span> ESCANEAR CÓDIGO DE BARRAS
+          </button>
+          <div style={{fontSize:12,color:"#555",textAlign:"center",marginBottom:12}}>— o escribí la serie —</div>
+          <input className="field" placeholder="Serie del equipo..."
+            value={serie} onChange={e=>setSerie(e.target.value)}
+            style={{fontSize:20,padding:"18px",textAlign:"center",letterSpacing:".1em"}}/>
+          {serie&&<div style={{marginTop:14,padding:"14px",background:"#001a0a",
+            border:`1px solid ${B.green}44`,fontSize:16,color:B.green,textAlign:"center",borderRadius:2}}>
+            ✓ <strong>{serie}</strong></div>}
+        </PantallaAccion>
+      </>
+    );
+
+    // Solo si SÍ resolvió: pasos 4,5,6
+    if(paso===4) return (
+      <PantallaAccion color={B.blue} icono="🔍" titulo="EL PROBLEMA"
+        subtitulo={caso.razon_social} pasoActual={4} totalPasos={6}
+        botonLabel="SIGUIENTE →" botonDisabled={!descProb.trim()}
+        onVolver={()=>setPaso(3)} onBoton={()=>setPaso(5)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:16}}>¿Cuál era el problema?</div>
+        <textarea className="field" rows={7}
+          placeholder="Describí el problema que tenía el equipo..."
+          value={descProb} onChange={e=>setDesc(e.target.value)}
+          style={{fontSize:16,resize:"none",lineHeight:1.7}}/>
+      </PantallaAccion>
+    );
+
+    if(paso===5) return (
+      <PantallaAccion color={B.blue} icono="🔧" titulo="LA SOLUCIÓN"
+        subtitulo={caso.razon_social} pasoActual={5} totalPasos={6}
+        botonLabel="SIGUIENTE →" botonDisabled={!comoRes.trim()}
+        onVolver={()=>setPaso(4)} onBoton={()=>setPaso(6)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:16}}>¿Cómo lo resolviste?</div>
+        <textarea className="field" rows={7}
+          placeholder="Describí la solución aplicada..."
+          value={comoRes} onChange={e=>setComo(e.target.value)}
+          style={{fontSize:16,resize:"none",lineHeight:1.7}}/>
+      </PantallaAccion>
+    );
+
+    if(paso===6) return (
+      <PantallaAccion color={B.green} icono="🆘" titulo="SOPORTE N2"
+        subtitulo={caso.razon_social} pasoActual={6} totalPasos={6}
+        botonLabel="✓ FINALIZAR CASO" botonDisabled={n2===null} saving={saving}
+        onVolver={()=>setPaso(5)} onBoton={guardar}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>¿Requirió soporte de nivel 2?</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+          {[[true,"⚠️","SÍ",B.red],[false,"✓","NO",B.green]].map(([val,ic,lbl,col])=>(
+            <button key={String(val)} onClick={()=>setN2(val)}
+              style={{padding:"28px 16px",border:`2px solid ${n2===val?col:"#2a2a2a"}`,
+                background:n2===val?col+"22":"#0e0e14",color:n2===val?col:"#ccc",
+                cursor:"pointer",borderRadius:2,textAlign:"center",transition:"all .15s"}}>
+              <div style={{fontSize:44,marginBottom:8}}>{ic}</div>
+              <div style={{fontSize:20,fontWeight:700}}>{lbl}</div>
+            </button>
+          ))}
+        </div>
+        {n2===true&&<div style={{marginTop:16,padding:"14px",background:"#1a0000",
+          border:"1px solid #FF204033",fontSize:14,color:"#FF2040",lineHeight:1.7,borderRadius:2}}>
+          ⚠ Se registrará como caso con soporte N2 para análisis estadístico posterior
+        </div>}
+      </PantallaAccion>
+    );
+    return null;
   };
 
-  // PASO 1 — ¿Resolviste?
-  if(paso===1) return (
-    <PantallaAccion
-      color={B.green} icono="🏁" titulo="¿RESOLVISTE?"
-      subtitulo={caso.razon_social}
-      pasoActual={1} totalPasos={totalPasos}
-      botonLabel="SIGUIENTE →"
-      botonDisabled={resolvio===null}
-      onVolver={onVolver}
-      onBoton={()=>setPaso(2)}>
-      <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>
-        ¿Resolviste el problema del cliente?
-      </div>
-      <div style={{display:"flex",flexDirection:"column",gap:16}}>
-        {[[true,"✅","SÍ, lo resolví",B.green],[false,"❌","NO pude resolverlo",B.red]].map(([val,ic,lbl,col])=>(
-          <button key={String(val)} onClick={()=>setRes(val)}
-            style={{
-              padding:"28px 20px",
-              border:`3px solid ${resolvio===val?col:"#2a2a2a"}`,
-              background:resolvio===val?col+"22":"#0e0e14",
-              color:resolvio===val?col:"#ccc",
-              cursor:"pointer", borderRadius:2,
-              display:"flex", alignItems:"center", gap:18, transition:"all .15s",
-            }}>
-            <span style={{fontSize:44,flexShrink:0}}>{ic}</span>
-            <span style={{fontSize:19,fontWeight:700,textAlign:"left"}}>{lbl}</span>
-          </button>
-        ))}
-      </div>
-    </PantallaAccion>
-  );
+  // ── INSTALACIÓN ─────────────────────────────────────────
+  const FlujINS = () => {
+    const [paso,setPaso] = useState(1);
+    const [completa,setCompleta] = useState(null);
+    const [pruebas,setPruebas] = useState({venta:false,anulacion:false,lote:false,devolucion:false});
+    const [modelo,setModelo] = useState("");
+    const [serie,setSerie] = useState("");
+    const [obs,setObs] = useState("");
+    const [showScan,setScan] = useState(false);
+    const [saving,setSaving] = useState(false);
 
-  // PASO 2 — Modelo
-  if(paso===2) return (
-    <PantallaAccion
-      color={B.orange} icono="🖥️" titulo="MODELO DEL EQUIPO"
-      subtitulo={caso.razon_social}
-      pasoActual={2} totalPasos={totalPasos}
-      botonLabel="SIGUIENTE →"
-      botonDisabled={!modelo}
-      onVolver={()=>setPaso(1)}
-      onBoton={()=>setPaso(3)}>
-      <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:20}}>
-        ¿Cuál es el modelo del equipo?
-      </div>
-      <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        {MODELOS_TERMINAL.map(m=>(
-          <button key={m} onClick={()=>setModelo(m)}
-            style={{
-              padding:"20px 20px",
-              border:`2px solid ${modelo===m?B.orange:"#2a2a2a"}`,
-              background:modelo===m?B.orangeDim:"#0e0e14",
-              color:modelo===m?B.orange:"#ccc",
-              cursor:"pointer", borderRadius:2,
-              display:"flex", alignItems:"center", gap:16,
-              fontSize:17, fontWeight:modelo===m?700:400, transition:"all .15s",
-            }}>
-            <span style={{fontSize:24}}>{modelo===m?"◉":"○"}</span>{m}
-          </button>
-        ))}
-      </div>
-    </PantallaAccion>
-  );
+    const PRUEBAS_LIST = [
+      {id:"venta",     label:"Prueba de Venta exitosa"},
+      {id:"anulacion", label:"Prueba de Anulación exitosa"},
+      {id:"lote",      label:"Prueba de Cierre de Lote exitoso"},
+      {id:"devolucion",label:"Prueba de Devolución exitosa"},
+    ];
+    const todasOk = Object.values(pruebas).every(Boolean);
 
-  // PASO 3 — Serie
-  if(paso===3) return (
-    <>
-      {showScan&&<EscanerBarras onScan={v=>{setSerie(v);setScan(false);}} onClose={()=>setScan(false)}/>}
-      <PantallaAccion
-        color={B.orange} icono="🔢" titulo="SERIE DEL EQUIPO"
-        subtitulo={caso.razon_social}
-        pasoActual={3} totalPasos={totalPasos}
-        botonLabel={resolvio===true&&esServicioTecnico?"SIGUIENTE →":"✓ FINALIZAR CASO"}
-        botonDisabled={!serie.trim()}
-        saving={saving}
-        onVolver={()=>setPaso(2)}
-        onBoton={async()=>{ if(resolvio===true&&esServicioTecnico){setPaso(4);} else {await guardar();} }}>
-        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:20}}>
-          Serie del equipo del cliente
+    const guardar = async() => {
+      setSaving(true);
+      await onGuardar({
+        estado:"FINALIZADO",
+        resolvio: completa===true,
+        cierre_completado: completa===true,
+        cierre_modelo_terminal: modelo,
+        cierre_serie_terminal: serie,
+        cierre_descripcion_problema: completa===false ? obs : "Instalación completa con pruebas exitosas",
+        cierre_at: new Date().toISOString(),
+        ...(completa===false ? {obs_supervisor: obs} : {}),
+      });
+      setSaving(false);
+    };
+
+    if(paso===1) return (
+      <PantallaAccion color={B.green} icono="📦" titulo="¿INSTALACIÓN COMPLETA?"
+        subtitulo={caso.razon_social} pasoActual={1} totalPasos={completa===true?3:2}
+        botonLabel="SIGUIENTE →" botonDisabled={completa===null}
+        onVolver={onVolver} onBoton={()=>setPaso(2)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>
+          ¿La instalación quedó completa?
         </div>
-        <button onClick={()=>setScan(true)}
-          style={{
-            width:"100%", padding:"22px 0", marginBottom:16,
-            background:"#001a33", border:`2px solid ${B.blue}`,
-            color:B.blue, cursor:"pointer", fontSize:17, fontWeight:700,
-            borderRadius:2, display:"flex", alignItems:"center",
-            justifyContent:"center", gap:14,
-          }}>
-          <span style={{fontSize:32}}>📷</span> ESCANEAR CÓDIGO DE BARRAS
-        </button>
-        <div style={{fontSize:13,color:"#555",textAlign:"center",marginBottom:12}}>— o escribí la serie —</div>
-        <input className="field"
-          placeholder="Ej: A1B2C3D4E5"
-          value={serie} onChange={e=>setSerie(e.target.value)}
-          style={{fontSize:20,padding:"18px",textAlign:"center",letterSpacing:".1em"}}/>
-        {serie&&(
-          <div style={{marginTop:14,padding:"14px",background:"#001a0a",
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {[[true,"✅","SÍ, quedó completa",B.green],[false,"❌","NO quedó completa",B.red]].map(([val,ic,lbl,col])=>(
+            <button key={String(val)} onClick={()=>setCompleta(val)}
+              style={{padding:"24px 20px",border:`3px solid ${completa===val?col:"#2a2a2a"}`,
+                background:completa===val?col+"22":"#0e0e14",color:completa===val?col:"#ccc",
+                cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:18,transition:"all .15s"}}>
+              <span style={{fontSize:44,flexShrink:0}}>{ic}</span>
+              <span style={{fontSize:18,fontWeight:700}}>{lbl}</span>
+            </button>
+          ))}
+        </div>
+      </PantallaAccion>
+    );
+
+    // Si SÍ → pruebas básicas
+    if(paso===2 && completa===true) return (
+      <PantallaAccion color={B.green} icono="✅" titulo="PRUEBAS BÁSICAS"
+        subtitulo={caso.razon_social} pasoActual={2} totalPasos={3}
+        botonLabel="SIGUIENTE →" botonDisabled={!todasOk}
+        onVolver={()=>setPaso(1)} onBoton={()=>setPaso(3)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:8}}>
+          Confirmá que todas las pruebas fueron exitosas:
+        </div>
+        <div style={{fontSize:13,color:"#666",marginBottom:20}}>
+          Tocá cada prueba para confirmarla
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {PRUEBAS_LIST.map(p=>(
+            <button key={p.id} onClick={()=>setPruebas(prev=>({...prev,[p.id]:!prev[p.id]}))}
+              style={{padding:"20px 18px",textAlign:"left",
+                border:`2px solid ${pruebas[p.id]?B.green:"#2a2a2a"}`,
+                background:pruebas[p.id]?"#001a0a":"#0e0e14",
+                color:pruebas[p.id]?B.green:"#ccc",
+                cursor:"pointer",borderRadius:2,
+                display:"flex",alignItems:"center",gap:16,
+                fontSize:16,transition:"all .15s"}}>
+              <span style={{fontSize:28,flexShrink:0}}>{pruebas[p.id]?"✅":"○"}</span>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {!todasOk&&<div style={{marginTop:16,fontSize:13,color:"#666",textAlign:"center"}}>
+          Confirmá todas las pruebas para continuar
+        </div>}
+      </PantallaAccion>
+    );
+
+    // Si SÍ → modelo y serie
+    if(paso===3 && completa===true) return (
+      <>
+        {showScan&&<EscanerBarras onScan={v=>{setSerie(v);setScan(false);}} onClose={()=>setScan(false)}/>}
+        <PantallaAccion color={B.green} icono="🖥️" titulo="DATOS DEL EQUIPO"
+          subtitulo={caso.razon_social} pasoActual={3} totalPasos={3}
+          botonLabel="✓ FINALIZAR INSTALACIÓN" botonDisabled={!modelo||!serie.trim()}
+          saving={saving} onVolver={()=>setPaso(2)} onBoton={guardar}>
+          <div style={{display:"flex",flexDirection:"column",gap:20}}>
+            <div>
+              <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:12}}>Modelo instalado</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {MODELOS_TERMINAL.map(m=>(
+                  <button key={m} onClick={()=>setModelo(m)}
+                    style={{padding:"16px 18px",border:`2px solid ${modelo===m?B.green:"#2a2a2a"}`,
+                      background:modelo===m?"#001a0a":"#0e0e14",color:modelo===m?B.green:"#ccc",
+                      cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:14,
+                      fontSize:15,fontWeight:modelo===m?700:400,transition:"all .15s"}}>
+                    <span style={{fontSize:20}}>{modelo===m?"◉":"○"}</span>{m}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:10}}>Serie del equipo</div>
+              <button onClick={()=>setScan(true)}
+                style={{width:"100%",padding:"18px 0",marginBottom:12,background:"#001a33",
+                  border:`2px solid ${B.blue}`,color:B.blue,cursor:"pointer",fontSize:16,fontWeight:700,
+                  borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",gap:12}}>
+                <span style={{fontSize:28}}>📷</span> ESCANEAR
+              </button>
+              <input className="field" placeholder="O escribí la serie..."
+                value={serie} onChange={e=>setSerie(e.target.value)}
+                style={{fontSize:18,padding:"16px",textAlign:"center",letterSpacing:".08em"}}/>
+              {serie&&<div style={{marginTop:10,padding:"12px",background:"#001a0a",
+                border:`1px solid ${B.green}44`,fontSize:15,color:B.green,textAlign:"center",borderRadius:2}}>
+                ✓ <strong>{serie}</strong></div>}
+            </div>
+          </div>
+        </PantallaAccion>
+      </>
+    );
+
+    // Si NO → observaciones
+    if(paso===2 && completa===false) return (
+      <PantallaAccion color={B.red} icono="📝" titulo="OBSERVACIONES"
+        subtitulo={caso.razon_social} pasoActual={2} totalPasos={2}
+        botonLabel="✓ FINALIZAR" botonDisabled={!obs.trim()}
+        saving={saving} onVolver={()=>setPaso(1)} onBoton={guardar}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:8}}>
+          ¿Por qué no quedó completa?
+        </div>
+        <div style={{marginBottom:16,padding:"12px 14px",background:"#1a0000",
+          border:"1px solid #FF204033",fontSize:13,color:"#FF6060",lineHeight:1.6,borderRadius:2}}>
+          ⚠ Esta observación será visible para tu Supervisor
+        </div>
+        <textarea className="field" rows={7}
+          placeholder="Describí el motivo por el cual la instalación no pudo completarse..."
+          value={obs} onChange={e=>setObs(e.target.value)}
+          style={{fontSize:16,resize:"none",lineHeight:1.7}}/>
+      </PantallaAccion>
+    );
+    return null;
+  };
+
+  // ── RETIRO DE TERMINAL ──────────────────────────────────
+  const FlujRET = () => {
+    const [paso,setPaso] = useState(1);
+    const [modelo,setModelo] = useState("");
+    const [serie,setSerie] = useState("");
+    const [accesorios,setAcc] = useState(null);
+    const [remito,setRemito] = useState("");
+    const [obs,setObs] = useState("");
+    const [showScan,setScan] = useState(false);
+    const [saving,setSaving] = useState(false);
+
+    const guardar = async() => {
+      setSaving(true);
+      await onGuardar({
+        estado:"FINALIZADO",
+        resolvio: true,
+        cierre_completado: true,
+        cierre_modelo_terminal: modelo,
+        cierre_serie_terminal: serie,
+        cierre_descripcion_problema: `Retiro completado · Accesorios: ${accesorios?"SÍ":"NO"} · Remito: ${remito}${obs?` · Obs: ${obs}`:""}`,
+        cierre_at: new Date().toISOString(),
+      });
+      setSaving(false);
+    };
+
+    if(paso===1) return (
+      <PantallaAccion color={B.orange} icono="🔄" titulo="MODELO DEL EQUIPO"
+        subtitulo={caso.razon_social} pasoActual={1} totalPasos={4}
+        botonLabel="SIGUIENTE →" botonDisabled={!modelo}
+        onVolver={onVolver} onBoton={()=>setPaso(2)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:20}}>¿Cuál es el modelo del equipo retirado?</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {MODELOS_TERMINAL.map(m=>(
+            <button key={m} onClick={()=>setModelo(m)}
+              style={{padding:"18px 18px",border:`2px solid ${modelo===m?B.orange:"#2a2a2a"}`,
+                background:modelo===m?B.orangeDim:"#0e0e14",color:modelo===m?B.orange:"#ccc",
+                cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:14,
+                fontSize:16,fontWeight:modelo===m?700:400,transition:"all .15s"}}>
+              <span style={{fontSize:22}}>{modelo===m?"◉":"○"}</span>{m}
+            </button>
+          ))}
+        </div>
+      </PantallaAccion>
+    );
+
+    if(paso===2) return (
+      <>
+        {showScan&&<EscanerBarras onScan={v=>{setSerie(v);setScan(false);}} onClose={()=>setScan(false)}/>}
+        <PantallaAccion color={B.orange} icono="🔢" titulo="SERIE DEL EQUIPO"
+          subtitulo={caso.razon_social} pasoActual={2} totalPasos={4}
+          botonLabel="SIGUIENTE →" botonDisabled={!serie.trim()}
+          onVolver={()=>setPaso(1)} onBoton={()=>setPaso(3)}>
+          <button onClick={()=>setScan(true)}
+            style={{width:"100%",padding:"22px 0",marginBottom:16,background:"#001a33",
+              border:`2px solid ${B.blue}`,color:B.blue,cursor:"pointer",fontSize:17,fontWeight:700,
+              borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",gap:14}}>
+            <span style={{fontSize:32}}>📷</span> ESCANEAR CÓDIGO DE BARRAS
+          </button>
+          <input className="field" placeholder="O escribí la serie..."
+            value={serie} onChange={e=>setSerie(e.target.value)}
+            style={{fontSize:20,padding:"18px",textAlign:"center",letterSpacing:".1em"}}/>
+          {serie&&<div style={{marginTop:14,padding:"14px",background:"#001a0a",
             border:`1px solid ${B.green}44`,fontSize:16,color:B.green,textAlign:"center",borderRadius:2}}>
-            ✓ <strong>{serie}</strong>
+            ✓ <strong>{serie}</strong></div>}
+        </PantallaAccion>
+      </>
+    );
+
+    if(paso===3) return (
+      <PantallaAccion color={B.orange} icono="📦" titulo="ACCESORIOS Y REMITO"
+        subtitulo={caso.razon_social} pasoActual={3} totalPasos={4}
+        botonLabel="SIGUIENTE →" botonDisabled={accesorios===null||!remito.trim()}
+        onVolver={()=>setPaso(2)} onBoton={()=>setPaso(4)}>
+        <div style={{display:"flex",flexDirection:"column",gap:24}}>
+          <div>
+            <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:14}}>¿Devuelve accesorios?</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              {[[true,"SÍ",B.green,"📦"],[false,"NO",B.red,"✗"]].map(([val,lbl,col,ic])=>(
+                <button key={String(val)} onClick={()=>setAcc(val)}
+                  style={{padding:"22px 12px",border:`2px solid ${accesorios===val?col:"#2a2a2a"}`,
+                    background:accesorios===val?col+"22":"#0e0e14",color:accesorios===val?col:"#ccc",
+                    cursor:"pointer",borderRadius:2,textAlign:"center",transition:"all .15s"}}>
+                  <div style={{fontSize:36,marginBottom:6}}>{ic}</div>
+                  <div style={{fontSize:18,fontWeight:700}}>{lbl}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:10}}>Número de remito</div>
+            <input className="field" type="number" placeholder="Ej: 00123456"
+              value={remito} onChange={e=>setRemito(e.target.value)}
+              style={{fontSize:22,padding:"18px",textAlign:"center",letterSpacing:".1em"}}/>
+          </div>
+        </div>
+      </PantallaAccion>
+    );
+
+    if(paso===4) return (
+      <PantallaAccion color={B.green} icono="📝" titulo="OBSERVACIONES"
+        subtitulo={caso.razon_social} pasoActual={4} totalPasos={4}
+        botonLabel="✓ FINALIZAR RETIRO" saving={saving}
+        onVolver={()=>setPaso(3)} onBoton={guardar}>
+        <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:10}}>
+          Observaciones adicionales (opcional)
+        </div>
+        <textarea className="field" rows={6}
+          placeholder="Alguna observación adicional sobre el retiro..."
+          value={obs} onChange={e=>setObs(e.target.value)}
+          style={{fontSize:16,resize:"none",lineHeight:1.7}}/>
+        <div style={{marginTop:16,padding:"14px 16px",background:B.deep,
+          border:`1px solid ${B.border}`,fontSize:13,color:B.t3,lineHeight:1.8,borderRadius:2}}>
+          <div>🔄 Modelo: <strong style={{color:B.orange}}>{modelo}</strong></div>
+          <div>🔢 Serie: <strong style={{color:B.orange}}>{serie}</strong></div>
+          <div>📦 Accesorios: <strong style={{color:accesorios?B.green:B.red}}>{accesorios?"SÍ":"NO"}</strong></div>
+          <div>📋 Remito: <strong style={{color:B.orange}}>#{remito}</strong></div>
+        </div>
+      </PantallaAccion>
+    );
+    return null;
+  };
+
+  // ── VISITA TÉCNICA PROACTIVA ────────────────────────────
+  const FlujVTP = () => {
+    const [paso,setPaso] = useState(1);
+    const [problema,setProblema] = useState(null);
+    const [descProb,setDescProb] = useState("");
+    const [obs,setObs] = useState("");
+    const [seguimiento,setSeg] = useState(null);
+    const [fechaSeg,setFechaSeg] = useState("");
+    const [resolvio,setResolvio] = useState(null);
+    const [modelo,setModelo] = useState("");
+    const [serie,setSerie] = useState("");
+    const [n2,setN2] = useState(null);
+    const [showScan,setScan] = useState(false);
+    const [saving,setSaving] = useState(false);
+
+    const guardar = async() => {
+      setSaving(true);
+      const updates = {
+        estado:"FINALIZADO",
+        resolvio: resolvio===true,
+        cierre_completado: true,
+        cierre_descripcion_problema: problema ? descProb : "Sin problemas detectados",
+        cierre_como_resolvio: resolvio===true ? "Resuelto en visita proactiva" : "",
+        cierre_requirio_n2: n2||false,
+        cierre_modelo_terminal: modelo||"",
+        cierre_serie_terminal: serie||"",
+        cierre_at: new Date().toISOString(),
+      };
+      await onGuardar(updates, seguimiento===true ? {
+        generarST: true,
+        fechaSeguimiento: fechaSeg,
+      } : null);
+      setSaving(false);
+    };
+
+    if(paso===1) return (
+      <PantallaAccion color={B.purple} icono="👁" titulo="¿PROBLEMA DETECTADO?"
+        subtitulo={caso.razon_social} pasoActual={1} totalPasos={5}
+        botonLabel="SIGUIENTE →" botonDisabled={problema===null}
+        onVolver={onVolver} onBoton={()=>setPaso(2)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>
+          ¿Se detectó algún problema?
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {[[true,"⚠️","SÍ, detecté un problema",B.red],[false,"✅","NO, todo en orden",B.green]].map(([val,ic,lbl,col])=>(
+            <button key={String(val)} onClick={()=>setProblema(val)}
+              style={{padding:"24px 20px",border:`3px solid ${problema===val?col:"#2a2a2a"}`,
+                background:problema===val?col+"22":"#0e0e14",color:problema===val?col:"#ccc",
+                cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:18,transition:"all .15s"}}>
+              <span style={{fontSize:44,flexShrink:0}}>{ic}</span>
+              <span style={{fontSize:18,fontWeight:700}}>{lbl}</span>
+            </button>
+          ))}
+        </div>
+      </PantallaAccion>
+    );
+
+    if(paso===2) return (
+      <PantallaAccion color={B.purple} icono="📋" titulo="OBSERVACIONES"
+        subtitulo={caso.razon_social} pasoActual={2} totalPasos={5}
+        botonLabel="SIGUIENTE →" botonDisabled={problema&&!descProb.trim()}
+        onVolver={()=>setPaso(1)} onBoton={()=>setPaso(3)}>
+        {problema&&(
+          <div>
+            <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:10}}>Descripción del problema</div>
+            <textarea className="field" rows={5}
+              placeholder="Describí el problema detectado..."
+              value={descProb} onChange={e=>setDescProb(e.target.value)}
+              style={{fontSize:16,resize:"none",marginBottom:20}}/>
+          </div>
+        )}
+        <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:10}}>Observaciones generales (opcional)</div>
+        <textarea className="field" rows={4}
+          placeholder="Observaciones adicionales de la visita..."
+          value={obs} onChange={e=>setObs(e.target.value)}
+          style={{fontSize:16,resize:"none"}}/>
+      </PantallaAccion>
+    );
+
+    if(paso===3) return (
+      <PantallaAccion color={B.purple} icono="📅" titulo="¿REQUIERE SEGUIMIENTO?"
+        subtitulo={caso.razon_social} pasoActual={3} totalPasos={5}
+        botonLabel="SIGUIENTE →" botonDisabled={seguimiento===null||(seguimiento&&!fechaSeg)}
+        onVolver={()=>setPaso(2)} onBoton={()=>setPaso(4)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>
+          ¿El caso requiere un seguimiento con Servicio Técnico?
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:20}}>
+          {[[true,"🔧","SÍ, requiere ST",B.orange],[false,"✅","NO, caso cerrado",B.green]].map(([val,ic,lbl,col])=>(
+            <button key={String(val)} onClick={()=>setSeg(val)}
+              style={{padding:"22px 20px",border:`3px solid ${seguimiento===val?col:"#2a2a2a"}`,
+                background:seguimiento===val?col+"22":"#0e0e14",color:seguimiento===val?col:"#ccc",
+                cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:16,transition:"all .15s"}}>
+              <span style={{fontSize:36,flexShrink:0}}>{ic}</span>
+              <span style={{fontSize:17,fontWeight:700}}>{lbl}</span>
+            </button>
+          ))}
+        </div>
+        {seguimiento===true&&(
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:10}}>Fecha de visita de ST</div>
+            <input type="date" className="field"
+              value={fechaSeg} onChange={e=>setFechaSeg(e.target.value)}
+              min={new Date().toISOString().split("T")[0]}
+              style={{fontSize:18,padding:"16px"}}/>
+            {fechaSeg&&<div style={{marginTop:10,padding:"10px 14px",background:"#001a0a",
+              border:`1px solid ${B.orange}44`,fontSize:14,color:B.orange,borderRadius:2}}>
+              🔧 Se generará un caso ST para el {new Date(fechaSeg+"T12:00:00").toLocaleDateString("es-UY",{weekday:"long",day:"numeric",month:"long"})}
+            </div>}
           </div>
         )}
       </PantallaAccion>
+    );
+
+    if(paso===4) return (
+      <PantallaAccion color={B.purple} icono="✅" titulo="¿RESOLVIÓ EN LA VISITA?"
+        subtitulo={caso.razon_social} pasoActual={4} totalPasos={5}
+        botonLabel="SIGUIENTE →" botonDisabled={resolvio===null}
+        onVolver={()=>setPaso(3)} onBoton={()=>setPaso(resolvio===true?5:99)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>
+          ¿Resolviste el problema durante la visita?
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {[[true,"✅","SÍ, lo resolví en la visita",B.green],[false,"❌","NO, requiere más trabajo",B.red]].map(([val,ic,lbl,col])=>(
+            <button key={String(val)} onClick={()=>setResolvio(val)}
+              style={{padding:"24px 20px",border:`3px solid ${resolvio===val?col:"#2a2a2a"}`,
+                background:resolvio===val?col+"22":"#0e0e14",color:resolvio===val?col:"#ccc",
+                cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:18,transition:"all .15s"}}>
+              <span style={{fontSize:44,flexShrink:0}}>{ic}</span>
+              <span style={{fontSize:18,fontWeight:700}}>{lbl}</span>
+            </button>
+          ))}
+        </div>
+      </PantallaAccion>
+    );
+
+    // Si resolvió: modelo + serie + N2
+    if(paso===5) return (
+      <>
+        {showScan&&<EscanerBarras onScan={v=>{setSerie(v);setScan(false);}} onClose={()=>setScan(false)}/>}
+        <PantallaAccion color={B.green} icono="🖥️" titulo="DATOS DEL EQUIPO"
+          subtitulo={caso.razon_social} pasoActual={5} totalPasos={5}
+          botonLabel="✓ FINALIZAR VISITA" botonDisabled={!modelo||!serie.trim()||n2===null}
+          saving={saving} onVolver={()=>setPaso(4)} onBoton={guardar}>
+          <div style={{display:"flex",flexDirection:"column",gap:20}}>
+            <div>
+              <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:10}}>Modelo del equipo</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {MODELOS_TERMINAL.map(m=>(
+                  <button key={m} onClick={()=>setModelo(m)}
+                    style={{padding:"14px 16px",border:`2px solid ${modelo===m?B.green:"#2a2a2a"}`,
+                      background:modelo===m?"#001a0a":"#0e0e14",color:modelo===m?B.green:"#ccc",
+                      cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:12,
+                      fontSize:14,fontWeight:modelo===m?700:400,transition:"all .15s"}}>
+                    <span style={{fontSize:18}}>{modelo===m?"◉":"○"}</span>{m}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:10}}>Serie del equipo</div>
+              <button onClick={()=>setScan(true)}
+                style={{width:"100%",padding:"16px 0",marginBottom:10,background:"#001a33",
+                  border:`2px solid ${B.blue}`,color:B.blue,cursor:"pointer",fontSize:15,fontWeight:700,
+                  borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+                <span style={{fontSize:24}}>📷</span> ESCANEAR
+              </button>
+              <input className="field" placeholder="O escribí la serie..."
+                value={serie} onChange={e=>setSerie(e.target.value)}
+                style={{fontSize:18,padding:"14px",textAlign:"center"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:12}}>¿Requirió soporte N2?</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                {[[true,"⚠️","SÍ",B.red],[false,"✓","NO",B.green]].map(([val,ic,lbl,col])=>(
+                  <button key={String(val)} onClick={()=>setN2(val)}
+                    style={{padding:"20px 12px",border:`2px solid ${n2===val?col:"#2a2a2a"}`,
+                      background:n2===val?col+"22":"#0e0e14",color:n2===val?col:"#ccc",
+                      cursor:"pointer",borderRadius:2,textAlign:"center",transition:"all .15s"}}>
+                    <div style={{fontSize:32,marginBottom:6}}>{ic}</div>
+                    <div style={{fontSize:16,fontWeight:700}}>{lbl}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </PantallaAccion>
+      </>
+    );
+
+    // Si NO resolvió en visita → finalizar directo
+    if(paso===99) {
+      guardar();
+      return <div style={{position:"fixed",inset:0,background:"#050507",display:"flex",
+        alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
+        <Spin s={40}/><div style={{color:B.t2,fontSize:14}}>Guardando...</div>
+      </div>;
+    }
+    return null;
+  };
+
+  // ── RENDER PRINCIPAL ────────────────────────────────────
+  return (
+    <>
+      {esST  && <FlujST/>}
+      {esINS && <FlujINS/>}
+      {esRET && <FlujRET/>}
+      {esVTP && <FlujVTP/>}
+      {!esST&&!esINS&&!esRET&&!esVTP&&(
+        // Flujo genérico para tipos no definidos
+        <PantallaAccion color={B.green} icono="🏁" titulo="FINALIZAR CASO"
+          subtitulo={caso.razon_social} pasoActual={1} totalPasos={1}
+          botonLabel="✓ FINALIZAR" onVolver={onVolver}
+          onBoton={()=>onGuardar({estado:"FINALIZADO",resolvio:true,cierre_completado:true,cierre_at:new Date().toISOString()})}>
+          <div style={{fontSize:16,color:"#ccc",textAlign:"center",padding:"30px 0"}}>
+            ¿Confirmás que el caso fue atendido?
+          </div>
+        </PantallaAccion>
+      )}
     </>
   );
-
-  // PASO 4 — ¿Cuál fue el problema? (solo ST + resolvio)
-  if(paso===4) return (
-    <PantallaAccion
-      color={B.blue} icono="🔍" titulo="EL PROBLEMA"
-      subtitulo={caso.razon_social}
-      pasoActual={4} totalPasos={totalPasos}
-      botonLabel="SIGUIENTE →"
-      botonDisabled={!descProb.trim()}
-      onVolver={()=>setPaso(3)}
-      onBoton={()=>setPaso(5)}>
-      <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:16}}>
-        ¿Cuál era el problema?
-      </div>
-      <textarea className="field" rows={7}
-        placeholder="Describí el problema que tenía el equipo..."
-        value={descProb} onChange={e=>setDesc(e.target.value)}
-        style={{fontSize:16,resize:"none",lineHeight:1.7}}/>
-    </PantallaAccion>
-  );
-
-  // PASO 5 — ¿Cómo lo resolviste?
-  if(paso===5) return (
-    <PantallaAccion
-      color={B.blue} icono="🔧" titulo="LA SOLUCIÓN"
-      subtitulo={caso.razon_social}
-      pasoActual={5} totalPasos={totalPasos}
-      botonLabel="SIGUIENTE →"
-      botonDisabled={!comoRes.trim()}
-      onVolver={()=>setPaso(4)}
-      onBoton={()=>setPaso(6)}>
-      <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:16}}>
-        ¿Cómo lo resolviste?
-      </div>
-      <textarea className="field" rows={7}
-        placeholder="Describí la solución que aplicaste..."
-        value={comoRes} onChange={e=>setComo(e.target.value)}
-        style={{fontSize:16,resize:"none",lineHeight:1.7}}/>
-    </PantallaAccion>
-  );
-
-  // PASO 6 — ¿Requirió N2?
-  if(paso===6) return (
-    <PantallaAccion
-      color={B.green} icono="🆘" titulo="SOPORTE N2"
-      subtitulo={caso.razon_social}
-      pasoActual={6} totalPasos={totalPasos}
-      botonLabel="✓ FINALIZAR CASO"
-      botonDisabled={n2===null}
-      saving={saving}
-      onVolver={()=>setPaso(5)}
-      onBoton={guardar}>
-      <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>
-        ¿Requirió soporte de nivel 2?
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-        {[[true,"⚠️","SÍ",B.red],[false,"✓","NO",B.green]].map(([val,ic,lbl,col])=>(
-          <button key={String(val)} onClick={()=>setN2(val)}
-            style={{
-              padding:"28px 16px",
-              border:`2px solid ${n2===val?col:"#2a2a2a"}`,
-              background:n2===val?col+"22":"#0e0e14",
-              color:n2===val?col:"#ccc",
-              cursor:"pointer", borderRadius:2,
-              textAlign:"center", transition:"all .15s",
-            }}>
-            <div style={{fontSize:44,marginBottom:8}}>{ic}</div>
-            <div style={{fontSize:20,fontWeight:700}}>{lbl}</div>
-          </button>
-        ))}
-      </div>
-      {n2===true&&(
-        <div style={{marginTop:16,padding:"14px",background:"#1a0000",
-          border:"1px solid #FF204033",fontSize:14,color:"#FF2040",lineHeight:1.7,borderRadius:2}}>
-          ⚠ Se registrará como caso con soporte N2 para análisis estadístico posterior
-        </div>
-      )}
-    </PantallaAccion>
-  );
-
-  return null;
 };
 
-
-// ─── COMPONENTE PRINCIPAL ──────────────────────────────────────
 const MiRutaDelDia = ({ user, toast, perfil }) => {
   const [casos,      setCasos]      = useState([]);
   const [tecnicoSel, setTecnicoSel] = useState(null);  // para supervisor
