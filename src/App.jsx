@@ -4334,6 +4334,81 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
   );
 };
 
+// ─── FUNCIONES DE GEOCODIFICACIÓN Y RUTA ─────────────────────
+const geocodificarDireccion = async (direccion, departamento, localidad) => {
+  if(!direccion) return {ok:false,lat:null,lng:null};
+  try {
+    const q = encodeURIComponent(`${direccion}${localidad?", "+localidad:""}${departamento?", "+departamento:""}, Uruguay`);
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&countrycodes=uy`,
+      {headers:{"Accept-Language":"es","User-Agent":"BooleanApp/1.0"}});
+    const data = await res.json();
+    if(data?.length){
+      return {ok:true, lat:parseFloat(data[0].lat), lng:parseFloat(data[0].lon)};
+    }
+    return {ok:false,lat:null,lng:null};
+  } catch(e) {
+    return {ok:false,lat:null,lng:null};
+  }
+};
+
+const ordenarPorCercania = (base, paradas) => {
+  if(!paradas.length) return [];
+  if(!base?.lat) return paradas;
+  // Algoritmo del vecino más cercano (nearest neighbor)
+  const pendientes = [...paradas];
+  const resultado = [];
+  let actual = base;
+  while(pendientes.length > 0){
+    let minDist = Infinity;
+    let minIdx = 0;
+    pendientes.forEach((p, i) => {
+      const dist = Math.sqrt(Math.pow(p.lat - actual.lat, 2) + Math.pow(p.lng - actual.lng, 2));
+      if(dist < minDist){ minDist = dist; minIdx = i; }
+    });
+    resultado.push(pendientes[minIdx]);
+    actual = pendientes[minIdx];
+    pendientes.splice(minIdx, 1);
+  }
+  return resultado;
+};
+
+const calcularRutaORS = async (puntos) => {
+  // Sin API key ORS — devuelve ruta aproximada con líneas rectas
+  if(puntos.length < 2) return {ok:false};
+  try {
+    // Intentar con ORS si hay key en localStorage
+    const orsKey = localStorage.getItem("ors_api_key");
+    if(orsKey){
+      const coords = puntos.map(p => [p.lng, p.lat]);
+      const res = await fetch("https://api.openrouteservice.org/v2/directions/driving-car/geojson", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":orsKey},
+        body:JSON.stringify({coordinates:coords})
+      });
+      if(res.ok){
+        const data = await res.json();
+        const seg = data.features?.[0]?.properties?.segments;
+        const totalKm = seg?.reduce((a,s)=>a+s.distance,0)/1000||0;
+        const totalMin = seg?.reduce((a,s)=>a+s.duration,0)/60||0;
+        const coords2d = data.features?.[0]?.geometry?.coordinates||[];
+        const polyline = coords2d.map(([lng,lat])=>({lat,lng}));
+        return {ok:true, polyline, totalKm:Math.round(totalKm*10)/10, totalMin:Math.round(totalMin)};
+      }
+    }
+    // Fallback: línea recta entre puntos
+    const polyline = puntos.map(p=>({lat:p.lat,lng:p.lng}));
+    let totalKm = 0;
+    for(let i=1;i<puntos.length;i++){
+      const dlat = (puntos[i].lat-puntos[i-1].lat)*111;
+      const dlng = (puntos[i].lng-puntos[i-1].lng)*111*Math.cos(puntos[i-1].lat*Math.PI/180);
+      totalKm += Math.sqrt(dlat*dlat+dlng*dlng);
+    }
+    return {ok:true, polyline, totalKm:Math.round(totalKm*10)/10, totalMin:Math.round(totalKm*3), approx:true};
+  } catch(e){
+    return {ok:false};
+  }
+};
+
 const MiRutaDelDia = ({ user, toast, perfil }) => {
   const [casos,      setCasos]      = useState([]);
   const [tecnicoSel, setTecnicoSel] = useState(null);  // para supervisor
@@ -4362,44 +4437,51 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
 
   const cargarDatos = async () => {
     setLoadingPage(true);
-
-    if (esRolSupervisor) {
-      // Supervisor/Director/Regional: carga todos los técnicos
-      const { data: tecs } = await supabase.from("usuarios").select("*").eq("rol","TECNICO").eq("activo",true);
-      setTecnicos(tecs || []);
-      if (tecs?.length > 0) await cargarCasosTecnico(tecs[0]);
-    } else {
-      // Técnico: usa el perfil ya cargado
-      if (perfil?.base_operativa) {
-        setBaseTxt(perfil.base_operativa);
-        const coords = await geocodificarDireccion(perfil.base_operativa, "", "");
-        setBase({ ...coords, direccion: perfil.base_operativa });
+    try {
+      if (esRolSupervisor) {
+        const { data: tecs } = await supabase.from("usuarios").select("*").eq("rol","TECNICO").eq("activo",true);
+        setTecnicos(tecs || []);
+        if (tecs?.length > 0) await cargarCasosTecnico(tecs[0]);
+      } else {
+        if (perfil?.base_operativa) {
+          setBaseTxt(perfil.base_operativa);
+          const coords = await geocodificarDireccion(perfil.base_operativa, "", "");
+          setBase({ ...coords, direccion: perfil.base_operativa });
+        }
+        const tecId = perfil?.auth_id || perfil?.id || user.id;
+        const { data: c } = await supabase.from("casos").select("*")
+          .eq("tecnico_id", tecId)
+          .not("estado", "in", "(FINALIZADO,CANCELADO)")
+          .order("created_at", { ascending: true });
+        setCasos(c || []);
+        if (c?.length) await geocodificarYOrdenar(c, { lat: null, lng: null });
       }
-      const tecId = perfil?.auth_id || perfil?.id || user.id;
-      const { data: c } = await supabase.from("casos").select("*")
-        .eq("tecnico_id", tecId)
-        .not("estado", "in", "(FINALIZADO,CANCELADO)")
-        .order("created_at", { ascending: true });
-      setCasos(c || []);
-      if (c?.length) await geocodificarYOrdenar(c, { lat: null, lng: null });
+    } catch(e) {
+      toast("Error cargando ruta: "+e.message);
+    } finally {
+      setLoadingPage(false);
     }
-    setLoadingPage(false);
   };
 
   const cargarCasosTecnico = async (tec) => {
     setTecnicoSel(tec);
-    if (tec.base_operativa) {
-      setBaseTxt(tec.base_operativa);
-      const coords = await geocodificarDireccion(tec.base_operativa, "", "");
-      setBase({ ...coords, direccion: tec.base_operativa });
+    try {
+      if (tec.base_operativa) {
+        setBaseTxt(tec.base_operativa);
+        const coords = await geocodificarDireccion(tec.base_operativa, "", "");
+        setBase({ ...coords, direccion: tec.base_operativa });
+      }
+      const { data: c } = await supabase.from("casos").select("*")
+        .eq("tecnico_id", tec.auth_id || tec.id)
+        .not("estado", "in", "(FINALIZADO,CANCELADO)")
+        .order("created_at", { ascending: true });
+      setCasos(c || []);
+      if (c?.length) await geocodificarYOrdenar(c, base);
+    } catch(e) {
+      console.error("Error cargando casos técnico:", e);
     }
-    const { data: c } = await supabase.from("casos").select("*")
-      .eq("tecnico_id", tec.auth_id || tec.id)
-      .not("estado", "in", "(FINALIZADO,CANCELADO)")
-      .order("created_at", { ascending: true });
-    setCasos(c || []);
-    if (c?.length) await geocodificarYOrdenar(c, base);
   };
+
 
   const geocodificarYOrdenar = async (listaCasos, baseCoords) => {
     setCalculando(true);
