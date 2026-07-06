@@ -1281,6 +1281,10 @@ const NuevoCaso = ({onSave,onCancel,loading}) => {
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:18}}>
           <div><FL label="Tipo de Proceso" req/><select className="field" value={f.tipo_proceso} onChange={e=>s("tipo_proceso",e.target.value)}>{TIPOS_PROCESO.map(t=><option key={t.codigo} value={t.codigo}>{t.icono} {t.nombre}</option>)}</select></div>
           <div><FL label="Prioridad" req/><select className="field" value={f.prioridad} onChange={e=>s("prioridad",e.target.value)}>{PRIORS.map(p=><option key={p} value={p}>{p}</option>)}</select></div>
+          <div><FL label="Tier"/><select className="field" value={f.tier||""} onChange={e=>s("tier",e.target.value)}>
+            <option value="">Sin tier</option>
+            {["VIP","T1a","T1b","T2"].map(t=><option key={t} value={t}>{t}</option>)}
+          </select></div>
           <div><FL label="SLA (horas)"/><input className="field" type="number" value={f.sla_horas} onChange={e=>s("sla_horas",parseInt(e.target.value)||4)}/></div>
           <div><FL label="Rango Horario"/><select className="field" value={f.rango_horario} onChange={e=>s("rango_horario",e.target.value)}>{RANGOS_HORARIO.map(r=><option key={r} value={r}>{r}</option>)}</select></div>
         </div>
