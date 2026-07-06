@@ -4409,6 +4409,112 @@ const calcularRutaORS = async (puntos) => {
   }
 };
 
+// ─── MAPA DE RUTA (Leaflet) ───────────────────────────────────
+const MapaRuta = ({ base, paradas, polyline }) => {
+  const mapRef = useRef(null);
+  const mapInstRef = useRef(null);
+  const markersRef = useRef([]);
+  const polyRef = useRef(null);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    // Cargar Leaflet dinámicamente si no está cargado
+    const initMap = () => {
+      if (mapInstRef.current) return;
+      const L = window.L;
+      if (!L) return;
+      const center = base?.lat ? [base.lat, base.lng] : [-32.5, -56.0];
+      const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap",
+        maxZoom: 18,
+      }).addTo(map);
+      map.setView(center, 10);
+      mapInstRef.current = map;
+    };
+
+    if (!window.L) {
+      // Cargar CSS de Leaflet
+      if (!document.getElementById("leaflet-css")) {
+        const link = document.createElement("link");
+        link.id = "leaflet-css";
+        link.rel = "stylesheet";
+        link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+        document.head.appendChild(link);
+      }
+      // Cargar JS de Leaflet
+      const script = document.createElement("script");
+      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      script.onload = initMap;
+      document.head.appendChild(script);
+    } else {
+      initMap();
+    }
+  }, []);
+
+  // Actualizar marcadores y polilínea
+  useEffect(() => {
+    const map = mapInstRef.current;
+    const L = window.L;
+    if (!map || !L) return;
+
+    // Limpiar marcadores anteriores
+    markersRef.current.forEach(m => map.removeLayer(m));
+    markersRef.current = [];
+    if (polyRef.current) map.removeLayer(polyRef.current);
+
+    const bounds = [];
+
+    // Marcador base
+    if (base?.lat) {
+      const icon = L.divIcon({
+        html: `<div style="background:#FF6B00;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid #fff;box-shadow:0 2px 8px #0008">🏠</div>`,
+        iconSize: [32, 32], iconAnchor: [16, 16], className: ""
+      });
+      const m = L.marker([base.lat, base.lng], { icon })
+        .addTo(map).bindPopup("📍 Base operativa");
+      markersRef.current.push(m);
+      bounds.push([base.lat, base.lng]);
+    }
+
+    // Marcadores de paradas
+    paradas.forEach((p, i) => {
+      if (!p.lat) return;
+      const color = p.prioridad === "CRITICA" ? "#FF2040" : p.prioridad === "ALTA" ? "#FF6B00" : "#00A8FF";
+      const icon = L.divIcon({
+        html: `<div style="background:${color};color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;border:2px solid #fff;box-shadow:0 2px 8px #0008">${i + 1}</div>`,
+        iconSize: [30, 30], iconAnchor: [15, 15], className: ""
+      });
+      const m = L.marker([p.lat, p.lng], { icon })
+        .addTo(map)
+        .bindPopup(`<b>${p.razon_social}</b><br>${p.direccion}<br>${p.localidad}`);
+      markersRef.current.push(m);
+      bounds.push([p.lat, p.lng]);
+    });
+
+    // Polilínea de ruta
+    if (polyline?.length > 1) {
+      polyRef.current = L.polyline(
+        polyline.map(p => [p.lat, p.lng]),
+        { color: "#FF6B00", weight: 3, opacity: 0.8, dashArray: "6,4" }
+      ).addTo(map);
+    }
+
+    // Ajustar vista
+    if (bounds.length > 0) {
+      map.fitBounds(bounds, { padding: [30, 30] });
+    }
+  }, [base, paradas, polyline]);
+
+  return (
+    <div ref={mapRef} style={{
+      width: "100%", height: 340,
+      background: "#0a0a14",
+      position: "relative",
+    }}/>
+  );
+};
+
 const MiRutaDelDia = ({ user, toast, perfil }) => {
   const [casos,      setCasos]      = useState([]);
   const [tecnicoSel, setTecnicoSel] = useState(null);  // para supervisor
