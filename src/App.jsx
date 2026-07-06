@@ -4650,7 +4650,7 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
           <div style={{ background: B.card, border: `1px solid ${B.border}`, overflow: "hidden", marginBottom: 16 }}>
             <div style={{ padding: "10px 14px", borderBottom: `1px solid ${B.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 10, color: B.orange, fontWeight: 700, letterSpacing: ".1em" }}>◈ MAPA DE RUTA</span>
-              {!ORS_API_KEY && (
+              {!localStorage.getItem('ors_api_key') && (
                 <span style={{ fontSize: 9, color: B.t3 }}>
                   Sin key ORS — ruta aproximada · <a href="https://openrouteservice.org/dev/#/signup" target="_blank"
                     style={{ color: B.blue, textDecoration: "none" }}>Obtener key gratis →</a>
@@ -4768,14 +4768,14 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
           </div>
 
           {/* Info ORS key */}
-          {!ORS_API_KEY && (
+          {!localStorage.getItem('ors_api_key') && (
             <div style={{ marginTop: 12, padding: "10px 14px", background: B.blueDim,
               border: `1px solid ${B.blue}33`, borderLeft: `3px solid ${B.blue}`, fontSize: 11 }}>
               <div style={{ color: B.blue, fontWeight: 700, marginBottom: 4 }}>◈ PARA RUTA ÓPTIMA REAL</div>
               <div style={{ color: B.t2, lineHeight: 1.7 }}>
                 1. Registrate gratis en <a href="https://openrouteservice.org/dev/#/signup" target="_blank"
                   style={{ color: B.blue }}>openrouteservice.org</a> y copiá tu API key<br/>
-                2. En tu proyecto Vercel, agregá la variable: <span className="mono" style={{ color: B.t1 }}>VITE_ORS_API_KEY=tu_key</span><br/>
+                2. En tu proyecto Vercel, agregá la variable: <span className="mono" style={{ color: B.t1 }}>VITE_localStorage.getItem('ors_api_key')=tu_key</span><br/>
                 3. Redesplegá — la ruta pasará a ser calculada por calles reales
               </div>
             </div>
