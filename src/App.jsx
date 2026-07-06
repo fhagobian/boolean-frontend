@@ -628,7 +628,7 @@ const Mision = ({casos,setView,user,perfil}) => {
         <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:36,
           fontWeight:700,color:B.orange,letterSpacing:".06em",
           textShadow:`0 0 20px ${B.orange}66`}}>
-          {time.toLocaleTimeString("es-UY",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}
+          {time.toLocaleTimeString("es-UY",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false})}
         </div>
         <div style={{fontSize:12,color:B.t3,marginTop:2,letterSpacing:".08em"}}>
           {time.toLocaleDateString("es-UY",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).toUpperCase()}
@@ -1284,7 +1284,7 @@ const NuevoCaso = ({onSave,onCancel,loading}) => {
           <div><FL label="SLA (horas)"/><input className="field" type="number" value={f.sla_horas} onChange={e=>s("sla_horas",parseInt(e.target.value)||4)}/></div>
           <div><FL label="Rango Horario"/><select className="field" value={f.rango_horario} onChange={e=>s("rango_horario",e.target.value)}>{RANGOS_HORARIO.map(r=><option key={r} value={r}>{r}</option>)}</select></div>
         </div>
-        {(f.tipo_proceso==="SOPORTE"||f.tipo_proceso==="PROACTIVO")&&(
+        {(f.tipo_proceso==="SERVICIO_TECNICO"||f.tipo_proceso==="VISITA_PROACTIVA")&&(
           <div style={{background:B.redDim,border:`1px solid ${B.red}22`,borderLeft:`3px solid ${B.red}33`,padding:"12px 14px",marginBottom:18}}>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
               <input type="checkbox" id="esInc" checked={f.es_incidente} onChange={e=>s("es_incidente",e.target.checked)} style={{width:16,height:16,accentColor:B.red,cursor:"pointer"}}/>
@@ -1375,7 +1375,11 @@ const NuevoCaso = ({onSave,onCancel,loading}) => {
           </div>
           <div style={{display:"flex",gap:10}}>
             <Bb label="CANCELAR" onClick={onCancel} color={B.t2} ghost small/>
-            <Bb label={loading?"GUARDANDO...":"CREAR CASO"} onClick={()=>onSave(f)} disabled={!f.descripcion||!f.tipo_proceso||loading}/>
+            <Bb label={loading?"GUARDANDO...":"CREAR CASO"} onClick={()=>onSave(f)}
+              disabled={
+                !f.tipo_proceso||!f.numero_serie||!f.razon_social||!f.empresa_id||loading||
+                (["SERVICIO_TECNICO","SOPORTE"].includes(f.tipo_proceso)&&!f.descripcion)
+              }/>
           </div>
         </div>
       </div>
@@ -3179,77 +3183,111 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
       </div>
 
       {/* Datos */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
-        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
-          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ DATOS DEL CLIENTE</div>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {[["Terminal",caso.numero_serie],["RUT",caso.rut],["Razón Social",caso.razon_social],["Rubro",caso.rubro],["Dirección",caso.direccion],["Localidad",caso.localidad],["Departamento",caso.departamento]].map(([l,v])=>v&&(
-              <div key={l} style={{display:"flex",gap:8}}>
-                <div style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em",minWidth:90,paddingTop:2}}>{l}</div>
-                <div style={{fontSize:13,color:B.t1,flex:1}}>{v}</div>
-              </div>
-            ))}
-            {caso.telefono&&(
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                <div style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em",minWidth:90}}>TELÉFONO</div>
-                <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}>
-                  <span style={{fontSize:13,color:B.t1}}>{caso.telefono}</span>
-                  <button onClick={()=>{
-                    const num=(caso.telefono||"").replace(/\D/g,"");
-                    const numUY=num.startsWith("598")?num:"598"+num;
-                    window.open(`https://wa.me/${numUY}`,"_blank");
-                  }} style={{background:"#001a00",border:"1px solid #25D36644",
-                    color:"#25D366",cursor:"pointer",padding:"4px 12px",
-                    fontSize:12,fontWeight:700,borderRadius:2,
-                    display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                    💬 WhatsApp
-                  </button>
-                </div>
-              </div>
-            )}
-            {/* Descripción/Observaciones según tipo de proceso */}
-            {(()=>{
-              const esST = ["SERVICIO_TECNICO","SOPORTE"].includes((caso.tipo_proceso||"").toUpperCase());
-              const label = esST ? "PROBLEMA APARENTE" : "OBSERVACIONES";
-              const texto = esST ? caso.descripcion : caso.observaciones;
-              if(!texto) return null;
-              return (
-                <div style={{marginTop:4}}>
-                  <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".06em",marginBottom:6}}>
-                    {esST?"🔍":"📋"} {label}
-                  </div>
-                  <div style={{fontSize:14,color:"#CC8800",lineHeight:1.7,
-                    padding:"10px 14px",background:"#1a1000",
-                    border:"1px solid #CC880033",borderRadius:2}}>
-                    {texto}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
-          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ DATOS OPERATIVOS</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[["Empresa",emp?.nombre||caso.empresa_id],["Departamento",caso.departamento],["Localidad",caso.localidad],["Franja",caso.franja_horaria||caso.rango_horario],["Prioridad",caso.prioridad],["Creado",fmtD(caso.created_at)]].map(([l,v])=>v&&(
-              <div key={l}><div style={{fontSize:9,color:B.t3,fontWeight:600,letterSpacing:".08em"}}>{l}</div>
-              <div style={{fontSize:12,color:B.t1,marginTop:2}}>{v}</div></div>
-            ))}
-          </div>
-          {caso.sla_deadline&&(
-            <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${B.border}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <span style={{fontSize:10,color:B.t3}}>SLA</span>
-                <span style={{fontSize:10,color:vencido?B.red:B.green,fontWeight:700}}>{vencido?"⚠ VENCIDO":"✓ EN TIEMPO"}</span>
-              </div>
-              <div style={{height:4,background:B.deep,borderRadius:2}}>
-                <div style={{height:4,width:`${pct}%`,background:vencido?B.red:pct<30?B.orange:B.green,borderRadius:2}}/>
+      {/* DATOS DEL CLIENTE */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:12}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ DATOS DEL CLIENTE</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {[["Terminal",caso.numero_serie],["RUT",caso.rut],["Razón Social",caso.razon_social],["Rubro",caso.rubro]].map(([l,v])=>v&&(
+            <div key={l} style={{display:"flex",gap:8}}>
+              <div style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em",minWidth:90,paddingTop:2}}>{l}</div>
+              <div style={{fontSize:13,color:B.t1,flex:1}}>{v}</div>
+            </div>
+          ))}
+          {caso.tier&&(
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <div style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em",minWidth:90}}>TIER</div>
+              <Tg label={caso.tier} color={({VIP:B.amber,T1a:B.orange,T1b:B.blue,T2:B.green})[caso.tier]||B.t2}/>
+            </div>
+          )}
+          {caso.prioridad&&(
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <div style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em",minWidth:90}}>PRIORIDAD</div>
+              <Tg label={caso.prioridad} color={PC[caso.prioridad]||B.t2}/>
+            </div>
+          )}
+          {caso.telefono&&(
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <div style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em",minWidth:90}}>TELÉFONO</div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flex:1,flexWrap:"wrap"}}>
+                <span style={{fontSize:13,color:B.t1}}>{caso.telefono}</span>
+                <button onClick={()=>{
+                  const num=(caso.telefono||"").replace(/\D/g,"");
+                  const numUY=num.startsWith("598")?num:"598"+num;
+                  window.open(`https://wa.me/${numUY}`,"_blank");
+                }} style={{background:"#001a00",border:"1px solid #25D36644",
+                  color:"#25D366",cursor:"pointer",padding:"4px 12px",
+                  fontSize:12,fontWeight:700,borderRadius:2,
+                  display:"flex",alignItems:"center",gap:6}}>
+                  💬 WhatsApp
+                </button>
               </div>
             </div>
+          )}
+          {/* Problema aparente u Observaciones */}
+          {(()=>{
+            const esST=["SERVICIO_TECNICO","SOPORTE"].includes((caso.tipo_proceso||"").toUpperCase());
+            const label=esST?"PROBLEMA APARENTE":"OBSERVACIONES";
+            const texto=esST?caso.descripcion:caso.observaciones;
+            if(!texto) return null;
+            return(
+              <div style={{marginTop:4}}>
+                <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".06em",marginBottom:6}}>
+                  {esST?"🔍":"📋"} {label}
+                </div>
+                <div style={{fontSize:14,color:"#CC8800",lineHeight:1.7,
+                  padding:"10px 14px",background:"#1a1000",
+                  border:"1px solid #CC880033",borderRadius:2}}>
+                  {texto}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+
+      {/* DATOS OPERATIVOS */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ DATOS OPERATIVOS</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {[["Empresa",emp?.nombre||caso.empresa_id],["Departamento",caso.departamento],["Localidad",caso.localidad],["Dirección",caso.direccion]].map(([l,v])=>v&&(
+            <div key={l} style={{display:"flex",gap:8}}>
+              <div style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em",minWidth:90,paddingTop:2}}>{l}</div>
+              <div style={{fontSize:13,color:B.t1,flex:1}}>{v}</div>
+            </div>
+          ))}
+          {(caso.franja_horaria||caso.rango_horario)&&(
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <div style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em",minWidth:90}}>FRANJA HORARIA</div>
+              <span style={{fontSize:13,color:"#CC7700",fontWeight:600}}>{caso.franja_horaria||caso.rango_horario}</span>
+            </div>
+          )}
+          {caso.sla_deadline&&(
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                <span style={{fontSize:10,color:B.t3,fontWeight:600,letterSpacing:".06em"}}>SLA</span>
+                <span style={{fontSize:11,color:vencido?B.red:B.green,fontWeight:700}}>{vencido?"⚠ VENCIDO":"✓ EN TIEMPO"}</span>
+              </div>
+              <div style={{height:6,background:B.deep,borderRadius:3}}>
+                <div style={{height:6,width:`${pct}%`,background:vencido?B.red:pct<30?B.orange:B.green,borderRadius:3}}/>
+              </div>
+            </div>
+          )}
+          {/* Botón Google Maps */}
+          {caso.direccion&&(
+            <button onClick={()=>{
+              const dir=encodeURIComponent(`${caso.direccion}${caso.localidad?", "+caso.localidad:""}${caso.departamento?", "+caso.departamento:""}, Uruguay`);
+              window.open(`https://www.google.com/maps/search/?api=1&query=${dir}`,"_blank");
+            }} style={{marginTop:4,width:"100%",padding:"14px 0",
+              background:"#001a33",border:"1px solid #4285F444",
+              color:"#4285F4",cursor:"pointer",fontSize:15,fontWeight:700,
+              borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+              <span style={{fontSize:24}}>📍</span> VER EN GOOGLE MAPS
+            </button>
           )}
         </div>
       </div>
 
+      {/* Cierre técnico */}
       {/* Cierre técnico */}
       {caso.cierre_completado&&(
         <div style={{background:`${B.green}11`,border:`1px solid ${B.green}33`,borderLeft:`3px solid ${B.green}`,padding:"12px 16px",marginBottom:16}}>
