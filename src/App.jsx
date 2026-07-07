@@ -4736,6 +4736,8 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
   const [editBase,    setEditBase]   = useState(false);
 
   const hoy = new Date().toISOString().split("T")[0];
+  const esRolTecnico  = perfil?.rol === "TECNICO";
+  const esRolSuperior = !esRolTecnico;
 
   // Guardar orden de ruta en Supabase
   const guardarOrden = async (nuevasParadas, baseOp, destinoOp, destinoDifOp) => {
@@ -4839,7 +4841,6 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
     } catch(e) { console.error("Error cargando casos:", e); }
   };
 
-  };
 
   const geocodificarYOrdenar = async (listaCasos, baseCoords) => {
     setCalculando(true);
