@@ -91,13 +91,78 @@ const useMobile = () => {
   return isMobile;
 };
 
-const slaInfo = (deadline,estado) => {
-  if(!deadline) return {label:"—",color:"#32324A"};
-  if(["FINALIZADO","CANCELADO"].includes(estado)) return {label:"✓ OK",color:"#00E87A"};
-  const h=(new Date(deadline)-new Date())/3600000;
-  if(h<0) return {label:`Venc. ${Math.abs(h).toFixed(0)}h`,color:"#FF2040"};
-  if(h<1) return {label:`${(h*60).toFixed(0)}min`,color:"#FFD020"};
-  return {label:`${h.toFixed(1)}h`,color:h<4?"#FFD020":"#00E87A"};
+// ─── DÍAS HÁBILES ────────────────────────────────────────────
+// Cache de feriados cargado una vez al inicio
+let FERIADOS_CACHE = null;
+const cargarFeriados = async () => {
+  if(FERIADOS_CACHE) return FERIADOS_CACHE;
+  const {data} = await supabase.from("feriados").select("fecha").eq("activo",true);
+  FERIADOS_CACHE = new Set((data||[]).map(f=>f.fecha));
+  return FERIADOS_CACHE;
+};
+
+const esFeriado = (fecha, feriadosSet) => {
+  const iso = fecha.toISOString().split("T")[0];
+  // Feriados fijos siempre aplican
+  const FIJOS = new Set(["01-01","05-01","07-18","08-25","12-25"]);
+  const mesdia = iso.slice(5); // MM-DD
+  if(FIJOS.has(mesdia)) return true;
+  return feriadosSet ? feriadosSet.has(iso) : false;
+};
+
+const esDiaHabil = (fecha, feriadosSet) => {
+  const dow = fecha.getDay(); // 0=dom, 6=sab
+  if(dow === 0 || dow === 6) return false;
+  return !esFeriado(fecha, feriadosSet);
+};
+
+// Calcula la fecha límite sumando N días hábiles desde fecha inicio
+const sumarDiasHabiles = (fechaInicio, diasHabiles, feriadosSet) => {
+  const fecha = new Date(fechaInicio);
+  let contados = 0;
+  while(contados < diasHabiles) {
+    fecha.setDate(fecha.getDate() + 1);
+    if(esDiaHabil(fecha, feriadosSet)) contados++;
+  }
+  return fecha;
+};
+
+// SLA en días hábiles por tipo de proceso
+const SLA_DIAS_HABILES = {
+  INSTALACION:      3,
+  SERVICIO_TECNICO: 2,
+  RETIRO:           5,
+  VISITA_PROACTIVA: 7,
+};
+
+// Calcula días hábiles restantes hasta un deadline
+const diasHabilesRestantes = (deadline, feriadosSet) => {
+  if(!deadline) return null;
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const fin  = new Date(deadline); fin.setHours(0,0,0,0);
+  if(fin <= hoy) return 0;
+  let dias = 0;
+  const cursor = new Date(hoy);
+  while(cursor < fin) {
+    cursor.setDate(cursor.getDate()+1);
+    if(esDiaHabil(cursor, feriadosSet)) dias++;
+  }
+  return dias;
+};
+
+const slaInfo = (deadline, estado, feriadosSet) => {
+  if(!deadline) return {label:"—", color:"#32324A"};
+  if(["FINALIZADO","CANCELADO"].includes(estado)) return {label:"✓ OK", color:"#00E87A"};
+  const diasRes = diasHabilesRestantes(deadline, feriadosSet);
+  if(diasRes === null) return {label:"—", color:"#32324A"};
+  if(diasRes === 0){
+    // Verificar si venció (deadline en el pasado)
+    const h = (new Date(deadline)-new Date())/3600000;
+    if(h < 0) return {label:`⚠ VENCIDO`, color:"#FF2040"};
+    return {label:`Vence hoy`, color:"#FFD020"};
+  }
+  if(diasRes === 1) return {label:`1 día hábil`, color:"#FFD020"};
+  return {label:`${diasRes} días hábiles`, color:diasRes<=2?"#FFD020":"#00E87A"};
 };
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;800;900&family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
@@ -2456,6 +2521,138 @@ const OverlayEditarCaso = ({ caso, user, perfil, onVolver, onGuardar }) => {
           {saving?"GUARDANDO...":"✓ GUARDAR CAMBIOS"}
         </button>
       </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════
+// GESTOR DE FERIADOS — Configurable por Director
+// ═══════════════════════════════════════════════════════════
+const GestorFeriados = ({ toast }) => {
+  const [feriados, setFeriados] = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [nueva,    setNueva]    = useState("");
+  const [desc,     setDesc]     = useState("");
+  const [saving,   setSaving]   = useState(false);
+
+  useEffect(()=>{ cargar(); },[]);
+
+  const cargar = async () => {
+    setLoading(true);
+    const {data} = await supabase.from("feriados")
+      .select("*").order("fecha");
+    setFeriados(data||[]);
+    // Invalidar cache
+    FERIADOS_CACHE = null;
+    setLoading(false);
+  };
+
+  const agregar = async () => {
+    if(!nueva) return;
+    setSaving(true);
+    const {error} = await supabase.from("feriados").insert({
+      fecha: nueva,
+      descripcion: desc.trim()||"Feriado",
+      activo: true,
+    });
+    if(error) toast("Error: "+error.message);
+    else { toast("✓ Feriado agregado"); setNueva(""); setDesc(""); await cargar(); }
+    setSaving(false);
+  };
+
+  const toggleActivo = async (f) => {
+    await supabase.from("feriados").update({activo:!f.activo}).eq("id",f.id);
+    await cargar();
+  };
+
+  const eliminar = async (id) => {
+    if(!window.confirm("¿Eliminar este feriado?")) return;
+    await supabase.from("feriados").delete().eq("id",id);
+    await cargar();
+    toast("Feriado eliminado");
+  };
+
+  const FIJOS = new Set(["01-01","05-01","07-18","08-25","12-25"]);
+  const esFijo = (fecha) => FIJOS.has(fecha?.slice(5));
+
+  return (
+    <div>
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>
+        ◈ FERIADOS CONFIGURADOS
+      </div>
+      <div style={{fontSize:12,color:B.t2,marginBottom:16,lineHeight:1.6}}>
+        Los días feriados no se cuentan como días hábiles en el cálculo del SLA.
+        Los feriados nacionales fijos (marcados con 🔒) no se pueden eliminar.
+      </div>
+
+      {/* Agregar nuevo */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:12}}>
+          + AGREGAR FERIADO
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr auto",gap:10,alignItems:"end"}}>
+          <div>
+            <FL label="Fecha" req/>
+            <input type="date" className="field" value={nueva}
+              onChange={e=>setNueva(e.target.value)}
+              style={{fontSize:14}}/>
+          </div>
+          <div>
+            <FL label="Descripción"/>
+            <input className="field" value={desc}
+              onChange={e=>setDesc(e.target.value)}
+              placeholder="Ej: Feriado departamental Rivera"
+              style={{fontSize:14}}/>
+          </div>
+          <Bb label={saving?"...":"AGREGAR"} onClick={agregar}
+            disabled={!nueva||saving} color={B.orange}/>
+        </div>
+      </div>
+
+      {/* Lista */}
+      {loading ? <Spin/> : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {feriados.map(f=>(
+            <div key={f.id} style={{
+              display:"flex",alignItems:"center",gap:12,
+              padding:"12px 16px",
+              background:f.activo?B.card:"#0a0a0a",
+              border:`1px solid ${f.activo?B.border:"#1a1a1a"}`,
+              opacity:f.activo?1:0.5,
+            }}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:13,
+                    color:B.orange,fontWeight:700}}>
+                    {new Date(f.fecha+"T12:00:00").toLocaleDateString("es-UY",
+                      {weekday:"short",day:"2-digit",month:"long",year:"numeric"})}
+                  </span>
+                  {esFijo(f.fecha)&&<span style={{fontSize:10,color:B.t3}}>🔒 Nacional</span>}
+                </div>
+                <div style={{fontSize:11,color:B.t3,marginTop:2}}>{f.descripcion}</div>
+              </div>
+              <button onClick={()=>toggleActivo(f)}
+                style={{background:"none",border:`1px solid ${B.border}`,
+                  color:f.activo?B.green:B.t3,cursor:"pointer",
+                  padding:"4px 10px",fontSize:10,borderRadius:2}}>
+                {f.activo?"ACTIVO":"INACTIVO"}
+              </button>
+              {!esFijo(f.fecha)&&(
+                <button onClick={()=>eliminar(f.id)}
+                  style={{background:"none",border:"none",color:B.red,
+                    cursor:"pointer",fontSize:18,padding:"0 4px"}}>
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          {feriados.length===0&&(
+            <div style={{textAlign:"center",padding:30,color:B.t3,fontSize:12}}>
+              Sin feriados configurados
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -6325,6 +6522,7 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
     {id:"notificaciones",label:"🔔 NOTIFICACIONES"},
     {id:"encuestas",label:"📋 ENCUESTAS"},
     {id:"motivos",label:"💬 MOTIVOS"},
+    {id:"feriados",label:"📅 FERIADOS"},
     {id:"procesos",label:"PROCESOS & SLA"},
     {id:"misiones",label:"MISIONES"},
     {id:"sistema",label:"SISTEMA"},
@@ -6349,6 +6547,9 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
       )}
       {tab==="motivos"&&(
         <GestorMotivos toast={toast}/>
+      )}
+      {tab==="feriados"&&(
+        <GestorFeriados toast={toast}/>
       )}
       {tab==="procesos"&&(
         <div>
@@ -6614,15 +6815,22 @@ export default function App(){
             const instrEsp = f.tiene_instrucciones && f.instrucciones_texto?.trim()
               ? { texto: f.instrucciones_texto.trim(), adjuntos: [], autor: user.email, ts: new Date().toISOString(), editado: false }
               : null;
+            // Calcular SLA en días hábiles
+            const feriados = await cargarFeriados();
+            const diasHab = SLA_DIAS_HABILES[f.tipo_proceso] || 3;
+            const slaDeadline = sumarDiasHabiles(new Date(), diasHab, feriados);
+            slaDeadline.setHours(23,59,59,999);
             const{error}=await supabase.from("casos").insert({
               ...f,
               instrucciones_especiales: instrEsp,
               tiene_instrucciones: undefined,
               instrucciones_texto: undefined,
               estado:"PENDIENTE",creado_por:user.id,
-              sla_deadline:new Date(Date.now()+f.sla_horas*3600000).toISOString(),
+              sla_horas: diasHab * 8, // referencia en horas para compatibilidad
+              sla_deadline: slaDeadline.toISOString(),
+              sla_dias_habiles: diasHab,
               historial:[
-                {id:Date.now(),tipo:"CREACION",texto:"Caso creado",usuario:user.email,ts:new Date().toISOString()},
+                {id:Date.now(),tipo:"CREACION",texto:`Caso creado · SLA: ${diasHab} días hábiles`,usuario:user.email,ts:new Date().toISOString()},
                 ...(instrEsp?[{id:Date.now()+1,tipo:"INSTRUCCIONES",texto:"Instrucciones especiales cargadas al crear el caso",usuario:user.email,ts:new Date().toISOString()}]:[])
               ]
             });
