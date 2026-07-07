@@ -5868,6 +5868,446 @@ const Usuarios=({user,perfil,toast,casos})=>{
 };
 
 // ─── CONFIG ──────────────────────────────────────────────
+// ─── BULK UPLOAD ─────────────────────────────────────────────
+const BulkUpload = ({ user, toast }) => {
+  const [csv, setCsv]         = useState("");
+  const [preview, setPreview] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [resultado, setRes]   = useState(null);
+
+  const COLS = ["tipo_proceso","numero_serie","razon_social","rut","telefono","rubro",
+    "empresa_id","departamento","localidad","direccion","prioridad","franja_horaria",
+    "sla_horas","descripcion","observaciones","tier"];
+
+  const parsear = (texto) => {
+    const lineas = texto.trim().split("\n").filter(l=>l.trim());
+    if(!lineas.length) return [];
+    const headers = lineas[0].split(";").map(h=>h.trim().toLowerCase().replace(/ /g,"_"));
+    return lineas.slice(1).map(linea=>{
+      const vals = linea.split(";").map(v=>v.trim());
+      const obj = {};
+      headers.forEach((h,i)=>{ if(vals[i]) obj[h]=vals[i]; });
+      return obj;
+    });
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const texto = ev.target.result;
+      setCsv(texto);
+      setPreview(parsear(texto).slice(0,5));
+    };
+    reader.readAsText(file);
+  };
+
+  const importar = async () => {
+    const casos = parsear(csv);
+    if(!casos.length){ toast("Sin datos para importar"); return; }
+    setLoading(true);
+    let ok=0, err=0;
+    const ts = new Date().toISOString();
+    for(const c of casos){
+      const slaH = parseInt(c.sla_horas)||4;
+      const deadline = new Date(Date.now()+slaH*3600000).toISOString();
+      const {error} = await supabase.from("casos").insert({
+        ...c,
+        estado:"PENDIENTE",
+        sla_horas:slaH,
+        sla_deadline:deadline,
+        creado_por:user?.email,
+        historial:[{id:Date.now(),tipo:"CREACION",
+          texto:"Caso creado por carga masiva",usuario:user?.email,ts}],
+        created_at:ts, updated_at:ts,
+      });
+      if(error) err++; else ok++;
+    }
+    setRes({ok,err,total:casos.length});
+    setLoading(false);
+    if(ok>0) toast(`✓ ${ok} casos importados correctamente`);
+    if(err>0) toast(`⚠ ${err} casos con error`);
+  };
+
+  const TEMPLATE = "tipo_proceso;numero_serie;razon_social;rut;telefono;rubro;empresa_id;departamento;localidad;direccion;prioridad;franja_horaria;sla_horas;descripcion;observaciones;tier\nSERVICIO_TECNICO;12345678;Comercio Ejemplo;210000000001;099123456;Retail;TRANS;Montevideo;Montevideo;Rivera 1234;MEDIA;FH2 (12-16);4;Equipo no enciende;;T1b";
+
+  return (
+    <div style={{maxWidth:700,padding:"0 0 40px"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>IMPORTACIÓN</div>
+        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>CARGA MASIVA DE CASOS</h1>
+      </div>
+
+      {/* Plantilla */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>◈ PLANTILLA CSV</div>
+        <div style={{fontSize:12,color:B.t2,marginBottom:12,lineHeight:1.6}}>
+          Descargá la plantilla, completá los datos y subí el archivo. Separador: punto y coma (;)
+        </div>
+        <button onClick={()=>{
+          const blob = new Blob([TEMPLATE],{type:"text/csv"});
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "plantilla_casos_boolean.csv";
+          a.click();
+        }} style={{background:B.deep,border:`1px solid ${B.border}`,color:B.t1,
+          cursor:"pointer",padding:"10px 20px",fontSize:13,fontWeight:700,borderRadius:2}}>
+          ⬇ DESCARGAR PLANTILLA
+        </button>
+      </div>
+
+      {/* Subir archivo */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ SUBIR ARCHIVO</div>
+        <input type="file" accept=".csv,.txt" onChange={handleFile}
+          style={{fontSize:13,color:B.t1,marginBottom:12,display:"block"}}/>
+        {preview.length>0&&(
+          <div>
+            <div style={{fontSize:10,color:B.t3,marginBottom:8}}>Vista previa (primeras {preview.length} filas):</div>
+            <div style={{overflowX:"auto"}}>
+              <table><thead><tr>{Object.keys(preview[0]).map(k=><th key={k}>{k}</th>)}</tr></thead>
+                <tbody>{preview.map((r,i)=><tr key={i}>{Object.values(r).map((v,j)=><td key={j}>{v}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {resultado&&(
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:700,color:B.t1,marginBottom:8}}>Resultado de importación</div>
+          <div style={{display:"flex",gap:16}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:28,color:B.green,fontWeight:900}}>{resultado.ok}</div>
+              <div style={{fontSize:10,color:B.t3}}>IMPORTADOS</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:28,color:resultado.err>0?B.red:B.t3,fontWeight:900}}>{resultado.err}</div>
+              <div style={{fontSize:10,color:B.t3}}>ERRORES</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {preview.length>0&&(
+        <Bb label={loading?`IMPORTANDO...`:`⬆ IMPORTAR ${parsear(csv).length} CASOS`}
+          onClick={importar} disabled={loading} full/>
+      )}
+    </div>
+  );
+};
+
+// ─── ANALÍTICA ───────────────────────────────────────────────
+const Analitica = ({ user, toast }) => {
+  const [casos, setCasos]   = useState([]);
+  const [loading,setLoading]= useState(true);
+  const [rango, setRango]   = useState("7d");
+
+  useEffect(()=>{
+    const desde = new Date();
+    desde.setDate(desde.getDate()-({7:7,30:30,90:90}[rango.replace("d","")]||7));
+    supabase.from("casos").select("*")
+      .gte("created_at",desde.toISOString())
+      .then(({data})=>{ setCasos(data||[]); setLoading(false); });
+  },[rango]);
+
+  const finalizados = casos.filter(c=>c.estado==="FINALIZADO");
+  const cancelados  = casos.filter(c=>c.estado==="CANCELADO");
+  const enCurso     = casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||""));
+  const slaOk       = finalizados.filter(c=>c.sla_deadline&&new Date(c.updated_at)<new Date(c.sla_deadline)).length;
+  const slaPct      = finalizados.length ? Math.round(slaOk/finalizados.length*100) : 0;
+  const resueltos   = finalizados.filter(c=>c.resolvio===true).length;
+  const resPct      = finalizados.length ? Math.round(resueltos/finalizados.length*100) : 0;
+
+  const porTipo = TIPOS_PROCESO.map(t=>({
+    nombre:t.nombre, icono:t.icono, color:t.color,
+    total:casos.filter(c=>c.tipo_proceso===t.codigo).length,
+    fin:casos.filter(c=>c.tipo_proceso===t.codigo&&c.estado==="FINALIZADO").length,
+  }));
+
+  const porEmpresa = EMPRESAS.map(e=>({
+    nombre:e.nombre, color:e.color,
+    total:casos.filter(c=>c.empresa_id===e.codigo).length,
+    fin:casos.filter(c=>c.empresa_id===e.codigo&&c.estado==="FINALIZADO").length,
+  })).filter(e=>e.total>0);
+
+  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh"}}><Spin s={36}/></div>;
+
+  return (
+    <div style={{maxWidth:800,padding:"0 0 40px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MÓDULO DE</div>
+          <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>ANALÍTICA OPERATIVA</h1>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          {[["7d","7 días"],["30d","30 días"],["90d","90 días"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setRango(v)}
+              style={{padding:"8px 14px",background:rango===v?B.orangeDim:B.deep,
+                border:`1px solid ${rango===v?B.orange:B.border}`,
+                color:rango===v?B.orange:B.t2,cursor:"pointer",fontSize:12,fontWeight:700,borderRadius:2}}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPIs principales */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:20}}>
+        {[
+          {label:"CASOS TOTALES",   val:casos.length,        color:B.blue,   icono:"📋"},
+          {label:"FINALIZADOS",     val:finalizados.length,  color:B.green,  icono:"✅"},
+          {label:"SLA CUMPLIDO",    val:`${slaPct}%`,        color:slaPct>=90?B.green:B.red, icono:"⏱"},
+          {label:"TASA RESOLUCIÓN", val:`${resPct}%`,        color:resPct>=80?B.green:B.orange, icono:"🔧"},
+          {label:"EN CURSO",        val:enCurso.length,      color:B.yellow, icono:"⚡"},
+          {label:"CANCELADOS",      val:cancelados.length,   color:B.red,    icono:"✗"},
+        ].map(k=>(
+          <div key={k.label} style={{background:B.card,border:`1px solid ${B.border}`,
+            borderLeft:`3px solid ${k.color}`,padding:"14px 16px"}}>
+            <div style={{fontSize:10,color:B.t3,fontWeight:700,letterSpacing:".08em",marginBottom:6}}>
+              {k.icono} {k.label}
+            </div>
+            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:26,fontWeight:900,color:k.color}}>
+              {k.val}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Por tipo de proceso */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ POR TIPO DE PROCESO</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {porTipo.filter(t=>t.total>0).map(t=>(
+            <div key={t.nombre}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{fontSize:13,color:B.t1}}>{t.icono} {t.nombre}</span>
+                <span style={{fontSize:12,color:t.color,fontWeight:700}}>{t.fin}/{t.total}</span>
+              </div>
+              <div style={{height:6,background:B.deep,borderRadius:3}}>
+                <div style={{height:6,width:t.total?`${Math.round(t.fin/t.total*100)}%`:"0%",
+                  background:t.color,borderRadius:3,transition:"width .5s"}}/>
+              </div>
+            </div>
+          ))}
+          {porTipo.every(t=>t.total===0)&&(
+            <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:20}}>Sin datos para el período seleccionado</div>
+          )}
+        </div>
+      </div>
+
+      {/* Por empresa */}
+      {porEmpresa.length>0&&(
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ POR EMPRESA</div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {porEmpresa.map(e=>(
+              <div key={e.nombre}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:13,color:e.color,fontWeight:600}}>{e.nombre}</span>
+                  <span style={{fontSize:12,color:B.t2}}>{e.fin}/{e.total} finalizados</span>
+                </div>
+                <div style={{height:6,background:B.deep,borderRadius:3}}>
+                  <div style={{height:6,width:e.total?`${Math.round(e.fin/e.total*100)}%`:"0%",
+                    background:e.color,borderRadius:3,transition:"width .5s"}}/>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── LOGROS ──────────────────────────────────────────────────
+const Logros = ({ user, toast }) => {
+  const [perfil, setPerfil] = useState(null);
+
+  useEffect(()=>{
+    supabase.from("usuarios").select("*").eq("auth_id",user?.id).maybeSingle()
+      .then(({data})=>setPerfil(data));
+  },[]);
+
+  const LOGROS_DEF = [
+    {id:"primer_caso",   icono:"🎯", nombre:"Primer Caso",        desc:"Finalizaste tu primer caso",          xp:50,  condicion:p=>p?.casos_finalizados>=1},
+    {id:"diez_casos",    icono:"⚡", nombre:"Velocista",          desc:"10 casos finalizados",                xp:200, condicion:p=>p?.casos_finalizados>=10},
+    {id:"cincuenta",     icono:"🏆", nombre:"Medio Centenar",     desc:"50 casos finalizados",                xp:500, condicion:p=>p?.casos_finalizados>=50},
+    {id:"sla_master",    icono:"⏱", nombre:"SLA Master",         desc:"100% SLA cumplido en una semana",     xp:300, condicion:()=>false},
+    {id:"sin_cancelar",  icono:"💪", nombre:"Sin Rendirse",       desc:"30 días sin cancelaciones",           xp:400, condicion:()=>false},
+    {id:"velocidad",     icono:"🚀", nombre:"Velocidad Máxima",   desc:"5 casos en un día",                   xp:250, condicion:()=>false},
+    {id:"instalador",    icono:"📦", nombre:"Instalador Pro",     desc:"20 instalaciones completadas",        xp:350, condicion:p=>p?.instalaciones>=20},
+    {id:"tecnico_elite", icono:"🔧", nombre:"Técnico Elite",      desc:"Nivel 50 alcanzado",                  xp:1000,condicion:p=>(p?.nivel||0)>=50},
+  ];
+
+  const xpTotal = perfil?.xp_total || 0;
+  const nivel   = Math.floor(xpTotal/500)+1;
+  const xpNivel = xpTotal%500;
+  const pctNivel = Math.round(xpNivel/500*100);
+
+  return (
+    <div style={{maxWidth:600,padding:"0 0 40px"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MÓDULO DE</div>
+        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>LOGROS Y PROGRESO</h1>
+      </div>
+
+      {/* XP y nivel */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:20,marginBottom:20,
+        borderLeft:`4px solid ${B.orange}`}}>
+        <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16}}>
+          <div style={{width:60,height:60,borderRadius:"50%",
+            background:`linear-gradient(135deg,${B.orange},${B.amber})`,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:"#050507"}}>
+            {nivel}
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:B.orange}}>
+              NIVEL {nivel}
+            </div>
+            <div style={{fontSize:12,color:B.t2,marginTop:2}}>
+              {xpNivel} / 500 XP para el siguiente nivel
+            </div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:22,fontWeight:700,color:B.amber}}>
+              {xpTotal.toLocaleString()}
+            </div>
+            <div style={{fontSize:9,color:B.t3,letterSpacing:".1em"}}>XP TOTAL</div>
+          </div>
+        </div>
+        <div style={{height:8,background:B.deep,borderRadius:4}}>
+          <div style={{height:8,width:`${pctNivel}%`,borderRadius:4,
+            background:`linear-gradient(90deg,${B.orange},${B.amber})`,transition:"width .5s"}}/>
+        </div>
+      </div>
+
+      {/* Tabla XP por acción */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,marginBottom:20,overflow:"hidden"}}>
+        <div style={{padding:"10px 16px",borderBottom:`1px solid ${B.border}`,fontSize:10,
+          color:B.orange,fontWeight:700,letterSpacing:".12em"}}>◈ XP POR ACCIÓN</div>
+        {XP_ACCIONES.map((a,i)=>(
+          <div key={a.accion} style={{display:"flex",alignItems:"center",gap:12,
+            padding:"12px 16px",
+            borderBottom:i<XP_ACCIONES.length-1?`1px solid ${B.border}22`:"none",
+            background:i%2===0?"transparent":B.deep+"44"}}>
+            <span style={{fontSize:20,flexShrink:0}}>{a.icono}</span>
+            <span style={{fontSize:13,color:B.t1,flex:1}}>{a.accion}</span>
+            <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:B.green}}>
+              +{a.xp} XP
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Logros */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ LOGROS</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {LOGROS_DEF.map(l=>{
+            const desbloqueado = l.condicion(perfil);
+            return(
+              <div key={l.id} style={{display:"flex",alignItems:"center",gap:14,
+                padding:"12px 14px",
+                background:desbloqueado?B.green+"11":B.deep,
+                border:`1px solid ${desbloqueado?B.green+"44":B.border}`,
+                borderRadius:2,opacity:desbloqueado?1:0.5}}>
+                <span style={{fontSize:32,flexShrink:0,filter:desbloqueado?"none":"grayscale(1)"}}>
+                  {l.icono}
+                </span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:desbloqueado?B.green:B.t2}}>
+                    {l.nombre}
+                  </div>
+                  <div style={{fontSize:11,color:B.t3,marginTop:2}}>{l.desc}</div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,
+                    color:desbloqueado?B.green:B.t3}}>
+                    +{l.xp} XP
+                  </div>
+                  {desbloqueado&&<div style={{fontSize:9,color:B.green,marginTop:2}}>✓ DESBLOQUEADO</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── CONFIG NOTIFICACIONES ───────────────────────────────────
+const ConfigNotificaciones = ({ user, minutosAntes, setMinutosAntes, toast }) => {
+  const [permiso, setPermiso] = useState(Notification.permission);
+  const [guardando, setGuardando] = useState(false);
+
+  const pedirPermiso = async () => {
+    const result = await Notification.requestPermission();
+    setPermiso(result);
+    if(result === "granted") toast("✓ Notificaciones activadas");
+    else toast("Permiso denegado por el browser");
+  };
+
+  const guardar = async () => {
+    setGuardando(true);
+    await supabase.from("usuarios").update({minutos_recordatorio: minutosAntes})
+      .eq("auth_id", user?.id);
+    toast("✓ Preferencias guardadas");
+    setGuardando(false);
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:480}}>
+      {/* Estado del permiso */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,borderRadius:2}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>
+          ◈ PERMISOS DEL BROWSER
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+          <div style={{width:10,height:10,borderRadius:"50%",flexShrink:0,
+            background:permiso==="granted"?B.green:permiso==="denied"?B.red:B.orange}}/>
+          <span style={{fontSize:13,color:B.t1}}>
+            {permiso==="granted"?"Notificaciones activadas":
+             permiso==="denied"?"Bloqueadas por el browser — cambiá en la configuración del sitio":
+             "Sin configurar"}
+          </span>
+        </div>
+        {permiso!=="granted"&&(
+          <Bb label="ACTIVAR NOTIFICACIONES" onClick={pedirPermiso} small/>
+        )}
+      </div>
+
+      {/* Minutos de anticipación */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,borderRadius:2}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>
+          ◈ ANTICIPACIÓN DEL RECORDATORIO
+        </div>
+        <div style={{fontSize:12,color:B.t2,marginBottom:16,lineHeight:1.6}}>
+          Recibís una notificación este tiempo antes del inicio de cada franja horaria.
+        </div>
+        <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:16}}>
+          {[15,30,45,60].map(m=>(
+            <button key={m} onClick={()=>setMinutosAntes(m)}
+              style={{flex:1,padding:"12px 0",
+                border:`2px solid ${minutosAntes===m?B.orange:B.border}`,
+                background:minutosAntes===m?B.orangeDim:B.deep,
+                color:minutosAntes===m?B.orange:B.t2,
+                cursor:"pointer",fontSize:13,fontWeight:700,borderRadius:2,
+                transition:"all .15s"}}>
+              {m} min
+            </button>
+          ))}
+        </div>
+        <Bb label={guardando?"GUARDANDO...":"GUARDAR PREFERENCIAS"}
+          onClick={guardar} disabled={guardando} small/>
+      </div>
+    </div>
+  );
+};
+
 const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
   const [tab,setTab]=useState("notificaciones");
   const [procesos,setProcesos]=useState(TIPOS_PROCESO);
