@@ -1242,12 +1242,19 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
           <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,color:B.orange,flexShrink:0}}>
             {selIds.size} CASO{selIds.size>1?"S":""} SEL.
           </div>
-          <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)} style={{flex:1,maxWidth:260}}>
+          <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)}
+            style={{flex:1,maxWidth:260}}>
             <option value="">👤 Asignar técnico...</option>
-            {tecnicos.map(t=>{
-              const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
-              return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} ({t.empresa_codigo}) — {carga} casos</option>;
-            })}
+            {tecnicos
+              .filter(t=>{
+                // Filtrar por empresa de los casos seleccionados
+                const empresasCasos=[...new Set([...selIds].map(id=>casos.find(c=>c.id===id)?.empresa_id).filter(Boolean))];
+                return empresasCasos.length===0||empresasCasos.some(emp=>t.empresa_codigo===emp);
+              })
+              .map(t=>{
+                const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
+                return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} ({t.empresa_codigo}) — {carga} casos</option>;
+              })}
           </select>
           <Bb label={asignando?"...":"⚡ ASIGNAR"} onClick={asignarMasivo} disabled={!tecSel||asignando} small/>
           <div style={{width:1,height:28,background:B.border}}/>
@@ -2288,6 +2295,171 @@ const PERIODOS = [
 // ═══════════════════════════════════════════════════════════
 // GESTOR DE MOTIVOS — Configurable por Director
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// OVERLAY EDITAR CASO
+// ═══════════════════════════════════════════════════════════
+const OverlayEditarCaso = ({ caso, user, perfil, onVolver, onGuardar }) => {
+  const [f, setF] = useState({
+    direccion:    caso.direccion||"",
+    localidad:    caso.localidad||"",
+    departamento: caso.departamento||"",
+    telefono:     caso.telefono||"",
+    franja_horaria: caso.franja_horaria||caso.rango_horario||"",
+    observaciones: caso.observaciones||"",
+    descripcion:  caso.descripcion||"",
+    empresa_id:   caso.empresa_id||"",
+    tecnico_id:   caso.tecnico_id||"",
+    prioridad:    caso.prioridad||"MEDIA",
+  });
+  const [tecnicos,  setTecnicos]  = useState([]);
+  const [saving,    setSaving]    = useState(false);
+  const s = (k,v) => setF(p=>({...p,[k]:v}));
+  const esDirector = perfil?.rol==="DIRECTOR";
+  const esST = ["SERVICIO_TECNICO","SOPORTE"].includes((caso.tipo_proceso||"").toUpperCase());
+
+  useEffect(()=>{
+    supabase.from("usuarios").select("*").eq("rol","TECNICO").eq("activo",true)
+      .then(({data})=>setTecnicos(data||[]));
+  },[]);
+
+  const tecnicosFiltrados = tecnicos.filter(t=>
+    !f.empresa_id || t.empresa_codigo===f.empresa_id
+  );
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:300,background:"#050507",
+      display:"flex",flexDirection:"column",overflowY:"auto"}}>
+      <div style={{height:5,background:B.blue,flexShrink:0}}/>
+      <div style={{padding:"16px 20px",borderBottom:`1px solid ${B.border}`,
+        display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+        <button onClick={onVolver}
+          style={{background:"none",border:`1px solid ${B.border}`,color:"#888",
+            cursor:"pointer",padding:"10px 18px",fontSize:14,borderRadius:2}}>
+          ← VOLVER
+        </button>
+        <div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,fontWeight:900,color:B.blue}}>
+            ✎ EDITAR CASO
+          </div>
+          <div style={{fontSize:11,color:"#666",marginTop:2}}>{caso.razon_social} · {caso.numero}</div>
+        </div>
+      </div>
+      <div style={{flex:1,padding:20,overflowY:"auto"}}>
+        <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:560}}>
+          {/* Empresa — solo Director */}
+          {esDirector&&(
+            <div>
+              <FL label="Empresa"/>
+              <select className="field" value={f.empresa_id}
+                onChange={e=>{s("empresa_id",e.target.value);s("tecnico_id","");}}>
+                <option value="">Sin empresa</option>
+                {EMPRESAS.map(e=><option key={e.codigo} value={e.codigo}>{e.nombre}</option>)}
+              </select>
+            </div>
+          )}
+          {/* Técnico asignado */}
+          <div>
+            <FL label="Técnico asignado"/>
+            <select className="field" value={f.tecnico_id}
+              onChange={e=>s("tecnico_id",e.target.value)}>
+              <option value="">Sin asignar</option>
+              {tecnicosFiltrados.map(t=>(
+                <option key={t.id} value={t.auth_id||t.id}>
+                  {t.nombre} {t.apellido} ({t.empresa_codigo})
+                </option>
+              ))}
+            </select>
+          </div>
+          {/* Prioridad */}
+          <div>
+            <FL label="Prioridad"/>
+            <div style={{display:"flex",gap:8}}>
+              {PRIORS.map(p=>(
+                <button key={p} onClick={()=>s("prioridad",p)}
+                  style={{flex:1,padding:"10px 8px",
+                    border:`2px solid ${f.prioridad===p?PC[p]:B.border}`,
+                    background:f.prioridad===p?PC[p]+"22":B.deep,
+                    color:f.prioridad===p?PC[p]:B.t2,
+                    cursor:"pointer",fontSize:12,fontWeight:700,borderRadius:2}}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* Dirección */}
+          <div><FL label="Dirección"/>
+            <input className="field" value={f.direccion}
+              onChange={e=>s("direccion",e.target.value)} placeholder="Ej: Av. Brasil 1234"/>
+          </div>
+          {/* Localidad y Departamento */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><FL label="Localidad"/>
+              <input className="field" value={f.localidad}
+                onChange={e=>s("localidad",e.target.value)}/></div>
+            <div><FL label="Departamento"/>
+              <select className="field" value={f.departamento} onChange={e=>s("departamento",e.target.value)}>
+                <option value="">Seleccioná...</option>
+                {["Artigas","Canelones","Cerro Largo","Colonia","Durazno","Flores","Florida",
+                  "Lavalleja","Maldonado","Montevideo","Paysandú","Río Negro","Rivera","Rocha",
+                  "Salto","San José","Soriano","Tacuarembó","Treinta y Tres"].map(d=>(
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {/* Teléfono */}
+          <div><FL label="Teléfono"/>
+            <input className="field" value={f.telefono}
+              onChange={e=>s("telefono",e.target.value)} placeholder="Ej: 099 123 456"/>
+          </div>
+          {/* Franja horaria */}
+          <div><FL label="Franja Horaria"/>
+            <select className="field" value={f.franja_horaria} onChange={e=>s("franja_horaria",e.target.value)}>
+              <option value="">Sin franja</option>
+              {["FH1 (8-12)","FH2 (12-16)","FH3 (16-19)","FH4 (19-22)"].map(fh=>(
+                <option key={fh} value={fh}>{fh}</option>
+              ))}
+            </select>
+          </div>
+          {/* Descripción / Observaciones */}
+          {esST ? (
+            <div><FL label="Descripción del problema"/>
+              <textarea className="field" rows={3} value={f.descripcion}
+                onChange={e=>s("descripcion",e.target.value)} style={{resize:"vertical",fontSize:15}}/>
+            </div>
+          ) : (
+            <div><FL label="Observaciones"/>
+              <textarea className="field" rows={3} value={f.observaciones}
+                onChange={e=>s("observaciones",e.target.value)} style={{resize:"vertical",fontSize:15}}/>
+            </div>
+          )}
+        </div>
+      </div>
+      {/* Botón guardar */}
+      <div style={{padding:16,background:"#0A0A0F",borderTop:`1px solid #1a1a1a`,flexShrink:0}}>
+        <button onClick={async()=>{
+          setSaving(true);
+          await onGuardar({
+            direccion:f.direccion, localidad:f.localidad, departamento:f.departamento,
+            telefono:f.telefono, franja_horaria:f.franja_horaria, rango_horario:f.franja_horaria,
+            observaciones:f.observaciones, descripcion:f.descripcion,
+            empresa_id:f.empresa_id, tecnico_id:f.tecnico_id||null,
+            prioridad:f.prioridad,
+            estado: f.tecnico_id ? (caso.estado==="PENDIENTE"?"ASIGNADO":caso.estado) : "PENDIENTE",
+          });
+          setSaving(false);
+        }} disabled={saving}
+          style={{width:"100%",padding:"20px 0",background:saving?"#333":B.blue,
+            border:"none",cursor:saving?"not-allowed":"pointer",
+            fontFamily:"'Orbitron',sans-serif",fontWeight:900,
+            fontSize:16,color:"#050507",borderRadius:2}}>
+          {saving?"GUARDANDO...":"✓ GUARDAR CAMBIOS"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const GestorMotivos = ({ toast }) => {
   const TIPOS = [
     {id:"PAUSA",          label:"⏸ Motivos de Pausa",          color:B.purple},
@@ -2882,6 +3054,7 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   const [showCancelar,setShowCancelar] = useState(false);
   const [showFinalizar,setShowFinalizar] = useState(false);
   const [showRecoord,setShowRecoord]   = useState(false);
+  const [showEditar,setShowEditar]     = useState(false);
   const [pantallaInstr,setPantallaInstr] = useState(false);
 
   // Tiempo guardado en DB — sin contador en vivo por ahora
@@ -3100,6 +3273,16 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   return(
     <div style={{padding:"0 0 40px"}}>
       {showInstr&&<ModalInstrucciones caso={caso} user={user} onClose={()=>setShowInstr(false)} onSave={guardarInstrucciones}/>}
+      {showEditar&&<OverlayEditarCaso caso={caso} user={user} perfil={perfil}
+        onVolver={()=>setShowEditar(false)}
+        onGuardar={async(updates)=>{
+          const{error}=await supabase.from("casos").update({...updates,updated_at:new Date().toISOString()}).eq("id",caso.id);
+          if(error){toast("Error: "+error.message);return;}
+          const casActualizado={...caso,...updates};
+          setCaso(casActualizado); if(onUpdate) onUpdate(casActualizado);
+          setShowEditar(false); toast("✓ Caso actualizado");
+        }}
+      />}
       {showCierre&&<ModalCierre caso={caso} user={user} onClose={()=>setShowCierre(false)} onGuardar={guardarCierre}/>}
       {showFinalizar&&<OverlayFinalizar caso={caso} onVolver={()=>setShowFinalizar(false)} onGuardar={async(updates, extras)=>{
         const h=[...(caso.historial||[]),{id:Date.now(),tipo:"FINALIZACION",
@@ -3174,6 +3357,9 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
           {["EN_PROCESO","PAUSADO"].includes(caso.estado)&&<Bb label="🏁 FINALIZAR" onClick={()=>setShowFinalizar(true)} color={B.green}/>}
           {["EN_PROCESO","PAUSADO","ASIGNADO"].includes(caso.estado)&&<Bb label="📅 RECOORDINAR" onClick={()=>setShowRecoord(true)} color={B.teal} ghost/>}
           {["EN_PROCESO","PAUSADO","ASIGNADO"].includes(caso.estado)&&<Bb label="✗ CANCELAR" onClick={()=>setShowCancelar(true)} color={B.red} ghost/>}
+          {esRolSuperior&&["DIRECTOR","REGIONAL"].includes(perfil?.rol)&&(
+            <Bb label="✎ EDITAR CASO" onClick={()=>setShowEditar(true)} ghost small color={B.blue}/>
+          )}
           {esRolSuperior&&<Bb label={tieneInstr?"✎ INSTRUCCIONES":"+ INSTRUCCIONES"} onClick={()=>setShowInstr(true)} ghost small color={B.orange}/>}
         </div>
         {caso.estado==="EN_PROCESO"&&(
@@ -4549,8 +4735,42 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
   const [dragOver,    setDragOver]   = useState(null);
   const [editBase,    setEditBase]   = useState(false);
 
-  const esRolTecnico   = perfil?.rol === "TECNICO";
-  const esRolSuperior  = !esRolTecnico;
+  const hoy = new Date().toISOString().split("T")[0];
+
+  // Guardar orden de ruta en Supabase
+  const guardarOrden = async (nuevasParadas, baseOp, destinoOp, destinoDifOp) => {
+    const tecId = perfil?.auth_id || perfil?.id;
+    const ordenIds = nuevasParadas.map(p=>p.id);
+    await supabase.from("ruta_orden").upsert({
+      tecnico_id: tecId,
+      fecha: hoy,
+      orden_casos: ordenIds,
+      base_txt: baseOp||baseTxt,
+      destino_txt: destinoOp||destinoTxt,
+      destino_dif: destinoDifOp!==undefined?destinoDifOp:destinoDif,
+      updated_at: new Date().toISOString(),
+    }, {onConflict:"tecnico_id,fecha"});
+  };
+
+  // Cargar orden guardado del día
+  const cargarOrdenGuardado = async (casosActivos) => {
+    const tecId = perfil?.auth_id || perfil?.id;
+    const {data} = await supabase.from("ruta_orden")
+      .select("*").eq("tecnico_id", tecId).eq("fecha", hoy).maybeSingle();
+    if(data?.orden_casos?.length) {
+      // Restaurar base y destino
+      if(data.base_txt) { setBaseTxt(data.base_txt); }
+      if(data.destino_txt) { setDestinoTxt(data.destino_txt); setDestinoDif(data.destino_dif||false); }
+      // Reordenar casos según orden guardado
+      const ordenGuardado = data.orden_casos;
+      const casosOrdenados = [
+        ...ordenGuardado.map(id=>casosActivos.find(c=>c.id===id)).filter(Boolean),
+        ...casosActivos.filter(c=>!ordenGuardado.includes(c.id))
+      ];
+      return {casosOrdenados, baseTxtGuardado:data.base_txt, destinoTxtGuardado:data.destino_txt, destinoDifGuardado:data.destino_dif};
+    }
+    return null;
+  };
 
   useEffect(() => { if(perfil) cargarDatos(); }, [perfil]);
 
@@ -4590,16 +4810,35 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
       const casosActivos = c||[];
       setCasos(casosActivos);
       if(casosActivos.length > 0) {
+        // Cargar orden guardado para técnico propio
+        if(tec.id===perfil?.id || tec.auth_id===perfil?.auth_id){
+          const guardado = await cargarOrdenGuardado(casosActivos);
+          if(guardado){
+            const {casosOrdenados,baseTxtGuardado,destinoTxtGuardado,destinoDifGuardado} = guardado;
+            if(baseTxtGuardado){
+              setBaseTxt(baseTxtGuardado);
+              const coords = await geocodificarDireccion(baseTxtGuardado,"","");
+              const nuevaBase = {...coords, direccion:baseTxtGuardado};
+              setBase(nuevaBase);
+              if(destinoTxtGuardado){ setDestinoTxt(destinoTxtGuardado); setDestinoDif(destinoDifGuardado||false); }
+              const conCoords = await Promise.all(casosOrdenados.map(async cc=>{
+                const c2 = await geocodificarDireccion(cc.direccion,cc.departamento,cc.localidad);
+                return {...cc,...c2};
+              }));
+              const validos = conCoords.filter(cc=>cc.ok&&cc.lat);
+              setParadas(validos); setOrden(validos.map((_,i)=>i));
+              await calcularRuta(validos, nuevaBase);
+              return;
+            }
+          }
+        }
         await geocodificarYOrdenar(casosActivos, base);
       } else {
-        setParadas([]);
-        setOrden([]);
-        setPolyline([]);
-        setRutaInfo(null);
+        setParadas([]); setOrden([]); setPolyline([]); setRutaInfo(null);
       }
-    } catch(e) {
-      console.error("Error cargando casos:", e);
-    }
+    } catch(e) { console.error("Error cargando casos:", e); }
+  };
+
   };
 
   const geocodificarYOrdenar = async (listaCasos, baseCoords) => {
@@ -4655,6 +4894,7 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
       .eq("auth_id", user.id);
     // Recalcular ruta con nueva base
     if(paradas.length > 0) await calcularRuta(paradas, nuevaBase);
+    await guardarOrden(paradas, baseTxt);
     setCalculando(false);
     toast("✓ Base operativa guardada");
   };
@@ -4686,6 +4926,7 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
     setParadas(nuevasParadas);
     setOrden(nuevasParadas.map((_,i)=>i));
     await calcularRuta(nuevasParadas, base);
+    await guardarOrden(nuevasParadas);
   };
 
   // Optimizar ruta automáticamente
@@ -4695,6 +4936,7 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
     setParadas(reordenadas);
     setOrden(reordenadas.map((_,i)=>i));
     await calcularRuta(reordenadas, base);
+    await guardarOrden(reordenadas);
     setCalculando(false);
     toast("✓ Ruta optimizada automáticamente");
   };
@@ -4927,193 +5169,367 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
 };
 
 // ─── COMUNICACIONES ──────────────────────────────────────
-const Comunicaciones=({user,toast})=>{
-  const [canales,setCanales]=useState([]);
-  const [canalActivo,setCanalActivo]=useState(null);
-  const [msgs,setMsgs]=useState([]);
-  const [msg,setMsg]=useState("");
-  const [loading,setLoading]=useState(true);
-  const bottomRef=useRef(null);
+const Comunicaciones=({user,perfil,toast})=>{
+  const [canales,    setCanales]    = useState([]);
+  const [canalAct,   setCanalAct]   = useState(null);
+  const [mensajes,   setMensajes]   = useState([]);
+  const [texto,      setTexto]      = useState("");
+  const [loading,    setLoading]    = useState(true);
+  const [enviando,   setEnviando]   = useState(false);
+  const [usuarios,   setUsuarios]   = useState([]);
+  const mensajesEndRef = useRef(null);
+  const subRef = useRef(null);
+
+  const rol         = perfil?.rol;
+  const empresa     = perfil?.empresa_codigo;
+  const miId        = perfil?.id;
+  const miNombre    = `${perfil?.nombre||""} ${perfil?.apellido||""}`.trim();
 
   useEffect(()=>{
-    (async()=>{
-      let ch=[
-        {id:"global",nombre:"🌐 General",descripcion:"Canal global de la operación"},
-        ...EMPRESAS.map(e=>({id:`emp_${e.codigo}`,nombre:`${e.nombre}`,descripcion:`Canal de ${e.nombre}`}))
-      ];
-      setCanales(ch);
-      setCanalActivo(ch[0]);
-      setLoading(false);
-    })();
+    supabase.from("usuarios").select("*").eq("activo",true)
+      .then(({data})=>{ setUsuarios(data||[]); });
   },[]);
 
   useEffect(()=>{
-    if(!canalActivo)return;
-    setMsgs([]);
-    const cargar=async()=>{
-      const{data}=await supabase.from("mensajes_chat").select("*").eq("canal_id",canalActivo.id).order("created_at",{ascending:true}).limit(50);
-      setMsgs(data||[]);
-      setTimeout(()=>bottomRef.current?.scrollIntoView({behavior:"smooth"}),100);
-    };
-    cargar();
-    const sub=supabase.channel(`chat_${canalActivo.id}`)
-      .on("postgres_changes",{event:"INSERT",schema:"public",table:"mensajes_chat",filter:`canal_id=eq.${canalActivo.id}`},
-        payload=>{setMsgs(m=>[...m,payload.new]);setTimeout(()=>bottomRef.current?.scrollIntoView({behavior:"smooth"}),50);})
-      .subscribe();
-    return()=>{supabase.removeChannel(sub);};
-  },[canalActivo]);
+    if(!perfil || !usuarios.length) return;
+    construirCanales();
+  },[perfil, usuarios]);
 
-  const enviar=async()=>{
-    if(!msg.trim()||!canalActivo)return;
-    const texto=msg.trim();setMsg("");
-    const{error}=await supabase.from("mensajes_chat").insert({canal_id:canalActivo.id,autor_id:user.id,autor_email:user.email,texto});
-    if(error)toast("Error al enviar mensaje");
+  const construirCanales = () => {
+    const lista = [];
+
+    // ── GRUPOS POR EMPRESA ──────────────────────────────
+    if(rol==="DIRECTOR"){
+      // Director ve todos los grupos de empresa
+      EMPRESAS.forEach(e=>{
+        const miembros = usuarios.filter(u=>u.empresa_codigo===e.codigo);
+        if(miembros.length>0){
+          lista.push({
+            id:`grupo_${e.codigo}`,
+            tipo:"grupo",
+            nombre:`🏢 Equipo ${e.nombre}`,
+            empresa:e.codigo,
+            color:e.color,
+            miembros:miembros.length,
+          });
+        }
+      });
+    } else if(rol==="REGIONAL"||rol==="SUPERVISOR"||rol==="TECNICO"){
+      // Grupo de su empresa
+      const empData = EMPRESAS.find(e=>e.codigo===empresa);
+      const miembros = usuarios.filter(u=>u.empresa_codigo===empresa);
+      if(miembros.length>0){
+        lista.push({
+          id:`grupo_${empresa}`,
+          tipo:"grupo",
+          nombre:`🏢 Equipo ${empData?.nombre||empresa}`,
+          empresa,
+          color:empData?.color||B.orange,
+          miembros:miembros.length,
+        });
+      }
+    }
+
+    // ── CANALES PRIVADOS según rol ──────────────────────
+    if(rol==="DIRECTOR"){
+      // Director ↔ cada Regional
+      usuarios.filter(u=>u.rol==="REGIONAL").forEach(reg=>{
+        lista.push({
+          id:canalPrivadoId(miId, reg.id),
+          tipo:"privado",
+          nombre:`👤 ${reg.nombre} ${reg.apellido}`,
+          subtitulo:`Regional · ${reg.empresa_codigo}`,
+          contraparte:reg,
+        });
+      });
+    }
+
+    if(rol==="REGIONAL"){
+      // Regional ↔ Director
+      const dir = usuarios.find(u=>u.rol==="DIRECTOR");
+      if(dir){
+        lista.push({
+          id:canalPrivadoId(miId, dir.id),
+          tipo:"privado",
+          nombre:`👑 ${dir.nombre} ${dir.apellido}`,
+          subtitulo:"Director Operativo",
+          contraparte:dir,
+        });
+      }
+      // Regional ↔ cada Supervisor de su empresa
+      usuarios.filter(u=>u.rol==="SUPERVISOR"&&u.empresa_codigo===empresa).forEach(sup=>{
+        lista.push({
+          id:canalPrivadoId(miId, sup.id),
+          tipo:"privado",
+          nombre:`👔 ${sup.nombre} ${sup.apellido}`,
+          subtitulo:"Supervisor",
+          contraparte:sup,
+        });
+      });
+    }
+
+    if(rol==="SUPERVISOR"){
+      // Supervisor ↔ Regional
+      const reg = usuarios.find(u=>u.rol==="REGIONAL"&&u.empresa_codigo===empresa);
+      if(reg){
+        lista.push({
+          id:canalPrivadoId(miId, reg.id),
+          tipo:"privado",
+          nombre:`🏢 ${reg.nombre} ${reg.apellido}`,
+          subtitulo:"Representante Regional",
+          contraparte:reg,
+        });
+      }
+      // Supervisor ↔ cada Técnico de su equipo
+      usuarios.filter(u=>u.rol==="TECNICO"&&u.supervisor_id===miId).forEach(tec=>{
+        lista.push({
+          id:canalPrivadoId(miId, tec.id),
+          tipo:"privado",
+          nombre:`🔧 ${tec.nombre} ${tec.apellido}`,
+          subtitulo:"Técnico de campo",
+          contraparte:tec,
+        });
+      });
+    }
+
+    if(rol==="TECNICO"){
+      // Técnico ↔ su Supervisor
+      const sup = usuarios.find(u=>u.id===perfil?.supervisor_id);
+      if(sup){
+        lista.push({
+          id:canalPrivadoId(miId, sup.id),
+          tipo:"privado",
+          nombre:`👔 ${sup.nombre} ${sup.apellido}`,
+          subtitulo:"Tu Supervisor",
+          contraparte:sup,
+        });
+      }
+    }
+
+    setCanales(lista);
+    if(lista.length>0 && !canalAct) abrirCanal(lista[0]);
+    setLoading(false);
   };
 
-  return(
-    <div style={{height:"calc(100vh - 160px)",display:"flex",gap:0,overflow:"hidden"}}>
-      {/* Sidebar canales */}
-      <div style={{width:200,background:B.card,borderRight:`1px solid ${B.border}`,display:"flex",flexDirection:"column",flexShrink:0}}>
-        <div style={{padding:"12px 14px",fontSize:9,fontWeight:700,color:B.orange,letterSpacing:".12em",borderBottom:`1px solid ${B.border}`}}>◈ CANALES</div>
+  const canalPrivadoId = (id1, id2) => {
+    const sorted = [id1, id2].sort();
+    return `privado_${sorted[0]}_${sorted[1]}`;
+  };
+
+  const abrirCanal = async (canal) => {
+    setCanalAct(canal);
+    // Cancelar suscripción anterior
+    if(subRef.current){ supabase.removeChannel(subRef.current); subRef.current=null; }
+    // Cargar mensajes
+    const {data} = await supabase.from("mensajes_chat")
+      .select("*").eq("canal_id", canal.id)
+      .order("created_at", {ascending:true}).limit(100);
+    setMensajes(data||[]);
+    // Suscripción realtime
+    const sub = supabase.channel(`chat_${canal.id}`)
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"mensajes_chat",
+        filter:`canal_id=eq.${canal.id}`},
+        payload=>{ setMensajes(prev=>[...prev, payload.new]); }
+      ).subscribe();
+    subRef.current = sub;
+    setTimeout(()=>mensajesEndRef.current?.scrollIntoView({behavior:"smooth"}),100);
+  };
+
+  useEffect(()=>{
+    mensajesEndRef.current?.scrollIntoView({behavior:"smooth"});
+  },[mensajes]);
+
+  const enviar = async () => {
+    if(!texto.trim()||!canalAct||enviando) return;
+    setEnviando(true);
+    await supabase.from("mensajes_chat").insert({
+      canal_id: canalAct.id,
+      tipo_canal: canalAct.tipo,
+      autor_id: miId,
+      autor_email: user?.email,
+      autor_nombre: miNombre,
+      texto: texto.trim(),
+      created_at: new Date().toISOString(),
+    });
+    setTexto("");
+    setEnviando(false);
+  };
+
+  const ROL_COLOR_MAP = {DIRECTOR:B.orange,REGIONAL:B.blue,SUPERVISOR:B.purple,TECNICO:B.green};
+
+  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh"}}><Spin s={36}/></div>;
+
+  return (
+    <div style={{display:"flex",height:"calc(100vh - 120px)",gap:0,
+      background:B.void,border:`1px solid ${B.border}`}}>
+
+      {/* Panel izquierdo — lista de canales */}
+      <div style={{width:260,flexShrink:0,borderRight:`1px solid ${B.border}`,
+        display:"flex",flexDirection:"column",background:B.panel}}>
+        <div style={{padding:"14px 16px",borderBottom:`1px solid ${B.border}`}}>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,color:B.orange}}>
+            💬 COMUNICACIONES
+          </div>
+          <div style={{fontSize:10,color:B.t3,marginTop:2}}>{canales.length} canales disponibles</div>
+        </div>
         <div style={{flex:1,overflowY:"auto"}}>
-          {canales.map(c=>(
-            <button key={c.id} onClick={()=>setCanalActivo(c)}
-              style={{width:"100%",display:"block",padding:"10px 14px",background:canalActivo?.id===c.id?B.orangeDim:"none",border:"none",borderLeft:canalActivo?.id===c.id?`3px solid ${B.orange}`:"3px solid transparent",color:canalActivo?.id===c.id?B.orange:B.t2,cursor:"pointer",textAlign:"left",fontSize:11,fontWeight:canalActivo?.id===c.id?700:400,transition:"all .15s"}}>
-              # {c.nombre}
-            </button>
-          ))}
+          {/* Grupos */}
+          {canales.filter(c=>c.tipo==="grupo").length>0&&(
+            <div>
+              <div style={{padding:"8px 14px 4px",fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>
+                GRUPOS
+              </div>
+              {canales.filter(c=>c.tipo==="grupo").map(c=>(
+                <button key={c.id} onClick={()=>abrirCanal(c)}
+                  style={{width:"100%",padding:"10px 16px",textAlign:"left",
+                    background:canalAct?.id===c.id?B.orangeDim:"transparent",
+                    border:"none",borderLeft:`3px solid ${canalAct?.id===c.id?B.orange:"transparent"}`,
+                    cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:36,height:36,borderRadius:"50%",flexShrink:0,
+                    background:c.color+"22",border:`2px solid ${c.color}`,
+                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
+                    🏢
+                  </div>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:700,color:canalAct?.id===c.id?B.orange:B.t1,
+                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nombre}</div>
+                    <div style={{fontSize:10,color:B.t3}}>{c.miembros} miembros</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Privados */}
+          {canales.filter(c=>c.tipo==="privado").length>0&&(
+            <div>
+              <div style={{padding:"8px 14px 4px",fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>
+                MENSAJES DIRECTOS
+              </div>
+              {canales.filter(c=>c.tipo==="privado").map(c=>{
+                const initials=`${(c.contraparte?.nombre||"?")[0]}${(c.contraparte?.apellido||"?")[0]}`.toUpperCase();
+                const rolColor=ROL_COLOR_MAP[c.contraparte?.rol]||B.t3;
+                return(
+                  <button key={c.id} onClick={()=>abrirCanal(c)}
+                    style={{width:"100%",padding:"10px 16px",textAlign:"left",
+                      background:canalAct?.id===c.id?B.orangeDim:"transparent",
+                      border:"none",borderLeft:`3px solid ${canalAct?.id===c.id?B.orange:"transparent"}`,
+                      cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:36,height:36,borderRadius:"50%",flexShrink:0,
+                      background:`${rolColor}22`,border:`2px solid ${rolColor}`,
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:12,fontWeight:900,color:rolColor,fontFamily:"'Orbitron',sans-serif"}}>
+                      {initials}
+                    </div>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:700,color:canalAct?.id===c.id?B.orange:B.t1,
+                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nombre}</div>
+                      <div style={{fontSize:10,color:B.t3}}>{c.subtitulo}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {canales.length===0&&(
+            <div style={{padding:24,textAlign:"center",color:B.t3,fontSize:12}}>
+              Sin canales disponibles
+            </div>
+          )}
         </div>
       </div>
-      {/* Chat */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",background:B.bg}}>
-        <div style={{padding:"12px 16px",borderBottom:`1px solid ${B.border}`,background:B.card}}>
-          <div style={{fontWeight:700,color:B.t1,fontSize:13}}># {canalActivo?.nombre}</div>
-          <div style={{fontSize:10,color:B.t3}}>{canalActivo?.descripcion}</div>
-        </div>
-        <div style={{flex:1,overflowY:"auto",padding:16,display:"flex",flexDirection:"column",gap:8}}>
-          {msgs.length===0&&<div style={{textAlign:"center",color:B.t3,fontSize:12,padding:30}}>Sin mensajes aún. ¡Sé el primero en escribir!</div>}
-          {msgs.map(m=>{
-            const esPropio=m.autor_id===user.id||m.autor_email===user.email;
-            return(
-              <div key={m.id} style={{display:"flex",flexDirection:"column",alignItems:esPropio?"flex-end":"flex-start"}}>
-                <div style={{maxWidth:"70%",background:esPropio?B.orangeDim:B.card,border:`1px solid ${esPropio?B.orange+"44":B.border}`,padding:"8px 12px",borderRadius:2}}>
-                  {!esPropio&&<div style={{fontSize:9,color:B.orange,fontWeight:700,marginBottom:4}}>{m.autor_email?.split("@")[0]?.toUpperCase()}</div>}
-                  <div style={{fontSize:12,color:B.t1,lineHeight:1.5}}>{m.texto}</div>
-                  <div style={{fontSize:9,color:B.t3,marginTop:4,textAlign:"right"}}>{m.created_at?new Date(m.created_at).toLocaleTimeString("es-UY",{hour:"2-digit",minute:"2-digit"}):""}</div>
+
+      {/* Panel derecho — mensajes */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
+        {canalAct ? (
+          <>
+            {/* Header del canal */}
+            <div style={{padding:"12px 16px",borderBottom:`1px solid ${B.border}`,
+              display:"flex",alignItems:"center",gap:12,background:B.panel,flexShrink:0}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:B.t1}}>{canalAct.nombre}</div>
+                <div style={{fontSize:10,color:B.t3}}>
+                  {canalAct.tipo==="grupo"?`${canalAct.miembros} miembros · Grupo de empresa`:canalAct.subtitulo}
                 </div>
               </div>
-            );
-          })}
-          <div ref={bottomRef}/>
-        </div>
-        <div style={{padding:12,borderTop:`1px solid ${B.border}`,display:"flex",gap:8}}>
-          <input className="field" style={{flex:1}} placeholder={`Mensaje en #${canalActivo?.nombre||"canal"}...`}
-            value={msg} onChange={e=>setMsg(e.target.value)} onKeyDown={e=>e.key==="Enter"&&enviar()}/>
-          <Bb label="ENVIAR ▶" onClick={enviar} disabled={!msg.trim()} small/>
-        </div>
+            </div>
+
+            {/* Mensajes */}
+            <div style={{flex:1,overflowY:"auto",padding:16,display:"flex",flexDirection:"column",gap:8}}>
+              {mensajes.length===0&&(
+                <div style={{textAlign:"center",color:B.t3,padding:40,fontSize:13}}>
+                  Sin mensajes aún. ¡Empezá la conversación!
+                </div>
+              )}
+              {mensajes.map(m=>{
+                const esMio = m.autor_id===miId;
+                const usu = usuarios.find(u=>u.id===m.autor_id);
+                const rolColor = ROL_COLOR_MAP[usu?.rol]||B.t3;
+                return(
+                  <div key={m.id} style={{display:"flex",
+                    justifyContent:esMio?"flex-end":"flex-start",gap:8}}>
+                    {!esMio&&(
+                      <div style={{width:28,height:28,borderRadius:"50%",flexShrink:0,
+                        background:`${rolColor}22`,border:`1px solid ${rolColor}`,
+                        display:"flex",alignItems:"center",justifyContent:"center",
+                        fontSize:10,fontWeight:900,color:rolColor,alignSelf:"flex-end"}}>
+                        {(m.autor_nombre||"?")[0]}
+                      </div>
+                    )}
+                    <div style={{maxWidth:"70%"}}>
+                      {!esMio&&(
+                        <div style={{fontSize:10,color:rolColor,fontWeight:700,marginBottom:3,paddingLeft:4}}>
+                          {m.autor_nombre||m.autor_email}
+                        </div>
+                      )}
+                      <div style={{
+                        padding:"10px 14px",
+                        background:esMio?B.orange+"22":B.card,
+                        border:`1px solid ${esMio?B.orange+"44":B.border}`,
+                        borderRadius:esMio?"12px 12px 2px 12px":"12px 12px 12px 2px",
+                        fontSize:14,color:B.t1,lineHeight:1.5,
+                      }}>
+                        {m.texto}
+                      </div>
+                      <div style={{fontSize:9,color:B.t3,marginTop:3,
+                        textAlign:esMio?"right":"left",paddingLeft:4,paddingRight:4}}>
+                        {new Date(m.created_at).toLocaleTimeString("es-UY",{hour:"2-digit",minute:"2-digit",hour12:false})}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={mensajesEndRef}/>
+            </div>
+
+            {/* Input de mensaje */}
+            <div style={{padding:"12px 16px",borderTop:`1px solid ${B.border}`,
+              display:"flex",gap:10,background:B.panel,flexShrink:0}}>
+              <input className="field" style={{flex:1,fontSize:15}}
+                placeholder="Escribí un mensaje..."
+                value={texto} onChange={e=>setTexto(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&enviar()}
+                disabled={enviando}/>
+              <button onClick={enviar} disabled={!texto.trim()||enviando}
+                style={{padding:"0 20px",background:texto.trim()?B.orange:"#333",
+                  border:"none",cursor:texto.trim()?"pointer":"not-allowed",
+                  color:texto.trim()?"#050507":"#666",
+                  fontWeight:900,fontSize:18,flexShrink:0,borderRadius:2}}>
+                ➤
+              </button>
+            </div>
+          </>
+        ) : (
+          <div style={{flex:1,display:"flex",alignItems:"center",
+            justifyContent:"center",flexDirection:"column",gap:14,color:B.t3}}>
+            <div style={{fontSize:48}}>💬</div>
+            <div style={{fontSize:14}}>Seleccioná un canal para comenzar</div>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
-// ─── LOGROS ──────────────────────────────────────────────
-const Logros=({user,toast})=>{
-  const [xpData,setXpData]=useState(null);
-  const [logros,setLogros]=useState([]);
-  const [loading,setLoading]=useState(true);
-
-  useEffect(()=>{
-    (async()=>{
-      const[{data:xp},{data:lg}]=await Promise.all([
-        supabase.from("usuario_xp").select("*").eq("usuario_id",user.id).maybeSingle(),
-        supabase.from("logros_config").select("*").order("rareza")
-      ]);
-      setXpData(xp);setLogros(lg||[]);setLoading(false);
-    })();
-  },[]);
-
-  const RAREZA_ORDER=["COMMON","RARE","EPIC","LEGENDARY","MYTHIC"];
-  const RAREZA_COLOR={COMMON:B=>B.t3,RARE:B=>B.blue,EPIC:B=>B.purple,LEGENDARY:B=>B.orange,MYTHIC:B=>B.red};
-  const RAREZA_LABEL={COMMON:"COMÚN",RARE:"RARO",EPIC:"ÉPICO",LEGENDARY:"LEGENDARIO",MYTHIC:"MÍTICO"};
-
-  const xp=xpData?.xp_total||0;
-  const nivel=Math.floor(xp/500)+1;
-  const pctNivel=(xp%500)/500*100;
-
-  if(loading)return<div style={{textAlign:"center",padding:60}}><Spin/></div>;
-
-  const Hexagon=({logro,desbloqueado})=>{
-    const col=RAREZA_COLOR[logro.rareza]?.(B)||B.t3;
-    return(
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,opacity:desbloqueado?1:0.35,transition:"all .2s",cursor:"default"}}>
-        <div style={{width:72,height:72,position:"relative",display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <svg viewBox="0 0 100 100" style={{position:"absolute",width:"100%",height:"100%"}}>
-            <polygon points="50,2 95,26 95,74 50,98 5,74 5,26" fill={desbloqueado?`${col}22`:`${B.bg}`} stroke={col} strokeWidth={desbloqueado?2:1}/>
-          </svg>
-          <span style={{fontSize:26,zIndex:1}}>{logro.icono||"🏆"}</span>
-        </div>
-        <div style={{textAlign:"center"}}>
-          <div style={{fontSize:9,fontWeight:700,color:desbloqueado?col:B.t3,letterSpacing:".06em"}}>{logro.nombre}</div>
-          <div style={{fontSize:8,color:B.t3,marginTop:2}}>{RAREZA_LABEL[logro.rareza]}</div>
-          {desbloqueado&&<div style={{fontSize:8,color:B.green,marginTop:2}}>+{logro.xp_reward} XP</div>}
-        </div>
-      </div>
-    );
-  };
-
-  return(
-    <div>
-      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:18,color:B.t1,marginBottom:20}}>◈ LOGROS & XP</div>
-      {/* Perfil XP */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:20,marginBottom:20}}>
-        <div style={{display:"flex",alignItems:"center",gap:20}}>
-          <div style={{textAlign:"center",minWidth:80}}>
-            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:36,fontWeight:900,color:B.orange}}>{nivel}</div>
-            <div style={{fontSize:9,color:B.t3,letterSpacing:".1em"}}>NIVEL</div>
-          </div>
-          <div style={{flex:1}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-              <span style={{fontSize:12,fontWeight:700,color:B.t1}}>{user.email?.split("@")[0]?.toUpperCase()}</span>
-              <span style={{fontSize:11,color:B.orange,fontWeight:700,fontFamily:"'Orbitron',sans-serif"}}>{xp.toLocaleString()} XP</span>
-            </div>
-            <div style={{height:8,background:B.bg,borderRadius:4,overflow:"hidden"}}>
-              <div style={{height:"100%",width:`${pctNivel}%`,background:`linear-gradient(90deg,${B.orange},${B.red})`,borderRadius:4,transition:"width .5s"}}/>
-            </div>
-            <div style={{fontSize:10,color:B.t3,marginTop:4}}>{xp%500}/{500} XP para nivel {nivel+1}</div>
-          </div>
-        </div>
-        <div style={{marginTop:16,paddingTop:16,borderTop:`1px solid ${B.border}`,display:"flex",gap:20,flexWrap:"wrap"}}>
-          {[["Instalaciones",xpData?.instalaciones_completadas||0,"📦"],["Soportes",xpData?.soportes_completados||0,"🔧"],["Retiros",xpData?.retiros_completados||0,"📤"],["Proactivos",xpData?.proactivos_completados||0,"🔍"]].map(([l,v,ic])=>(
-            <div key={l} style={{textAlign:"center"}}>
-              <div style={{fontSize:20}}>{ic}</div>
-              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900,color:B.t1}}>{v}</div>
-              <div style={{fontSize:9,color:B.t3}}>{l}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-      {/* Grilla de logros */}
-      {RAREZA_ORDER.map(rareza=>{
-        const del_rareza=logros.filter(l=>l.rareza===rareza);
-        if(!del_rareza.length)return null;
-        const col=RAREZA_COLOR[rareza]?.(B)||B.t3;
-        return(
-          <div key={rareza} style={{marginBottom:20}}>
-            <div style={{fontSize:10,fontWeight:700,color:col,letterSpacing:".14em",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-              <span>◈ {RAREZA_LABEL[rareza]}</span>
-              <div style={{flex:1,height:1,background:col+"33"}}/>
-            </div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:20}}>
-              {del_rareza.map(l=><Hexagon key={l.id} logro={l} desbloqueado={false}/>)}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-// ─── USUARIOS ────────────────────────────────────────────
 const Usuarios=({user,perfil,toast,casos})=>{
   const [usuarios,  setUsuarios]  = useState([]);
   const [loading,   setLoading]   = useState(true);
@@ -5794,7 +6210,7 @@ export default function App(){
           />}
           {view==="bulk"&&<BulkUpload user={user} toast={async(m)=>{toast(m);await recargarCasos();}}/>}
           {view==="analitica"&&<Analitica user={user} toast={toast}/>}
-          {view==="comunicaciones"&&<Comunicaciones user={user} toast={toast}/>}
+          {view==="comunicaciones"&&<Comunicaciones user={user} perfil={perfil} toast={toast}/>}
           {view==="logros"&&<Logros user={user} toast={toast}/>}
           {view==="usuarios"&&<Usuarios user={user} perfil={perfil} toast={toast} casos={casos}/>}
           {view==="config"&&<Config user={user} toast={toast} minutosAntes={minutosAntes} setMinutosAntes={setMinutosAntes}/>}
