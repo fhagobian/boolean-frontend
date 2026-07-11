@@ -6718,7 +6718,7 @@ export default function App(){
   });
 
   const setViewPersist = (v) => {
-    setViewPersist(v);
+    setView(v);
     try{ localStorage.setItem("boolean_view",v); }catch{}
   };
   const [toastMsg,setToastMsg]=useState(null);
