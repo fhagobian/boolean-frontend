@@ -6733,6 +6733,7 @@ export default function App(){
     return()=>subscription.unsubscribe();
   },[]);
 
+  const sessionLoadedRef = useRef(false);
   const [noLeidosChat, setNoLeidosChat] = useState(0);
 
   // Calcular mensajes no leídos para el badge del menú
