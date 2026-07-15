@@ -5814,39 +5814,125 @@ const Comunicaciones=({user,perfil,toast})=>{
       </div>
     );
     return (
-      <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,
-        display:"flex",flexDirection:"column",background:"#050507",zIndex:50}}>
-        {/* Header con botón volver y miembros */}
-        <div style={{padding:"12px 16px",borderBottom:"1px solid #1a1a1a",
-          display:"flex",alignItems:"center",gap:12,background:"#0A0A0F",flexShrink:0}}>
+      <div style={{
+        position:"fixed",top:0,left:0,right:0,bottom:0,
+        display:"flex",flexDirection:"column",
+        background:"#050507",zIndex:50,
+      }}>
+        {/* Header fijo arriba */}
+        <div style={{
+          padding:"12px 16px",borderBottom:"1px solid #1a1a1a",
+          display:"flex",alignItems:"center",gap:12,
+          background:"#0A0A0F",flexShrink:0,
+          paddingTop:"max(12px, env(safe-area-inset-top))",
+        }}>
           <button onClick={()=>{
             setVistaMovil("lista");setCanalAct(null);setCanalActId(null);
             try{
               localStorage.setItem(`boolean_chat_vista_${miId}`,"lista");
               localStorage.removeItem(`boolean_chat_canal_${miId}`);
             }catch{}
-          }}
-            style={{background:"#FF6B0022",border:"2px solid #FF6B00",
-              color:"#FF6B00",cursor:"pointer",padding:"10px 16px",
-              fontSize:16,borderRadius:4,flexShrink:0,fontWeight:700}}>
-            ←
-          </button>
+          }} style={{
+            background:"#FF6B0022",border:"2px solid #FF6B00",
+            color:"#FF6B00",cursor:"pointer",padding:"10px 16px",
+            fontSize:16,borderRadius:4,flexShrink:0,fontWeight:700,
+            fontFamily:"'Orbitron',sans-serif",
+          }}>←</button>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:14,fontWeight:700,color:"#ccc",
               overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
               {canalAct?.nombre}
             </div>
-            {/* Miembros del canal */}
-            <div style={{fontSize:10,color:"#555",marginTop:2}}>
+            <div style={{fontSize:10,color:"#555"}}>
               {canalAct?.tipo==="grupo"
-                ? `${canalAct?.miembros} miembros · ${usuarios.filter(u=>u.empresa_codigo===canalAct?.empresa).map(u=>`${u.nombre}`).slice(0,3).join(", ")}${canalAct?.miembros>3?"...":""}`
-                : canalAct?.subtitulo
-              }
+                ?`${canalAct?.miembros} miembros`
+                :canalAct?.subtitulo}
             </div>
           </div>
         </div>
-        <ChatMensajes mensajes={mensajes} usuarios={usuarios} miId={miId}/>
-        <ChatInput onEnviar={enviarMensaje}/>
+
+        {/* Mensajes — área scrolleable */}
+        <div style={{flex:1,overflowY:"auto",
+          paddingBottom:"80px", // espacio para el input fijo
+        }}>
+          <ChatMensajes mensajes={mensajes} usuarios={usuarios} miId={miId}/>
+        </div>
+
+        {/* Input FIJO en la parte inferior — siempre visible sobre el teclado */}
+        <div style={{
+          position:"fixed",
+          bottom:0,left:0,right:0,
+          padding:"8px 12px",
+          paddingBottom:"max(8px, env(safe-area-inset-bottom))",
+          borderTop:"2px solid #1a1a1a",
+          background:"#0A0A0F",
+          zIndex:100,
+          display:"flex",gap:8,
+        }}>
+          <textarea
+            rows={1}
+            style={{
+              flex:1,fontSize:16,padding:"12px 14px",
+              background:"#141420",
+              border:"2px solid #333",
+              color:"#fff",borderRadius:8,
+              outline:"none",fontFamily:"inherit",
+              resize:"none",lineHeight:1.4,
+              maxHeight:120,overflowY:"auto",
+              // Crítico para Android — evita zoom y pérdida de foco
+              fontSize:"16px",
+              touchAction:"manipulation",
+            }}
+            placeholder="Escribí un mensaje..."
+            onChange={e=>{
+              // Usar ref local
+              e.target.style.height="auto";
+              e.target.style.height=Math.min(e.target.scrollHeight,120)+"px";
+            }}
+            onKeyDown={e=>{
+              if(e.key==="Enter"&&!e.shiftKey){
+                e.preventDefault();
+                const val=e.target.value.trim();
+                if(val){ enviarMensaje(val); e.target.value=""; e.target.style.height="auto"; }
+              }
+            }}
+            onBlur={e=>{
+              // En Android el blur puede ser del teclado — no perder el valor
+              e.preventDefault();
+            }}
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck="false"
+            enterKeyHint="send"
+          />
+          <button
+            onTouchEnd={e=>{
+              e.preventDefault();
+              // Usar el textarea hermano
+              const ta=e.currentTarget.previousSibling;
+              const val=ta?.value?.trim();
+              if(val){ enviarMensaje(val); ta.value=""; ta.style.height="auto"; ta.focus(); }
+            }}
+            onClick={e=>{
+              const ta=e.currentTarget.previousSibling;
+              const val=ta?.value?.trim();
+              if(val){ enviarMensaje(val); ta.value=""; ta.style.height="auto"; }
+            }}
+            style={{
+              padding:"0 18px",
+              background:"#FF6B00",
+              border:"none",
+              cursor:"pointer",
+              color:"#050507",
+              fontWeight:900,fontSize:22,
+              borderRadius:8,flexShrink:0,
+              minWidth:54,minHeight:48,
+              alignSelf:"flex-end",
+              touchAction:"manipulation",
+            }}>
+            ➤
+          </button>
+        </div>
       </div>
     );
   }
