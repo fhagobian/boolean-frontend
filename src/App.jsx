@@ -345,7 +345,7 @@ const Login = ({onLogin}) => {
   );
 };
 
-const Sidebar = ({view,setView,user,onLogout,casos,perfil}) => {
+const Sidebar = ({view,setView,user,onLogout,casos,perfil,noLeidosChat}) => {
   const isMobile = useMobile();
   const breach=casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||"")&&c.sla_deadline&&new Date(c.sla_deadline)<new Date()).length;
   const abiertos=casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
@@ -358,7 +358,7 @@ const Sidebar = ({view,setView,user,onLogout,casos,perfil}) => {
     {id:"nuevo",         icon:"+",  emoji:"➕", label:"NUEVO",            roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
     {id:"bulk",          icon:"⬆", emoji:"📤", label:"CARGA",            roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
     {id:"analitica",     icon:"◑",  emoji:"📊", label:"ANÁLISIS",         roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
-    {id:"comunicaciones",icon:"💬", emoji:"💬", label:"CHAT",             roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
+    {id:"comunicaciones",icon:"💬", emoji:"💬", label:"CHAT",             roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"], badge:noLeidosChat||0},
     {id:"logros",        icon:"★",  emoji:"🏆", label:"LOGROS",           roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
     {id:"usuarios",      icon:"👥", emoji:"👥", label:"USUARIOS",         roles:["DIRECTOR","REGIONAL"]},
     {id:"config",        icon:"⟲", emoji:"⚙️", label:"CONFIG",           roles:["DIRECTOR"]},
@@ -5375,350 +5375,366 @@ const Comunicaciones=({user,perfil,toast})=>{
   const [loading,    setLoading]    = useState(true);
   const [enviando,   setEnviando]   = useState(false);
   const [usuarios,   setUsuarios]   = useState([]);
+  const [noLeidos,   setNoLeidos]   = useState({}); // {canal_id: count}
+  const [vistaMovil, setVistaMovil] = useState("lista"); // lista | chat
   const mensajesEndRef = useRef(null);
   const subRef = useRef(null);
+  const isMobile = useMobile();
 
-  const rol         = perfil?.rol;
-  const empresa     = perfil?.empresa_codigo;
-  const miId        = perfil?.id;
-  const miNombre    = `${perfil?.nombre||""} ${perfil?.apellido||""}`.trim();
+  const rol    = perfil?.rol;
+  const empresa= perfil?.empresa_codigo;
+  const miId   = perfil?.id;
+  const miNombre = `${perfil?.nombre||""} ${perfil?.apellido||""}`.trim();
 
   useEffect(()=>{
     supabase.from("usuarios").select("*").eq("activo",true)
-      .then(({data})=>{ setUsuarios(data||[]); });
+      .then(({data})=>setUsuarios(data||[]));
   },[]);
 
   useEffect(()=>{
-    if(!perfil || !usuarios.length) return;
+    if(!perfil||!usuarios.length) return;
     construirCanales();
-  },[perfil, usuarios]);
+  },[perfil,usuarios]);
 
-  const construirCanales = () => {
-    const lista = [];
+  const canalPrivadoId=(id1,id2)=>{
+    return `privado_${[id1,id2].sort().join("_")}`;
+  };
 
-    // ── GRUPOS POR EMPRESA ──────────────────────────────
+  const construirCanales=()=>{
+    const lista=[];
+    // Grupos por empresa
     if(rol==="DIRECTOR"){
-      // Director ve todos los grupos de empresa
       EMPRESAS.forEach(e=>{
-        const miembros = usuarios.filter(u=>u.empresa_codigo===e.codigo);
-        if(miembros.length>0){
-          lista.push({
-            id:`grupo_${e.codigo}`,
-            tipo:"grupo",
-            nombre:`🏢 Equipo ${e.nombre}`,
-            empresa:e.codigo,
-            color:e.color,
-            miembros:miembros.length,
-          });
-        }
-      });
-    } else if(rol==="REGIONAL"||rol==="SUPERVISOR"||rol==="TECNICO"){
-      // Grupo de su empresa
-      const empData = EMPRESAS.find(e=>e.codigo===empresa);
-      const miembros = usuarios.filter(u=>u.empresa_codigo===empresa);
-      if(miembros.length>0){
-        lista.push({
-          id:`grupo_${empresa}`,
-          tipo:"grupo",
-          nombre:`🏢 Equipo ${empData?.nombre||empresa}`,
-          empresa,
-          color:empData?.color||B.orange,
-          miembros:miembros.length,
+        const miembros=usuarios.filter(u=>u.empresa_codigo===e.codigo);
+        if(miembros.length>0) lista.push({
+          id:`grupo_${e.codigo}`,tipo:"grupo",
+          nombre:`🏢 Equipo ${e.nombre}`,empresa:e.codigo,
+          color:e.color,miembros:miembros.length,
         });
-      }
+      });
+    } else {
+      const empData=EMPRESAS.find(e=>e.codigo===empresa);
+      const miembros=usuarios.filter(u=>u.empresa_codigo===empresa);
+      if(miembros.length>0) lista.push({
+        id:`grupo_${empresa}`,tipo:"grupo",
+        nombre:`🏢 Equipo ${empData?.nombre||empresa}`,
+        empresa,color:empData?.color||B.orange,miembros:miembros.length,
+      });
     }
-
-    // ── CANALES PRIVADOS según rol ──────────────────────
+    // Canales privados según rol
     if(rol==="DIRECTOR"){
-      // Director ↔ cada Regional
       usuarios.filter(u=>u.rol==="REGIONAL").forEach(reg=>{
-        lista.push({
-          id:canalPrivadoId(miId, reg.id),
-          tipo:"privado",
-          nombre:`👤 ${reg.nombre} ${reg.apellido}`,
-          subtitulo:`Regional · ${reg.empresa_codigo}`,
-          contraparte:reg,
-        });
+        lista.push({id:canalPrivadoId(miId,reg.id),tipo:"privado",
+          nombre:`${reg.nombre} ${reg.apellido}`,
+          subtitulo:`Regional · ${reg.empresa_codigo}`,contraparte:reg});
       });
     }
-
     if(rol==="REGIONAL"){
-      // Regional ↔ Director
-      const dir = usuarios.find(u=>u.rol==="DIRECTOR");
-      if(dir){
-        lista.push({
-          id:canalPrivadoId(miId, dir.id),
-          tipo:"privado",
-          nombre:`👑 ${dir.nombre} ${dir.apellido}`,
-          subtitulo:"Director Operativo",
-          contraparte:dir,
-        });
-      }
-      // Regional ↔ cada Supervisor de su empresa
+      const dir=usuarios.find(u=>u.rol==="DIRECTOR");
+      if(dir) lista.push({id:canalPrivadoId(miId,dir.id),tipo:"privado",
+        nombre:`${dir.nombre} ${dir.apellido}`,subtitulo:"Director Operativo",contraparte:dir});
       usuarios.filter(u=>u.rol==="SUPERVISOR"&&u.empresa_codigo===empresa).forEach(sup=>{
-        lista.push({
-          id:canalPrivadoId(miId, sup.id),
-          tipo:"privado",
-          nombre:`👔 ${sup.nombre} ${sup.apellido}`,
-          subtitulo:"Supervisor",
-          contraparte:sup,
-        });
+        lista.push({id:canalPrivadoId(miId,sup.id),tipo:"privado",
+          nombre:`${sup.nombre} ${sup.apellido}`,subtitulo:"Supervisor",contraparte:sup});
       });
     }
-
     if(rol==="SUPERVISOR"){
-      // Supervisor ↔ Regional
-      const reg = usuarios.find(u=>u.rol==="REGIONAL"&&u.empresa_codigo===empresa);
-      if(reg){
-        lista.push({
-          id:canalPrivadoId(miId, reg.id),
-          tipo:"privado",
-          nombre:`🏢 ${reg.nombre} ${reg.apellido}`,
-          subtitulo:"Representante Regional",
-          contraparte:reg,
-        });
-      }
-      // Supervisor ↔ cada Técnico de su equipo
+      const reg=usuarios.find(u=>u.rol==="REGIONAL"&&u.empresa_codigo===empresa);
+      if(reg) lista.push({id:canalPrivadoId(miId,reg.id),tipo:"privado",
+        nombre:`${reg.nombre} ${reg.apellido}`,subtitulo:"Representante Regional",contraparte:reg});
       usuarios.filter(u=>u.rol==="TECNICO"&&u.supervisor_id===miId).forEach(tec=>{
-        lista.push({
-          id:canalPrivadoId(miId, tec.id),
-          tipo:"privado",
-          nombre:`🔧 ${tec.nombre} ${tec.apellido}`,
-          subtitulo:"Técnico de campo",
-          contraparte:tec,
-        });
+        lista.push({id:canalPrivadoId(miId,tec.id),tipo:"privado",
+          nombre:`${tec.nombre} ${tec.apellido}`,subtitulo:"Técnico de campo",contraparte:tec});
       });
     }
-
     if(rol==="TECNICO"){
-      // Técnico ↔ su Supervisor
-      const sup = usuarios.find(u=>u.id===perfil?.supervisor_id);
-      if(sup){
-        lista.push({
-          id:canalPrivadoId(miId, sup.id),
-          tipo:"privado",
-          nombre:`👔 ${sup.nombre} ${sup.apellido}`,
-          subtitulo:"Tu Supervisor",
-          contraparte:sup,
-        });
-      }
+      const sup=usuarios.find(u=>u.id===perfil?.supervisor_id);
+      if(sup) lista.push({id:canalPrivadoId(miId,sup.id),tipo:"privado",
+        nombre:`${sup.nombre} ${sup.apellido}`,subtitulo:"Tu Supervisor",contraparte:sup});
     }
-
     setCanales(lista);
-    if(lista.length>0 && !canalAct) abrirCanal(lista[0]);
+    // Cargar contadores de no leídos
+    cargarNoLeidos(lista);
     setLoading(false);
   };
 
-  const canalPrivadoId = (id1, id2) => {
-    const sorted = [id1, id2].sort();
-    return `privado_${sorted[0]}_${sorted[1]}`;
+  const cargarNoLeidos=async(lista)=>{
+    const storageKey=`boolean_chat_leido_${miId}`;
+    let ultimosLeidos={};
+    try{ ultimosLeidos=JSON.parse(localStorage.getItem(storageKey)||"{}"); }catch{}
+    const counts={};
+    for(const c of lista){
+      const {count}=await supabase.from("mensajes_chat")
+        .select("*",{count:"exact",head:true})
+        .eq("canal_id",c.id)
+        .neq("autor_id",miId)
+        .gt("created_at",ultimosLeidos[c.id]||"2000-01-01");
+      counts[c.id]=count||0;
+    }
+    setNoLeidos(counts);
   };
 
-  const abrirCanal = async (canal) => {
+  const marcarLeido=(canalId)=>{
+    const storageKey=`boolean_chat_leido_${miId}`;
+    let ultimosLeidos={};
+    try{ ultimosLeidos=JSON.parse(localStorage.getItem(storageKey)||"{}"); }catch{}
+    ultimosLeidos[canalId]=new Date().toISOString();
+    try{ localStorage.setItem(storageKey,JSON.stringify(ultimosLeidos)); }catch{}
+    setNoLeidos(prev=>({...prev,[canalId]:0}));
+  };
+
+  const abrirCanal=async(canal)=>{
     setCanalAct(canal);
-    // Cancelar suscripción anterior
+    if(isMobile) setVistaMovil("chat");
+    // Cancelar sub anterior
     if(subRef.current){ supabase.removeChannel(subRef.current); subRef.current=null; }
     // Cargar mensajes
-    const {data} = await supabase.from("mensajes_chat")
-      .select("*").eq("canal_id", canal.id)
-      .order("created_at", {ascending:true}).limit(100);
+    const {data}=await supabase.from("mensajes_chat")
+      .select("*").eq("canal_id",canal.id)
+      .order("created_at",{ascending:true}).limit(100);
     setMensajes(data||[]);
-    // Suscripción realtime
-    const sub = supabase.channel(`chat_${canal.id}`)
-      .on("postgres_changes",{event:"INSERT",schema:"public",table:"mensajes_chat",
-        filter:`canal_id=eq.${canal.id}`},
-        payload=>{ setMensajes(prev=>[...prev, payload.new]); }
-      ).subscribe();
-    subRef.current = sub;
+    marcarLeido(canal.id);
     setTimeout(()=>mensajesEndRef.current?.scrollIntoView({behavior:"smooth"}),100);
+    // Suscripción realtime
+    const sub=supabase.channel(`chat_${canal.id}_${Date.now()}`)
+      .on("postgres_changes",{event:"INSERT",schema:"public",
+        table:"mensajes_chat",filter:`canal_id=eq.${canal.id}`},
+        payload=>{
+          setMensajes(prev=>{
+            if(prev.find(m=>m.id===payload.new.id)) return prev;
+            return [...prev,payload.new];
+          });
+          marcarLeido(canal.id);
+        }
+      ).subscribe();
+    subRef.current=sub;
   };
 
   useEffect(()=>{
     mensajesEndRef.current?.scrollIntoView({behavior:"smooth"});
   },[mensajes]);
 
-  const enviar = async () => {
+  const enviar=async()=>{
     if(!texto.trim()||!canalAct||enviando) return;
     setEnviando(true);
-    await supabase.from("mensajes_chat").insert({
-      canal_id: canalAct.id,
-      tipo_canal: canalAct.tipo,
-      autor_id: miId,
-      autor_email: user?.email,
-      autor_nombre: miNombre,
-      texto: texto.trim(),
-      created_at: new Date().toISOString(),
-    });
+    const msg={
+      canal_id:canalAct.id,
+      tipo_canal:canalAct.tipo,
+      autor_id:miId,
+      autor_email:user?.email,
+      autor_nombre:miNombre,
+      texto:texto.trim(),
+      created_at:new Date().toISOString(),
+    };
+    // Optimistic update
+    const tmpId=`tmp_${Date.now()}`;
+    setMensajes(prev=>[...prev,{...msg,id:tmpId}]);
     setTexto("");
+    setTimeout(()=>mensajesEndRef.current?.scrollIntoView({behavior:"smooth"}),50);
+    await supabase.from("mensajes_chat").insert(msg);
     setEnviando(false);
   };
 
-  const ROL_COLOR_MAP = {DIRECTOR:B.orange,REGIONAL:B.blue,SUPERVISOR:B.purple,TECNICO:B.green};
+  const totalNoLeidos=Object.values(noLeidos).reduce((a,b)=>a+b,0);
+  const ROL_COLOR_MAP={DIRECTOR:B.orange,REGIONAL:B.blue,SUPERVISOR:B.purple,TECNICO:B.green};
 
   if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh"}}><Spin s={36}/></div>;
 
-  return (
-    <div style={{display:"flex",height:"calc(100vh - 120px)",gap:0,
-      background:B.void,border:`1px solid ${B.border}`}}>
-
-      {/* Panel izquierdo — lista de canales */}
-      <div style={{width:260,flexShrink:0,borderRight:`1px solid ${B.border}`,
-        display:"flex",flexDirection:"column",background:B.panel}}>
-        <div style={{padding:"14px 16px",borderBottom:`1px solid ${B.border}`}}>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,color:B.orange}}>
-            💬 COMUNICACIONES
-          </div>
-          <div style={{fontSize:10,color:B.t3,marginTop:2}}>{canales.length} canales disponibles</div>
+  // ── PANEL LISTA DE CANALES ───────────────────────────────
+  const PanelLista=()=>(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      <div style={{padding:"14px 16px",borderBottom:`1px solid ${B.border}`,background:B.panel,flexShrink:0}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:B.orange}}>
+          💬 COMUNICACIONES
+          {totalNoLeidos>0&&<span style={{
+            marginLeft:8,background:B.red,color:"#fff",
+            borderRadius:10,padding:"1px 7px",fontSize:11,fontWeight:900,
+          }}>{totalNoLeidos}</span>}
         </div>
-        <div style={{flex:1,overflowY:"auto"}}>
-          {/* Grupos */}
-          {canales.filter(c=>c.tipo==="grupo").length>0&&(
-            <div>
-              <div style={{padding:"8px 14px 4px",fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>
-                GRUPOS
-              </div>
-              {canales.filter(c=>c.tipo==="grupo").map(c=>(
+        <div style={{fontSize:10,color:B.t3,marginTop:2}}>{canales.length} canales</div>
+      </div>
+      <div style={{flex:1,overflowY:"auto"}}>
+        {/* Grupos */}
+        {canales.filter(c=>c.tipo==="grupo").length>0&&(
+          <div>
+            <div style={{padding:"8px 14px 4px",fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>GRUPOS</div>
+            {canales.filter(c=>c.tipo==="grupo").map(c=>{
+              const nl=noLeidos[c.id]||0;
+              return(
                 <button key={c.id} onClick={()=>abrirCanal(c)}
-                  style={{width:"100%",padding:"10px 16px",textAlign:"left",
+                  style={{width:"100%",padding:"12px 16px",textAlign:"left",
                     background:canalAct?.id===c.id?B.orangeDim:"transparent",
                     border:"none",borderLeft:`3px solid ${canalAct?.id===c.id?B.orange:"transparent"}`,
-                    cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
-                  <div style={{width:36,height:36,borderRadius:"50%",flexShrink:0,
+                    cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{width:40,height:40,borderRadius:"50%",flexShrink:0,
                     background:c.color+"22",border:`2px solid ${c.color}`,
-                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
-                    🏢
-                  </div>
-                  <div style={{minWidth:0}}>
-                    <div style={{fontSize:12,fontWeight:700,color:canalAct?.id===c.id?B.orange:B.t1,
+                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏢</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:700,
+                      color:canalAct?.id===c.id?B.orange:B.t1,
                       overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nombre}</div>
                     <div style={{fontSize:10,color:B.t3}}>{c.miembros} miembros</div>
                   </div>
+                  {nl>0&&<span style={{background:B.orange,color:"#050507",borderRadius:10,
+                    padding:"2px 7px",fontSize:11,fontWeight:900,flexShrink:0}}>{nl}</span>}
                 </button>
-              ))}
-            </div>
-          )}
-          {/* Privados */}
-          {canales.filter(c=>c.tipo==="privado").length>0&&(
-            <div>
-              <div style={{padding:"8px 14px 4px",fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>
-                MENSAJES DIRECTOS
-              </div>
-              {canales.filter(c=>c.tipo==="privado").map(c=>{
-                const initials=`${(c.contraparte?.nombre||"?")[0]}${(c.contraparte?.apellido||"?")[0]}`.toUpperCase();
-                const rolColor=ROL_COLOR_MAP[c.contraparte?.rol]||B.t3;
-                return(
-                  <button key={c.id} onClick={()=>abrirCanal(c)}
-                    style={{width:"100%",padding:"10px 16px",textAlign:"left",
-                      background:canalAct?.id===c.id?B.orangeDim:"transparent",
-                      border:"none",borderLeft:`3px solid ${canalAct?.id===c.id?B.orange:"transparent"}`,
-                      cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{width:36,height:36,borderRadius:"50%",flexShrink:0,
+              );
+            })}
+          </div>
+        )}
+        {/* Privados */}
+        {canales.filter(c=>c.tipo==="privado").length>0&&(
+          <div>
+            <div style={{padding:"8px 14px 4px",fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>MENSAJES DIRECTOS</div>
+            {canales.filter(c=>c.tipo==="privado").map(c=>{
+              const nl=noLeidos[c.id]||0;
+              const rolColor=ROL_COLOR_MAP[c.contraparte?.rol]||B.t3;
+              const initials=`${(c.contraparte?.nombre||"?")[0]}${(c.contraparte?.apellido||"?")[0]}`.toUpperCase();
+              return(
+                <button key={c.id} onClick={()=>abrirCanal(c)}
+                  style={{width:"100%",padding:"12px 16px",textAlign:"left",
+                    background:canalAct?.id===c.id?B.orangeDim:"transparent",
+                    border:"none",borderLeft:`3px solid ${canalAct?.id===c.id?B.orange:"transparent"}`,
+                    cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{position:"relative",flexShrink:0}}>
+                    <div style={{width:40,height:40,borderRadius:"50%",
                       background:`${rolColor}22`,border:`2px solid ${rolColor}`,
                       display:"flex",alignItems:"center",justifyContent:"center",
-                      fontSize:12,fontWeight:900,color:rolColor,fontFamily:"'Orbitron',sans-serif"}}>
+                      fontSize:13,fontWeight:900,color:rolColor,fontFamily:"'Orbitron',sans-serif"}}>
                       {initials}
                     </div>
-                    <div style={{minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:700,color:canalAct?.id===c.id?B.orange:B.t1,
-                        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nombre}</div>
-                      <div style={{fontSize:10,color:B.t3}}>{c.subtitulo}</div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          {canales.length===0&&(
-            <div style={{padding:24,textAlign:"center",color:B.t3,fontSize:12}}>
-              Sin canales disponibles
-            </div>
-          )}
+                    {nl>0&&<span style={{position:"absolute",top:-4,right:-4,
+                      background:B.red,color:"#fff",borderRadius:"50%",
+                      width:18,height:18,fontSize:10,fontWeight:900,
+                      display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      {nl>9?"9+":nl}
+                    </span>}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:nl>0?700:600,
+                      color:canalAct?.id===c.id?B.orange:nl>0?B.t1:B.t2,
+                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nombre}</div>
+                    <div style={{fontSize:10,color:B.t3}}>{c.subtitulo}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {canales.length===0&&(
+          <div style={{padding:24,textAlign:"center",color:B.t3,fontSize:12}}>Sin canales disponibles</div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── PANEL CHAT ───────────────────────────────────────────
+  const PanelChat=()=>(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      {/* Header */}
+      <div style={{padding:"12px 16px",borderBottom:`1px solid ${B.border}`,
+        display:"flex",alignItems:"center",gap:12,background:B.panel,flexShrink:0}}>
+        {isMobile&&(
+          <button onClick={()=>{setVistaMovil("lista");setCanalAct(null);}}
+            style={{background:"none",border:`1px solid ${B.border}`,color:B.t2,
+              cursor:"pointer",padding:"8px 14px",fontSize:14,borderRadius:2,flexShrink:0}}>
+            ←
+          </button>
+        )}
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:14,fontWeight:700,color:B.t1,
+            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {canalAct?.nombre}
+          </div>
+          <div style={{fontSize:10,color:B.t3}}>
+            {canalAct?.tipo==="grupo"?`${canalAct?.miembros} miembros`:canalAct?.subtitulo}
+          </div>
         </div>
       </div>
-
-      {/* Panel derecho — mensajes */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
-        {canalAct ? (
-          <>
-            {/* Header del canal */}
-            <div style={{padding:"12px 16px",borderBottom:`1px solid ${B.border}`,
-              display:"flex",alignItems:"center",gap:12,background:B.panel,flexShrink:0}}>
-              <div>
-                <div style={{fontSize:14,fontWeight:700,color:B.t1}}>{canalAct.nombre}</div>
-                <div style={{fontSize:10,color:B.t3}}>
-                  {canalAct.tipo==="grupo"?`${canalAct.miembros} miembros · Grupo de empresa`:canalAct.subtitulo}
+      {/* Mensajes */}
+      <div style={{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:10}}>
+        {mensajes.length===0&&(
+          <div style={{textAlign:"center",color:B.t3,padding:40,fontSize:13}}>
+            ¡Empezá la conversación!
+          </div>
+        )}
+        {mensajes.map(m=>{
+          const esMio=m.autor_id===miId;
+          const usu=usuarios.find(u=>u.id===m.autor_id);
+          const rolColor=ROL_COLOR_MAP[usu?.rol]||B.t3;
+          return(
+            <div key={m.id} style={{display:"flex",justifyContent:esMio?"flex-end":"flex-start",gap:8}}>
+              {!esMio&&(
+                <div style={{width:30,height:30,borderRadius:"50%",flexShrink:0,
+                  background:`${rolColor}22`,border:`1px solid ${rolColor}`,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:11,fontWeight:900,color:rolColor,alignSelf:"flex-end"}}>
+                  {(m.autor_nombre||"?")[0]}
+                </div>
+              )}
+              <div style={{maxWidth:"75%"}}>
+                {!esMio&&<div style={{fontSize:10,color:rolColor,fontWeight:700,marginBottom:3,paddingLeft:4}}>
+                  {m.autor_nombre||m.autor_email}
+                </div>}
+                <div style={{
+                  padding:"10px 14px",
+                  background:esMio?B.orange+"33":B.card,
+                  border:`1px solid ${esMio?B.orange+"55":B.border}`,
+                  borderRadius:esMio?"16px 16px 4px 16px":"16px 16px 16px 4px",
+                  fontSize:15,color:B.t1,lineHeight:1.5,
+                  opacity:m.id?.startsWith("tmp_")?0.7:1,
+                }}>
+                  {m.texto}
+                </div>
+                <div style={{fontSize:9,color:B.t3,marginTop:3,
+                  textAlign:esMio?"right":"left",paddingLeft:4,paddingRight:4}}>
+                  {new Date(m.created_at).toLocaleTimeString("es-UY",
+                    {hour:"2-digit",minute:"2-digit",hour12:false})}
                 </div>
               </div>
             </div>
+          );
+        })}
+        <div ref={mensajesEndRef}/>
+      </div>
+      {/* Input */}
+      <div style={{padding:"10px 12px",borderTop:`1px solid ${B.border}`,
+        display:"flex",gap:8,background:B.panel,flexShrink:0}}>
+        <input className="field" style={{flex:1,fontSize:15,padding:"12px 14px"}}
+          placeholder="Escribí un mensaje..."
+          value={texto} onChange={e=>setTexto(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&enviar()}
+          disabled={enviando}/>
+        <button onClick={enviar} disabled={!texto.trim()||enviando}
+          style={{padding:"0 18px",background:texto.trim()?B.orange:"#333",
+            border:"none",cursor:texto.trim()?"pointer":"not-allowed",
+            color:texto.trim()?"#050507":"#666",fontWeight:900,fontSize:20,
+            borderRadius:2,flexShrink:0,minWidth:50}}>
+          ➤
+        </button>
+      </div>
+    </div>
+  );
 
-            {/* Mensajes */}
-            <div style={{flex:1,overflowY:"auto",padding:16,display:"flex",flexDirection:"column",gap:8}}>
-              {mensajes.length===0&&(
-                <div style={{textAlign:"center",color:B.t3,padding:40,fontSize:13}}>
-                  Sin mensajes aún. ¡Empezá la conversación!
-                </div>
-              )}
-              {mensajes.map(m=>{
-                const esMio = m.autor_id===miId;
-                const usu = usuarios.find(u=>u.id===m.autor_id);
-                const rolColor = ROL_COLOR_MAP[usu?.rol]||B.t3;
-                return(
-                  <div key={m.id} style={{display:"flex",
-                    justifyContent:esMio?"flex-end":"flex-start",gap:8}}>
-                    {!esMio&&(
-                      <div style={{width:28,height:28,borderRadius:"50%",flexShrink:0,
-                        background:`${rolColor}22`,border:`1px solid ${rolColor}`,
-                        display:"flex",alignItems:"center",justifyContent:"center",
-                        fontSize:10,fontWeight:900,color:rolColor,alignSelf:"flex-end"}}>
-                        {(m.autor_nombre||"?")[0]}
-                      </div>
-                    )}
-                    <div style={{maxWidth:"70%"}}>
-                      {!esMio&&(
-                        <div style={{fontSize:10,color:rolColor,fontWeight:700,marginBottom:3,paddingLeft:4}}>
-                          {m.autor_nombre||m.autor_email}
-                        </div>
-                      )}
-                      <div style={{
-                        padding:"10px 14px",
-                        background:esMio?B.orange+"22":B.card,
-                        border:`1px solid ${esMio?B.orange+"44":B.border}`,
-                        borderRadius:esMio?"12px 12px 2px 12px":"12px 12px 12px 2px",
-                        fontSize:14,color:B.t1,lineHeight:1.5,
-                      }}>
-                        {m.texto}
-                      </div>
-                      <div style={{fontSize:9,color:B.t3,marginTop:3,
-                        textAlign:esMio?"right":"left",paddingLeft:4,paddingRight:4}}>
-                        {new Date(m.created_at).toLocaleTimeString("es-UY",{hour:"2-digit",minute:"2-digit",hour12:false})}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={mensajesEndRef}/>
-            </div>
+  // ── LAYOUT ───────────────────────────────────────────────
+  if(isMobile){
+    return (
+      <div style={{height:"calc(100vh - 80px)",display:"flex",flexDirection:"column"}}>
+        {vistaMovil==="lista" ? <PanelLista/> : <PanelChat/>}
+      </div>
+    );
+  }
 
-            {/* Input de mensaje */}
-            <div style={{padding:"12px 16px",borderTop:`1px solid ${B.border}`,
-              display:"flex",gap:10,background:B.panel,flexShrink:0}}>
-              <input className="field" style={{flex:1,fontSize:15}}
-                placeholder="Escribí un mensaje..."
-                value={texto} onChange={e=>setTexto(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&enviar()}
-                disabled={enviando}/>
-              <button onClick={enviar} disabled={!texto.trim()||enviando}
-                style={{padding:"0 20px",background:texto.trim()?B.orange:"#333",
-                  border:"none",cursor:texto.trim()?"pointer":"not-allowed",
-                  color:texto.trim()?"#050507":"#666",
-                  fontWeight:900,fontSize:18,flexShrink:0,borderRadius:2}}>
-                ➤
-              </button>
-            </div>
-          </>
-        ) : (
-          <div style={{flex:1,display:"flex",alignItems:"center",
-            justifyContent:"center",flexDirection:"column",gap:14,color:B.t3}}>
+  return (
+    <div style={{display:"flex",height:"calc(100vh - 120px)",
+      border:`1px solid ${B.border}`,background:B.void}}>
+      <div style={{width:280,flexShrink:0,borderRight:`1px solid ${B.border}`}}>
+        <PanelLista/>
+      </div>
+      <div style={{flex:1,minWidth:0}}>
+        {canalAct ? <PanelChat/> : (
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",
+            height:"100%",flexDirection:"column",gap:14,color:B.t3}}>
             <div style={{fontSize:48}}>💬</div>
             <div style={{fontSize:14}}>Seleccioná un canal para comenzar</div>
           </div>
@@ -6694,7 +6710,17 @@ const useRecordatorios = (casos, user, minutosAntes) => {
 export default function App(){
   const [session,setSession]=useState(null);
   const [loading,setLoading]=useState(true);
-  const [view,setView]=useState("mision");
+  const [view,setView]=useState(()=>{
+    try{
+      const saved=localStorage.getItem("boolean_view");
+      return saved||"mision";
+    }catch{ return "mision"; }
+  });
+
+  const setViewPersist = (v) => {
+    setView(v);
+    try{ localStorage.setItem("boolean_view",v); }catch{}
+  };
   const [toastMsg,setToastMsg]=useState(null);
   const [casoDetalle,setCasoDetalle]=useState(null);
   const [casos,setCasos]=useState([]);
@@ -6708,6 +6734,20 @@ export default function App(){
   },[]);
 
   const sessionLoadedRef = useRef(false);
+  const [noLeidosChat, setNoLeidosChat] = useState(0);
+
+  // Calcular mensajes no leídos para el badge del menú
+  useEffect(()=>{
+    if(!perfil) return;
+    const storageKey=`boolean_chat_leido_${perfil.id}`;
+    let ultimosLeidos={};
+    try{ ultimosLeidos=JSON.parse(localStorage.getItem(storageKey)||"{}"); }catch{}
+    const ultimoGlobal = Object.values(ultimosLeidos).sort().pop()||"2000-01-01";
+    supabase.from("mensajes_chat").select("*",{count:"exact",head:true})
+      .neq("autor_id",perfil.id)
+      .gt("created_at",ultimoGlobal)
+      .then(({count})=>setNoLeidosChat(count||0));
+  },[perfil]);
 
   useEffect(()=>{
     if(!session) return;
@@ -6752,7 +6792,7 @@ export default function App(){
       TECNICO:    ["mision","ruta","casos","comunicaciones","logros","detalle"],
     };
     const permitidos=PERMISOS[perfil.rol]||PERMISOS.DIRECTOR;
-    if(!permitidos.includes(view)) setView("mision");
+    if(!permitidos.includes(view)) setViewPersist("mision");
   },[perfil,view,casoDetalle]);
 
   const toast=(msg,dur=3000)=>{
@@ -6805,12 +6845,18 @@ export default function App(){
     <div style={{minHeight:"100vh",background:B.bg,color:B.t1,fontFamily:"'Rajdhani',sans-serif",display:"flex",flexDirection:"column"}}>
       <Ticker casos={casos}/>
       <div style={{display:"flex",flex:1,overflow:"hidden",height:"calc(100vh - 24px)"}}>
-        <Sidebar view={view} setView={v=>{setView(v);setCasoDetalle(null);}} user={user} onLogout={()=>supabase.auth.signOut()} casos={casos} perfil={perfil}/>
+        <Sidebar view={view} setView={v=>{setViewPersist(v);setCasoDetalle(null);}} user={user} onLogout={async()=>{
+          setCasos([]); setPerfil(null); setCasoDetalle(null);
+          setViewPersist("mision");
+          sessionLoadedRef.current = false;
+          try{ localStorage.removeItem("boolean_view"); }catch{}
+          await supabase.auth.signOut();
+        }} casos={casos} perfil={perfil} noLeidosChat={noLeidosChat}/>
         <main className={window.innerWidth<768?"mobile-main":""} style={{flex:1,overflowY:"auto",padding:window.innerWidth<768?"16px 14px":"24px 28px"}}>
           {view==="mision"&&!casoDetalle&&<Mision casos={casos} setView={setView} user={user} perfil={perfil}/>}
           {view==="ruta"&&<MiRutaDelDia user={user} toast={toast} perfil={perfil}/>}
-          {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);}} onNew={()=>setView("nuevo")}/>}
-          {view==="nuevo"&&<NuevoCaso onCancel={()=>setView("casos")} loading={false} onSave={async(f)=>{
+          {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);}} onNew={()=>setViewPersist("nuevo")}/>}
+          {view==="nuevo"&&<NuevoCaso onCancel={()=>setViewPersist("casos")} loading={false} onSave={async(f)=>{
             const tp=TIPOS_PROCESO.find(t=>t.codigo===f.tipo_proceso);
             const instrEsp = f.tiene_instrucciones && f.instrucciones_texto?.trim()
               ? { texto: f.instrucciones_texto.trim(), adjuntos: [], autor: user.email, ts: new Date().toISOString(), editado: false }
@@ -6835,7 +6881,7 @@ export default function App(){
               ]
             });
             if(error){toast("Error: "+error.message);}
-            else{toast(`✓ Caso creado · +${tp?.xp||50} XP`);await recargarCasos();setView("casos");}
+            else{toast(`✓ Caso creado · +${tp?.xp||50} XP`);await recargarCasos();setViewPersist("casos");}
           }}/>}
           {casoDetalle&&<CasoDetalle
             caso={casoDetalle}
@@ -6844,7 +6890,7 @@ export default function App(){
             perfil={perfil}
             onBack={async()=>{
               setCasoDetalle(null);
-              setView("casos");
+              setViewPersist("casos");
               await recargarCasos();
             }}
             onUpdate={(casoActualizado)=>{
