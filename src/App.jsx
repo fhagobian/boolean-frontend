@@ -2417,8 +2417,8 @@ const OverlayEditarCaso = ({ caso, user, perfil, onVolver, onGuardar }) => {
       <div style={{padding:"16px 20px",borderBottom:`1px solid ${B.border}`,
         display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
         <button onClick={onVolver}
-          style={{background:"none",border:`1px solid ${B.border}`,color:"#888",
-            cursor:"pointer",padding:"10px 18px",fontSize:14,borderRadius:2}}>
+          style={{background:`${B.orange}22`,border:`2px solid ${B.orange}`,color:B.orange,
+            cursor:"pointer",padding:"10px 18px",fontSize:14,fontWeight:700,borderRadius:4}}>
           ← VOLVER
         </button>
         <div>
@@ -2860,8 +2860,8 @@ const GestorMisiones = ({ toast }) => {
     <div>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
         <button onClick={()=>setEditando(null)}
-          style={{background:"none",border:`1px solid ${B.border}`,color:B.t2,
-            cursor:"pointer",padding:"6px 12px",fontSize:11,fontFamily:"'Orbitron',sans-serif"}}>
+          style={{background:`${B.orange}22`,border:`2px solid ${B.orange}`,color:B.orange,
+            cursor:"pointer",padding:"10px 18px",fontSize:13,fontWeight:700,borderRadius:4}}>
           ← VOLVER
         </button>
         <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:B.t1}}>
@@ -5576,7 +5576,15 @@ const Comunicaciones=({user,perfil,toast})=>{
   const [loading,   setLoading]   = useState(true);
   const [usuarios,  setUsuarios]  = useState([]);
   const [noLeidos,  setNoLeidos]  = useState({});
-  const [vistaMovil,setVistaMovil]= useState("lista");
+  const [vistaMovil,setVistaMovil]= useState(()=>{
+    // Restaurar vista al refrescar
+    try{ return localStorage.getItem(`boolean_chat_vista_${perfil?.id}`)||"lista"; }
+    catch{ return "lista"; }
+  });
+  const [canalActId, setCanalActId] = useState(()=>{
+    try{ return localStorage.getItem(`boolean_chat_canal_${perfil?.id}`)||null; }
+    catch{ return null; }
+  });
   const subRef = useRef(null);
   const isMobile = useMobile();
 
@@ -5645,6 +5653,13 @@ const Comunicaciones=({user,perfil,toast})=>{
     setCanales(lista);
     cargarNoLeidos(lista);
     setLoading(false);
+    // Restaurar canal activo si existía
+    if(canalActId){
+      const canalGuardado = lista.find(c=>c.id===canalActId);
+      if(canalGuardado){
+        setTimeout(()=>abrirCanal(canalGuardado), 100);
+      }
+    }
   };
 
   const cargarNoLeidos=async(lista)=>{
@@ -5673,7 +5688,13 @@ const Comunicaciones=({user,perfil,toast})=>{
 
   const abrirCanal=async(canal)=>{
     setCanalAct(canal);
+    setCanalActId(canal.id);
     if(isMobile) setVistaMovil("chat");
+    // Persistir canal activo
+    try{
+      localStorage.setItem(`boolean_chat_canal_${miId}`, canal.id);
+      localStorage.setItem(`boolean_chat_vista_${miId}`, "chat");
+    }catch{}
     if(subRef.current){ supabase.removeChannel(subRef.current); subRef.current=null; }
     const {data}=await supabase.from("mensajes_chat")
       .select("*").eq("canal_id",canal.id)
@@ -5682,15 +5703,23 @@ const Comunicaciones=({user,perfil,toast})=>{
     marcarLeido(canal.id);
     const sub=supabase.channel(`chat_${canal.id}_${Date.now()}`)
       .on("postgres_changes",{event:"INSERT",schema:"public",
-        table:"mensajes_chat",filter:`canal_id=eq.${canal.id}`},
+        table:"mensajes_chat"},
         payload=>{
+          // Filtrar en el cliente para mayor confiabilidad
+          if(payload.new.canal_id !== canal.id) return;
           setMensajes(prev=>{
-            if(prev.find(m=>m.id===payload.new.id)) return prev;
-            return [...prev,payload.new];
+            if(prev.find(m=>m.id===payload.new.id||m.id===`tmp_${payload.new.id}`)) return prev;
+            // Reemplazar mensaje temporal si existe
+            const sinTmp = prev.filter(m=>!m.id?.startsWith("tmp_")||m.texto!==payload.new.texto);
+            return [...sinTmp, payload.new];
           });
           marcarLeido(canal.id);
         }
-      ).subscribe();
+      ).subscribe((status)=>{
+        if(status==="SUBSCRIBED"){
+          console.log("Chat realtime conectado para canal:", canal.id);
+        }
+      });
     subRef.current=sub;
   };
 
@@ -5717,12 +5746,19 @@ const Comunicaciones=({user,perfil,toast})=>{
     return (
       <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,
         display:"flex",flexDirection:"column",background:"#050507",zIndex:50}}>
-        {/* Header con botón volver */}
+        {/* Header con botón volver y miembros */}
         <div style={{padding:"12px 16px",borderBottom:"1px solid #1a1a1a",
           display:"flex",alignItems:"center",gap:12,background:"#0A0A0F",flexShrink:0}}>
-          <button onClick={()=>{setVistaMovil("lista");setCanalAct(null);}}
-            style={{background:"none",border:"1px solid #2a2a2a",color:"#888",
-              cursor:"pointer",padding:"10px 16px",fontSize:16,borderRadius:4,flexShrink:0}}>
+          <button onClick={()=>{
+            setVistaMovil("lista");setCanalAct(null);setCanalActId(null);
+            try{
+              localStorage.setItem(`boolean_chat_vista_${miId}`,"lista");
+              localStorage.removeItem(`boolean_chat_canal_${miId}`);
+            }catch{}
+          }}
+            style={{background:"#FF6B0022",border:"2px solid #FF6B00",
+              color:"#FF6B00",cursor:"pointer",padding:"10px 16px",
+              fontSize:16,borderRadius:4,flexShrink:0,fontWeight:700}}>
             ←
           </button>
           <div style={{flex:1,minWidth:0}}>
@@ -5730,8 +5766,12 @@ const Comunicaciones=({user,perfil,toast})=>{
               overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
               {canalAct?.nombre}
             </div>
-            <div style={{fontSize:10,color:"#555"}}>
-              {canalAct?.tipo==="grupo"?`${canalAct?.miembros} miembros`:canalAct?.subtitulo}
+            {/* Miembros del canal */}
+            <div style={{fontSize:10,color:"#555",marginTop:2}}>
+              {canalAct?.tipo==="grupo"
+                ? `${canalAct?.miembros} miembros · ${usuarios.filter(u=>u.empresa_codigo===canalAct?.empresa).map(u=>`${u.nombre}`).slice(0,3).join(", ")}${canalAct?.miembros>3?"...":""}`
+                : canalAct?.subtitulo
+              }
             </div>
           </div>
         </div>
