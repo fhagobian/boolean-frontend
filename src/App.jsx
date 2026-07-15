@@ -301,8 +301,26 @@ const Modal = ({title,onClose,children,width=680}) => (
     </div>
   </div>
 );
+const BtnVolver = ({onClick, label="← VOLVER"}) => (
+  <button onClick={onClick} style={{
+    background:"#FF6B0022",
+    border:"2px solid #FF6B00",
+    color:"#FF6B00",
+    cursor:"pointer",
+    padding:"10px 20px",
+    fontSize:14,
+    fontWeight:700,
+    fontFamily:"'Orbitron',sans-serif",
+    borderRadius:4,
+    letterSpacing:".04em",
+    display:"flex",
+    alignItems:"center",
+    gap:8,
+    transition:"all .15s",
+  }}>{label}</button>
+);
+
 const Ticker = ({casos}) => {
-  const breach=casos.filter(c=>c.sla_deadline&&new Date(c.sla_deadline)<new Date()&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
   const items=[`◈ ${casos.length} casos en el sistema`,`⚠ ${breach} casos con SLA vencido`,`✓ ${casos.filter(c=>c.estado==="FINALIZADO").length} casos resueltos`,`⚙ ${casos.filter(c=>c.estado==="EN_PROGRESO").length} en progreso`,`★ BOOLEAN · La lógica detrás de toda la operación`];
   const full=[...items,...items];
   return (
@@ -5391,31 +5409,75 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
 const ChatInput = ({ onEnviar }) => {
   const [texto, setTexto] = useState("");
   const ref = useRef(null);
+
   const enviar = () => {
-    if(!texto.trim()) return;
-    onEnviar(texto.trim());
+    const t = texto.trim();
+    if(!t) return;
+    onEnviar(t);
     setTexto("");
-    setTimeout(()=>ref.current?.focus(), 30);
+    // Mantener foco sin causar re-render del padre
+    requestAnimationFrame(()=>ref.current?.focus());
   };
+
   return (
-    <div style={{padding:"10px 12px",borderTop:"1px solid #1a1a1a",
-      display:"flex",gap:8,background:"#0A0A0F",flexShrink:0}}>
-      <input ref={ref}
-        style={{flex:1,fontSize:16,padding:"14px",background:"#0e0e14",
-          border:"1px solid #2a2a2a",color:"#ccc",borderRadius:4,
-          outline:"none",fontFamily:"inherit",WebkitAppearance:"none"}}
+    <div style={{
+      padding:"10px 12px",
+      borderTop:"2px solid #1a1a1a",
+      display:"flex",gap:8,
+      background:"#0A0A0F",
+      flexShrink:0,
+      // Evitar que el teclado de Android desplace el contenido
+      position:"relative",
+      zIndex:1,
+    }}>
+      <textarea
+        ref={ref}
+        rows={1}
+        style={{
+          flex:1,fontSize:16,padding:"12px 14px",
+          background:"#141420",
+          border:"2px solid #2a2a2a",
+          color:"#fff",borderRadius:8,
+          outline:"none",fontFamily:"inherit",
+          resize:"none",lineHeight:1.4,
+          maxHeight:100,overflowY:"auto",
+          WebkitUserSelect:"text",
+          // Evitar zoom en iOS/Android al enfocar
+          fontSize:"16px",
+        }}
         placeholder="Escribí un mensaje..."
         value={texto}
-        onChange={e=>setTexto(e.target.value)}
-        onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();enviar();}}}
-        autoComplete="off" autoCorrect="off" spellCheck="false"
+        onChange={e=>{
+          setTexto(e.target.value);
+          // Auto-resize
+          e.target.style.height="auto";
+          e.target.style.height=Math.min(e.target.scrollHeight,100)+"px";
+        }}
+        onKeyDown={e=>{
+          if(e.key==="Enter"&&!e.shiftKey){
+            e.preventDefault();
+            enviar();
+          }
+        }}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck="false"
         enterKeyHint="send"
       />
-      <button onClick={enviar} disabled={!texto.trim()}
-        style={{padding:"0 20px",background:texto.trim()?"#FF6B00":"#333",
-          border:"none",cursor:texto.trim()?"pointer":"not-allowed",
-          color:texto.trim()?"#050507":"#666",fontWeight:900,
-          fontSize:22,borderRadius:4,flexShrink:0,minWidth:54}}>
+      <button
+        onClick={enviar}
+        disabled={!texto.trim()}
+        style={{
+          padding:"0 20px",
+          background:texto.trim()?"#FF6B00":"#1a1a1a",
+          border:`2px solid ${texto.trim()?"#FF6B00":"#2a2a2a"}`,
+          cursor:texto.trim()?"pointer":"not-allowed",
+          color:texto.trim()?"#050507":"#444",
+          fontWeight:900,fontSize:22,
+          borderRadius:8,flexShrink:0,
+          minWidth:54,alignSelf:"flex-end",
+          minHeight:48,
+        }}>
         ➤
       </button>
     </div>
@@ -5586,7 +5648,34 @@ const Comunicaciones=({user,perfil,toast})=>{
     catch{ return null; }
   });
   const subRef = useRef(null);
+  const canalActRef = useRef(null); // track current canal for filtering
   const isMobile = useMobile();
+
+  // Suscripción GLOBAL única — filtra por canal activo en el cliente
+  useEffect(()=>{
+    const sub = supabase.channel("chat_global_boolean")
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"mensajes_chat"},
+        payload=>{
+          const canalActual = canalActRef.current;
+          if(!canalActual) return;
+          if(payload.new.canal_id !== canalActual.id) return;
+          setMensajes(prev=>{
+            // Evitar duplicados
+            if(prev.find(m=>m.id===payload.new.id)) return prev;
+            // Reemplazar mensaje optimista si tiene el mismo texto y autor
+            const filtrado = prev.filter(m=>
+              !(m.id?.startsWith("tmp_") &&
+                m.texto===payload.new.texto &&
+                m.autor_id===payload.new.autor_id)
+            );
+            return [...filtrado, payload.new];
+          });
+          marcarLeido(canalActual.id);
+        }
+      ).subscribe();
+    subRef.current = sub;
+    return ()=>{ supabase.removeChannel(sub); };
+  },[]);
 
   const rol     = perfil?.rol;
   const empresa = perfil?.empresa_codigo;
@@ -5688,39 +5777,19 @@ const Comunicaciones=({user,perfil,toast})=>{
 
   const abrirCanal=async(canal)=>{
     setCanalAct(canal);
+    canalActRef.current = canal; // actualizar ref para filtro realtime
     setCanalActId(canal.id);
     if(isMobile) setVistaMovil("chat");
-    // Persistir canal activo
     try{
       localStorage.setItem(`boolean_chat_canal_${miId}`, canal.id);
       localStorage.setItem(`boolean_chat_vista_${miId}`, "chat");
     }catch{}
-    if(subRef.current){ supabase.removeChannel(subRef.current); subRef.current=null; }
+    // Cargar mensajes históricos
     const {data}=await supabase.from("mensajes_chat")
       .select("*").eq("canal_id",canal.id)
       .order("created_at",{ascending:true}).limit(100);
     setMensajes(data||[]);
     marcarLeido(canal.id);
-    const sub=supabase.channel(`chat_${canal.id}_${Date.now()}`)
-      .on("postgres_changes",{event:"INSERT",schema:"public",
-        table:"mensajes_chat"},
-        payload=>{
-          // Filtrar en el cliente para mayor confiabilidad
-          if(payload.new.canal_id !== canal.id) return;
-          setMensajes(prev=>{
-            if(prev.find(m=>m.id===payload.new.id||m.id===`tmp_${payload.new.id}`)) return prev;
-            // Reemplazar mensaje temporal si existe
-            const sinTmp = prev.filter(m=>!m.id?.startsWith("tmp_")||m.texto!==payload.new.texto);
-            return [...sinTmp, payload.new];
-          });
-          marcarLeido(canal.id);
-        }
-      ).subscribe((status)=>{
-        if(status==="SUBSCRIBED"){
-          console.log("Chat realtime conectado para canal:", canal.id);
-        }
-      });
-    subRef.current=sub;
   };
 
   const enviarMensaje=async(texto)=>{
