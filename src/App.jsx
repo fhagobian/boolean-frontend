@@ -321,7 +321,8 @@ const BtnVolver = ({onClick, label="← VOLVER"}) => (
 );
 
 const Ticker = ({casos}) => {
-  const items=[`◈ ${casos.length} casos en el sistema`,`⚠ ${breach} casos con SLA vencido`,`✓ ${casos.filter(c=>c.estado==="FINALIZADO").length} casos resueltos`,`⚙ ${casos.filter(c=>c.estado==="EN_PROGRESO").length} en progreso`,`★ BOOLEAN · La lógica detrás de toda la operación`];
+  const breach=casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||"")&&c.sla_deadline&&new Date(c.sla_deadline)<new Date()).length;
+  const items=[`◈ ${casos.length} casos en el sistema`,`⚠ ${breach} casos con SLA vencido`,`✓ ${casos.filter(c=>c.estado==="FINALIZADO").length} casos resueltos`,`⚙ ${casos.filter(c=>c.estado==="EN_PROCESO").length} en progreso`,`★ BOOLEAN · La lógica detrás de toda la operación`];
   const full=[...items,...items];
   return (
     <div style={{background:B.orange,height:24,display:"flex",alignItems:"center",overflow:"hidden",flexShrink:0}}>
