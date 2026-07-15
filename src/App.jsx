@@ -5716,6 +5716,12 @@ const Comunicaciones=({user,perfil,toast})=>{
           placeholder="Escribí un mensaje..."
           value={texto} onChange={e=>setTexto(e.target.value)}
           onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&enviar()}
+          onBlur={e=>e.preventDefault()}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="sentences"
+          spellCheck="false"
+          inputMode="text"
           disabled={enviando}/>
         <button onClick={enviar} disabled={!texto.trim()||enviando}
           style={{padding:"0 18px",background:texto.trim()?B.orange:"#333",
@@ -5731,7 +5737,13 @@ const Comunicaciones=({user,perfil,toast})=>{
   // ── LAYOUT ───────────────────────────────────────────────
   if(isMobile){
     return (
-      <div style={{height:"calc(100vh - 80px)",display:"flex",flexDirection:"column"}}>
+      <div style={{
+        position:"fixed",
+        top:0, left:0, right:0, bottom:0,
+        display:"flex", flexDirection:"column",
+        background:B.void,
+        zIndex:10,
+      }}>
         {vistaMovil==="lista" ? <PanelLista/> : <PanelChat/>}
       </div>
     );
