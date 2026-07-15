@@ -2000,12 +2000,24 @@ const EscanerBarras = ({ onScan, onClose }) => {
         scanRef.current = codeReader;
         setCarg(false);
 
-        const devices = await window.ZXing.BrowserCodeReader.listVideoInputDevices();
-        // Preferir cámara trasera
-        const cam = devices.find(d=>d.label.toLowerCase().includes("back")||d.label.toLowerCase().includes("rear")||d.label.toLowerCase().includes("environment"))
-          || devices[devices.length-1];
+        // Listar dispositivos de video correctamente
+        let deviceId = undefined;
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter(d=>d.kind==="videoinput");
+          // Preferir cámara trasera
+          const back = videoDevices.find(d=>
+            d.label.toLowerCase().includes("back")||
+            d.label.toLowerCase().includes("rear")||
+            d.label.toLowerCase().includes("environment")
+          );
+          deviceId = back?.deviceId || videoDevices[videoDevices.length-1]?.deviceId;
+        } catch(e) {
+          // Si no puede listar, usa la cámara por defecto
+          deviceId = undefined;
+        }
 
-        await codeReader.decodeFromVideoDevice(cam?.deviceId||undefined, divRef.current, (result, err) => {
+        await codeReader.decodeFromVideoDevice(deviceId, divRef.current, (result, err) => {
           if(result && mounted) {
             onScan(result.getText());
           }
