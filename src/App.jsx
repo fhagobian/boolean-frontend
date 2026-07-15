@@ -5379,24 +5379,122 @@ const MiRutaDelDia = ({ user, toast, perfil }) => {
 };
 
 // ─── COMUNICACIONES ──────────────────────────────────────
+// ─── CHAT — subcomponentes externos para evitar re-renders ──
+const ChatInput = ({ onEnviar }) => {
+  const [texto, setTexto] = useState("");
+  const inputRef = useRef(null);
+
+  const enviar = () => {
+    if(!texto.trim()) return;
+    onEnviar(texto.trim());
+    setTexto("");
+    // Mantener el foco después de enviar
+    setTimeout(()=>inputRef.current?.focus(), 50);
+  };
+
+  return (
+    <div style={{padding:"10px 12px",borderTop:`1px solid #1a1a1a`,
+      display:"flex",gap:8,background:"#0A0A0F",flexShrink:0}}>
+      <input
+        ref={inputRef}
+        style={{flex:1,fontSize:15,padding:"12px 14px",
+          background:"#0e0e14",border:"1px solid #2a2a2a",
+          color:"#ccc",borderRadius:2,outline:"none",
+          fontFamily:"inherit"}}
+        placeholder="Escribí un mensaje..."
+        value={texto}
+        onChange={e=>setTexto(e.target.value)}
+        onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();enviar();}}}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck="false"
+      />
+      <button onClick={enviar} disabled={!texto.trim()}
+        style={{padding:"0 18px",background:texto.trim()?"#FF6B00":"#333",
+          border:"none",cursor:texto.trim()?"pointer":"not-allowed",
+          color:texto.trim()?"#050507":"#666",fontWeight:900,fontSize:20,
+          borderRadius:2,flexShrink:0,minWidth:50}}>
+        ➤
+      </button>
+    </div>
+  );
+};
+
+const ChatMensajes = ({ mensajes, usuarios, miId }) => {
+  const endRef = useRef(null);
+  const ROL_COLOR_MAP = {DIRECTOR:"#FF6B00",REGIONAL:"#00A8FF",SUPERVISOR:"#9B6DFF",TECNICO:"#00E87A"};
+
+  useEffect(()=>{
+    endRef.current?.scrollIntoView({behavior:"smooth"});
+  },[mensajes]);
+
+  return (
+    <div style={{flex:1,overflowY:"auto",padding:14,
+      display:"flex",flexDirection:"column",gap:10}}>
+      {mensajes.length===0&&(
+        <div style={{textAlign:"center",color:"#555",padding:40,fontSize:13}}>
+          ¡Empezá la conversación!
+        </div>
+      )}
+      {mensajes.map(m=>{
+        const esMio = m.autor_id===miId;
+        const usu   = usuarios.find(u=>u.id===m.autor_id);
+        const rolColor = ROL_COLOR_MAP[usu?.rol]||"#555";
+        return(
+          <div key={m.id} style={{display:"flex",
+            justifyContent:esMio?"flex-end":"flex-start",gap:8}}>
+            {!esMio&&(
+              <div style={{width:30,height:30,borderRadius:"50%",flexShrink:0,
+                background:`${rolColor}22`,border:`1px solid ${rolColor}`,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:11,fontWeight:900,color:rolColor,alignSelf:"flex-end"}}>
+                {(m.autor_nombre||"?")[0]}
+              </div>
+            )}
+            <div style={{maxWidth:"75%"}}>
+              {!esMio&&<div style={{fontSize:10,color:rolColor,fontWeight:700,
+                marginBottom:3,paddingLeft:4}}>
+                {m.autor_nombre||m.autor_email}
+              </div>}
+              <div style={{
+                padding:"10px 14px",
+                background:esMio?"#FF6B0033":"#0e0e14",
+                border:`1px solid ${esMio?"#FF6B0055":"#2a2a2a"}`,
+                borderRadius:esMio?"16px 16px 4px 16px":"16px 16px 16px 4px",
+                fontSize:15,color:"#ccc",lineHeight:1.5,
+                opacity:m.id?.startsWith("tmp_")?0.7:1,
+              }}>
+                {m.texto}
+              </div>
+              <div style={{fontSize:9,color:"#555",marginTop:3,
+                textAlign:esMio?"right":"left",paddingLeft:4,paddingRight:4}}>
+                {new Date(m.created_at).toLocaleTimeString("es-UY",
+                  {hour:"2-digit",minute:"2-digit",hour12:false})}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      <div ref={endRef}/>
+    </div>
+  );
+};
+
 const Comunicaciones=({user,perfil,toast})=>{
-  const [canales,    setCanales]    = useState([]);
-  const [canalAct,   setCanalAct]   = useState(null);
-  const [mensajes,   setMensajes]   = useState([]);
-  const [texto,      setTexto]      = useState("");
-  const [loading,    setLoading]    = useState(true);
-  const [enviando,   setEnviando]   = useState(false);
-  const [usuarios,   setUsuarios]   = useState([]);
-  const [noLeidos,   setNoLeidos]   = useState({}); // {canal_id: count}
-  const [vistaMovil, setVistaMovil] = useState("lista"); // lista | chat
-  const mensajesEndRef = useRef(null);
+  const [canales,   setCanales]   = useState([]);
+  const [canalAct,  setCanalAct]  = useState(null);
+  const [mensajes,  setMensajes]  = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [usuarios,  setUsuarios]  = useState([]);
+  const [noLeidos,  setNoLeidos]  = useState({});
+  const [vistaMovil,setVistaMovil]= useState("lista");
   const subRef = useRef(null);
   const isMobile = useMobile();
 
-  const rol    = perfil?.rol;
-  const empresa= perfil?.empresa_codigo;
-  const miId   = perfil?.id;
-  const miNombre = `${perfil?.nombre||""} ${perfil?.apellido||""}`.trim();
+  const rol     = perfil?.rol;
+  const empresa = perfil?.empresa_codigo;
+  const miId    = perfil?.id;
+  const miNombre= `${perfil?.nombre||""} ${perfil?.apellido||""}`.trim();
 
   useEffect(()=>{
     supabase.from("usuarios").select("*").eq("activo",true)
@@ -5408,13 +5506,10 @@ const Comunicaciones=({user,perfil,toast})=>{
     construirCanales();
   },[perfil,usuarios]);
 
-  const canalPrivadoId=(id1,id2)=>{
-    return `privado_${[id1,id2].sort().join("_")}`;
-  };
+  const canalPrivadoId=(id1,id2)=>`privado_${[id1,id2].sort().join("_")}`;
 
   const construirCanales=()=>{
     const lista=[];
-    // Grupos por empresa
     if(rol==="DIRECTOR"){
       EMPRESAS.forEach(e=>{
         const miembros=usuarios.filter(u=>u.empresa_codigo===e.codigo);
@@ -5430,10 +5525,9 @@ const Comunicaciones=({user,perfil,toast})=>{
       if(miembros.length>0) lista.push({
         id:`grupo_${empresa}`,tipo:"grupo",
         nombre:`🏢 Equipo ${empData?.nombre||empresa}`,
-        empresa,color:empData?.color||B.orange,miembros:miembros.length,
+        empresa,color:empData?.color||"#FF6B00",miembros:miembros.length,
       });
     }
-    // Canales privados según rol
     if(rol==="DIRECTOR"){
       usuarios.filter(u=>u.rol==="REGIONAL").forEach(reg=>{
         lista.push({id:canalPrivadoId(miId,reg.id),tipo:"privado",
@@ -5465,7 +5559,6 @@ const Comunicaciones=({user,perfil,toast})=>{
         nombre:`${sup.nombre} ${sup.apellido}`,subtitulo:"Tu Supervisor",contraparte:sup});
     }
     setCanales(lista);
-    // Cargar contadores de no leídos
     cargarNoLeidos(lista);
     setLoading(false);
   };
@@ -5478,8 +5571,7 @@ const Comunicaciones=({user,perfil,toast})=>{
     for(const c of lista){
       const {count}=await supabase.from("mensajes_chat")
         .select("*",{count:"exact",head:true})
-        .eq("canal_id",c.id)
-        .neq("autor_id",miId)
+        .eq("canal_id",c.id).neq("autor_id",miId)
         .gt("created_at",ultimosLeidos[c.id]||"2000-01-01");
       counts[c.id]=count||0;
     }
@@ -5498,16 +5590,12 @@ const Comunicaciones=({user,perfil,toast})=>{
   const abrirCanal=async(canal)=>{
     setCanalAct(canal);
     if(isMobile) setVistaMovil("chat");
-    // Cancelar sub anterior
     if(subRef.current){ supabase.removeChannel(subRef.current); subRef.current=null; }
-    // Cargar mensajes
     const {data}=await supabase.from("mensajes_chat")
       .select("*").eq("canal_id",canal.id)
       .order("created_at",{ascending:true}).limit(100);
     setMensajes(data||[]);
     marcarLeido(canal.id);
-    setTimeout(()=>mensajesEndRef.current?.scrollIntoView({behavior:"smooth"}),100);
-    // Suscripción realtime
     const sub=supabase.channel(`chat_${canal.id}_${Date.now()}`)
       .on("postgres_changes",{event:"INSERT",schema:"public",
         table:"mensajes_chat",filter:`canal_id=eq.${canal.id}`},
@@ -5522,91 +5610,76 @@ const Comunicaciones=({user,perfil,toast})=>{
     subRef.current=sub;
   };
 
-  useEffect(()=>{
-    mensajesEndRef.current?.scrollIntoView({behavior:"smooth"});
-  },[mensajes]);
-
-  const enviar=async()=>{
-    if(!texto.trim()||!canalAct||enviando) return;
-    setEnviando(true);
+  const enviarMensaje=async(texto)=>{
+    if(!canalAct) return;
     const msg={
-      canal_id:canalAct.id,
-      tipo_canal:canalAct.tipo,
-      autor_id:miId,
-      autor_email:user?.email,
-      autor_nombre:miNombre,
-      texto:texto.trim(),
+      canal_id:canalAct.id,tipo_canal:canalAct.tipo,
+      autor_id:miId,autor_email:user?.email,
+      autor_nombre:miNombre,texto,
       created_at:new Date().toISOString(),
     };
-    // Optimistic update
     const tmpId=`tmp_${Date.now()}`;
     setMensajes(prev=>[...prev,{...msg,id:tmpId}]);
-    setTexto("");
-    setTimeout(()=>mensajesEndRef.current?.scrollIntoView({behavior:"smooth"}),50);
     await supabase.from("mensajes_chat").insert(msg);
-    setEnviando(false);
   };
 
   const totalNoLeidos=Object.values(noLeidos).reduce((a,b)=>a+b,0);
-  const ROL_COLOR_MAP={DIRECTOR:B.orange,REGIONAL:B.blue,SUPERVISOR:B.purple,TECNICO:B.green};
+  const ROL_COLOR_MAP={DIRECTOR:"#FF6B00",REGIONAL:"#00A8FF",SUPERVISOR:"#9B6DFF",TECNICO:"#00E87A"};
 
-  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh"}}><Spin s={36}/></div>;
+  if(loading) return <div style={{display:"flex",alignItems:"center",
+    justifyContent:"center",height:"60vh"}}><Spin s={36}/></div>;
 
-  // ── PANEL LISTA DE CANALES ───────────────────────────────
-  const PanelLista=()=>(
+  const ListaCanales=()=>(
     <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      <div style={{padding:"14px 16px",borderBottom:`1px solid ${B.border}`,background:B.panel,flexShrink:0}}>
-        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:B.orange}}>
+      <div style={{padding:"14px 16px",borderBottom:"1px solid #1a1a1a",
+        background:"#0A0A0F",flexShrink:0}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:"#FF6B00"}}>
           💬 COMUNICACIONES
-          {totalNoLeidos>0&&<span style={{
-            marginLeft:8,background:B.red,color:"#fff",
-            borderRadius:10,padding:"1px 7px",fontSize:11,fontWeight:900,
-          }}>{totalNoLeidos}</span>}
+          {totalNoLeidos>0&&<span style={{marginLeft:8,background:"#FF2040",color:"#fff",
+            borderRadius:10,padding:"1px 7px",fontSize:11,fontWeight:900}}>{totalNoLeidos}</span>}
         </div>
-        <div style={{fontSize:10,color:B.t3,marginTop:2}}>{canales.length} canales</div>
+        <div style={{fontSize:10,color:"#555",marginTop:2}}>{canales.length} canales</div>
       </div>
       <div style={{flex:1,overflowY:"auto"}}>
-        {/* Grupos */}
         {canales.filter(c=>c.tipo==="grupo").length>0&&(
           <div>
-            <div style={{padding:"8px 14px 4px",fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>GRUPOS</div>
+            <div style={{padding:"8px 14px 4px",fontSize:9,color:"#555",fontWeight:700,letterSpacing:".1em"}}>GRUPOS</div>
             {canales.filter(c=>c.tipo==="grupo").map(c=>{
               const nl=noLeidos[c.id]||0;
               return(
                 <button key={c.id} onClick={()=>abrirCanal(c)}
                   style={{width:"100%",padding:"12px 16px",textAlign:"left",
-                    background:canalAct?.id===c.id?B.orangeDim:"transparent",
-                    border:"none",borderLeft:`3px solid ${canalAct?.id===c.id?B.orange:"transparent"}`,
+                    background:canalAct?.id===c.id?"#1a0a00":"transparent",
+                    border:"none",borderLeft:`3px solid ${canalAct?.id===c.id?"#FF6B00":"transparent"}`,
                     cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
                   <div style={{width:40,height:40,borderRadius:"50%",flexShrink:0,
                     background:c.color+"22",border:`2px solid ${c.color}`,
                     display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏢</div>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:700,
-                      color:canalAct?.id===c.id?B.orange:B.t1,
-                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nombre}</div>
-                    <div style={{fontSize:10,color:B.t3}}>{c.miembros} miembros</div>
+                    <div style={{fontSize:13,fontWeight:700,overflow:"hidden",
+                      textOverflow:"ellipsis",whiteSpace:"nowrap",
+                      color:canalAct?.id===c.id?"#FF6B00":"#ccc"}}>{c.nombre}</div>
+                    <div style={{fontSize:10,color:"#555"}}>{c.miembros} miembros</div>
                   </div>
-                  {nl>0&&<span style={{background:B.orange,color:"#050507",borderRadius:10,
+                  {nl>0&&<span style={{background:"#FF6B00",color:"#050507",borderRadius:10,
                     padding:"2px 7px",fontSize:11,fontWeight:900,flexShrink:0}}>{nl}</span>}
                 </button>
               );
             })}
           </div>
         )}
-        {/* Privados */}
         {canales.filter(c=>c.tipo==="privado").length>0&&(
           <div>
-            <div style={{padding:"8px 14px 4px",fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".1em"}}>MENSAJES DIRECTOS</div>
+            <div style={{padding:"8px 14px 4px",fontSize:9,color:"#555",fontWeight:700,letterSpacing:".1em"}}>MENSAJES DIRECTOS</div>
             {canales.filter(c=>c.tipo==="privado").map(c=>{
               const nl=noLeidos[c.id]||0;
-              const rolColor=ROL_COLOR_MAP[c.contraparte?.rol]||B.t3;
+              const rolColor=ROL_COLOR_MAP[c.contraparte?.rol]||"#555";
               const initials=`${(c.contraparte?.nombre||"?")[0]}${(c.contraparte?.apellido||"?")[0]}`.toUpperCase();
               return(
                 <button key={c.id} onClick={()=>abrirCanal(c)}
                   style={{width:"100%",padding:"12px 16px",textAlign:"left",
-                    background:canalAct?.id===c.id?B.orangeDim:"transparent",
-                    border:"none",borderLeft:`3px solid ${canalAct?.id===c.id?B.orange:"transparent"}`,
+                    background:canalAct?.id===c.id?"#1a0a00":"transparent",
+                    border:"none",borderLeft:`3px solid ${canalAct?.id===c.id?"#FF6B00":"transparent"}`,
                     cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
                   <div style={{position:"relative",flexShrink:0}}>
                     <div style={{width:40,height:40,borderRadius:"50%",
@@ -5616,149 +5689,81 @@ const Comunicaciones=({user,perfil,toast})=>{
                       {initials}
                     </div>
                     {nl>0&&<span style={{position:"absolute",top:-4,right:-4,
-                      background:B.red,color:"#fff",borderRadius:"50%",
+                      background:"#FF2040",color:"#fff",borderRadius:"50%",
                       width:18,height:18,fontSize:10,fontWeight:900,
                       display:"flex",alignItems:"center",justifyContent:"center"}}>
                       {nl>9?"9+":nl}
                     </span>}
                   </div>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:nl>0?700:600,
-                      color:canalAct?.id===c.id?B.orange:nl>0?B.t1:B.t2,
-                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nombre}</div>
-                    <div style={{fontSize:10,color:B.t3}}>{c.subtitulo}</div>
+                    <div style={{fontSize:13,fontWeight:nl>0?700:600,overflow:"hidden",
+                      textOverflow:"ellipsis",whiteSpace:"nowrap",
+                      color:canalAct?.id===c.id?"#FF6B00":nl>0?"#ccc":"#888"}}>{c.nombre}</div>
+                    <div style={{fontSize:10,color:"#555"}}>{c.subtitulo}</div>
                   </div>
                 </button>
               );
             })}
           </div>
         )}
-        {canales.length===0&&(
-          <div style={{padding:24,textAlign:"center",color:B.t3,fontSize:12}}>Sin canales disponibles</div>
-        )}
+        {canales.length===0&&<div style={{padding:24,textAlign:"center",color:"#555",fontSize:12}}>Sin canales disponibles</div>}
       </div>
     </div>
   );
 
-  // ── PANEL CHAT ───────────────────────────────────────────
-  const PanelChat=()=>(
-    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      {/* Header */}
-      <div style={{padding:"12px 16px",borderBottom:`1px solid ${B.border}`,
-        display:"flex",alignItems:"center",gap:12,background:B.panel,flexShrink:0}}>
-        {isMobile&&(
-          <button onClick={()=>{setVistaMovil("lista");setCanalAct(null);}}
-            style={{background:"none",border:`1px solid ${B.border}`,color:B.t2,
-              cursor:"pointer",padding:"8px 14px",fontSize:14,borderRadius:2,flexShrink:0}}>
-            ←
-          </button>
-        )}
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:14,fontWeight:700,color:B.t1,
-            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            {canalAct?.nombre}
-          </div>
-          <div style={{fontSize:10,color:B.t3}}>
-            {canalAct?.tipo==="grupo"?`${canalAct?.miembros} miembros`:canalAct?.subtitulo}
-          </div>
+  const CanalHeader=()=>(
+    <div style={{padding:"12px 16px",borderBottom:"1px solid #1a1a1a",
+      display:"flex",alignItems:"center",gap:12,background:"#0A0A0F",flexShrink:0}}>
+      {isMobile&&(
+        <button onClick={()=>{setVistaMovil("lista");setCanalAct(null);}}
+          style={{background:"none",border:"1px solid #2a2a2a",color:"#888",
+            cursor:"pointer",padding:"8px 14px",fontSize:14,borderRadius:2,flexShrink:0}}>←</button>
+      )}
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:14,fontWeight:700,color:"#ccc",
+          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+          {canalAct?.nombre}
+        </div>
+        <div style={{fontSize:10,color:"#555"}}>
+          {canalAct?.tipo==="grupo"?`${canalAct?.miembros} miembros`:canalAct?.subtitulo}
         </div>
       </div>
-      {/* Mensajes */}
-      <div style={{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:10}}>
-        {mensajes.length===0&&(
-          <div style={{textAlign:"center",color:B.t3,padding:40,fontSize:13}}>
-            ¡Empezá la conversación!
-          </div>
-        )}
-        {mensajes.map(m=>{
-          const esMio=m.autor_id===miId;
-          const usu=usuarios.find(u=>u.id===m.autor_id);
-          const rolColor=ROL_COLOR_MAP[usu?.rol]||B.t3;
-          return(
-            <div key={m.id} style={{display:"flex",justifyContent:esMio?"flex-end":"flex-start",gap:8}}>
-              {!esMio&&(
-                <div style={{width:30,height:30,borderRadius:"50%",flexShrink:0,
-                  background:`${rolColor}22`,border:`1px solid ${rolColor}`,
-                  display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:11,fontWeight:900,color:rolColor,alignSelf:"flex-end"}}>
-                  {(m.autor_nombre||"?")[0]}
-                </div>
-              )}
-              <div style={{maxWidth:"75%"}}>
-                {!esMio&&<div style={{fontSize:10,color:rolColor,fontWeight:700,marginBottom:3,paddingLeft:4}}>
-                  {m.autor_nombre||m.autor_email}
-                </div>}
-                <div style={{
-                  padding:"10px 14px",
-                  background:esMio?B.orange+"33":B.card,
-                  border:`1px solid ${esMio?B.orange+"55":B.border}`,
-                  borderRadius:esMio?"16px 16px 4px 16px":"16px 16px 16px 4px",
-                  fontSize:15,color:B.t1,lineHeight:1.5,
-                  opacity:m.id?.startsWith("tmp_")?0.7:1,
-                }}>
-                  {m.texto}
-                </div>
-                <div style={{fontSize:9,color:B.t3,marginTop:3,
-                  textAlign:esMio?"right":"left",paddingLeft:4,paddingRight:4}}>
-                  {new Date(m.created_at).toLocaleTimeString("es-UY",
-                    {hour:"2-digit",minute:"2-digit",hour12:false})}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-        <div ref={mensajesEndRef}/>
-      </div>
-      {/* Input */}
-      <div style={{padding:"10px 12px",borderTop:`1px solid ${B.border}`,
-        display:"flex",gap:8,background:B.panel,flexShrink:0}}>
-        <input className="field" style={{flex:1,fontSize:15,padding:"12px 14px"}}
-          placeholder="Escribí un mensaje..."
-          value={texto} onChange={e=>setTexto(e.target.value)}
-          onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&enviar()}
-          onBlur={e=>e.preventDefault()}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="sentences"
-          spellCheck="false"
-          inputMode="text"
-          disabled={enviando}/>
-        <button onClick={enviar} disabled={!texto.trim()||enviando}
-          style={{padding:"0 18px",background:texto.trim()?B.orange:"#333",
-            border:"none",cursor:texto.trim()?"pointer":"not-allowed",
-            color:texto.trim()?"#050507":"#666",fontWeight:900,fontSize:20,
-            borderRadius:2,flexShrink:0,minWidth:50}}>
-          ➤
-        </button>
-      </div>
     </div>
   );
 
-  // ── LAYOUT ───────────────────────────────────────────────
   if(isMobile){
     return (
-      <div style={{
-        position:"fixed",
-        top:0, left:0, right:0, bottom:0,
-        display:"flex", flexDirection:"column",
-        background:B.void,
-        zIndex:10,
-      }}>
-        {vistaMovil==="lista" ? <PanelLista/> : <PanelChat/>}
+      <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,
+        display:"flex",flexDirection:"column",background:"#050507",zIndex:10}}>
+        {vistaMovil==="lista" ? (
+          <ListaCanales/>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+            <CanalHeader/>
+            <ChatMensajes mensajes={mensajes} usuarios={usuarios} miId={miId}/>
+            <ChatInput onEnviar={enviarMensaje}/>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div style={{display:"flex",height:"calc(100vh - 120px)",
-      border:`1px solid ${B.border}`,background:B.void}}>
-      <div style={{width:280,flexShrink:0,borderRight:`1px solid ${B.border}`}}>
-        <PanelLista/>
+      border:"1px solid #1a1a1a",background:"#050507"}}>
+      <div style={{width:280,flexShrink:0,borderRight:"1px solid #1a1a1a"}}>
+        <ListaCanales/>
       </div>
-      <div style={{flex:1,minWidth:0}}>
-        {canalAct ? <PanelChat/> : (
+      <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column"}}>
+        {canalAct ? (
+          <>
+            <CanalHeader/>
+            <ChatMensajes mensajes={mensajes} usuarios={usuarios} miId={miId}/>
+            <ChatInput onEnviar={enviarMensaje}/>
+          </>
+        ) : (
           <div style={{display:"flex",alignItems:"center",justifyContent:"center",
-            height:"100%",flexDirection:"column",gap:14,color:B.t3}}>
+            height:"100%",flexDirection:"column",gap:14,color:"#555"}}>
             <div style={{fontSize:48}}>💬</div>
             <div style={{fontSize:14}}>Seleccioná un canal para comenzar</div>
           </div>
