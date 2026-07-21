@@ -197,58 +197,76 @@ const css = `
   .btn{
     cursor:pointer;border:none;outline:none;
     font-family:'Orbitron',sans-serif;font-weight:700;
-    letter-spacing:.08em;text-transform:uppercase;
-    transition:all .12s ease;
-    display:inline-flex;align-items:center;gap:6px;
-    position:relative;
-    border-radius:2px;
-    box-shadow:
-      0 1px 0 rgba(255,255,255,0.18) inset,
-      0 -2px 0 rgba(0,0,0,0.45) inset,
-      0 4px 14px rgba(0,0,0,0.45),
-      0 2px 4px rgba(0,0,0,0.6) !important;
+    letter-spacing:.1em;text-transform:uppercase;
+    transition:all .13s ease;
+    display:inline-flex;align-items:center;gap:8px;
+    position:relative;overflow:hidden;
+    border-radius:3px;
   }
-  .btn:hover{
-    transform:translateY(-2px) !important;
-    filter:brightness(1.14);
-    box-shadow:
-      0 1px 0 rgba(255,255,255,0.22) inset,
-      0 -2px 0 rgba(0,0,0,0.5) inset,
-      0 8px 20px rgba(0,0,0,0.4),
-      0 3px 6px rgba(0,0,0,0.6) !important;
-  }
-  .btn:active{
-    transform:translateY(1px) !important;
-    filter:brightness(0.88);
-    box-shadow:
-      0 -1px 0 rgba(255,255,255,0.06) inset,
-      0 2px 0 rgba(0,0,0,0.5) inset,
-      0 1px 4px rgba(0,0,0,0.5) !important;
-  }
-  .btn:disabled{opacity:.35;pointer-events:none;box-shadow:none !important;}
+  .btn:hover{ transform:translateY(-3px); filter:brightness(1.12); }
+  .btn:active{ transform:translateY(2px); filter:brightness(0.88); }
+  .btn:disabled{ opacity:.35; pointer-events:none; box-shadow:none !important; }
   .btn-orange{
-    background:linear-gradient(180deg,#FF8020 0%,#FF6B00 55%,#CC5200 100%);
-    border:1px solid #FF6B00;
+    background:linear-gradient(180deg,#FF9040 0%,#FF6B00 50%,#CC4400 100%);
     color:#050507;
-    box-shadow:
-      0 1px 0 rgba(255,255,255,0.18) inset,
-      0 -2px 0 rgba(0,0,0,0.45) inset,
-      0 4px 14px rgba(255,107,0,0.3),
-      0 2px 4px rgba(0,0,0,0.6) !important;
+    border-top:1px solid #FFB060;
+    border-bottom:3px solid #882200;
+    box-shadow:0 4px 14px rgba(255,107,0,0.35),0 2px 4px rgba(0,0,0,0.6) !important;
   }
   .btn-orange:hover{
-    box-shadow:
-      0 1px 0 rgba(255,255,255,0.22) inset,
-      0 -2px 0 rgba(0,0,0,0.5) inset,
-      0 8px 24px rgba(255,107,0,0.4),
-      0 3px 6px rgba(0,0,0,0.5) !important;
+    box-shadow:0 10px 24px rgba(255,107,0,0.5),0 3px 8px rgba(0,0,0,0.7) !important;
+  }
+  .btn-green{
+    background:linear-gradient(180deg,#20E870 0%,#00C860 50%,#008040 100%);
+    color:#020F06;
+    border-top:1px solid #40FF90;
+    border-bottom:3px solid #004020;
+    box-shadow:0 4px 14px rgba(0,232,122,0.3),0 2px 4px rgba(0,0,0,0.6) !important;
+  }
+  .btn-green:hover{
+    box-shadow:0 10px 24px rgba(0,232,122,0.5),0 3px 8px rgba(0,0,0,0.7) !important;
+  }
+  .btn-red{
+    background:linear-gradient(180deg,#2a0810 0%,#1a0408 50%,#0a0203 100%);
+    color:#FF2040;
+    border-top:1px solid #3a1020;
+    border-bottom:3px solid #050102;
+    box-shadow:0 4px 14px rgba(255,32,64,0.2),0 2px 4px rgba(0,0,0,0.6) !important;
+  }
+  .btn-red:hover{
+    box-shadow:0 10px 24px rgba(255,32,64,0.4),0 3px 8px rgba(0,0,0,0.7) !important;
+  }
+  .btn-blue{
+    background:linear-gradient(180deg,#20A8E0 0%,#0088CC 50%,#004880 100%);
+    color:#000810;
+    border-top:1px solid #40C8FF;
+    border-bottom:3px solid #002040;
+    box-shadow:0 4px 14px rgba(0,168,255,0.2),0 2px 4px rgba(0,0,0,0.6) !important;
+  }
+  .btn-blue:hover{
+    box-shadow:0 10px 24px rgba(0,168,255,0.4),0 3px 8px rgba(0,0,0,0.7) !important;
+  }
+  .btn-yellow{
+    background:linear-gradient(180deg,#FFE040 0%,#FFD020 50%,#CC9000 100%);
+    color:#0F0A00;
+    border-top:1px solid #FFF060;
+    border-bottom:3px solid #805800;
+    box-shadow:0 4px 14px rgba(255,208,32,0.25),0 2px 4px rgba(0,0,0,0.6) !important;
+  }
+  .btn-yellow:hover{
+    box-shadow:0 10px 24px rgba(255,208,32,0.45),0 3px 8px rgba(0,0,0,0.7) !important;
   }
   .btn-ghost{
     background:transparent !important;
     background-image:none !important;
-    box-shadow:
-      0 2px 8px rgba(0,0,0,0.3),
-      0 1px 3px rgba(0,0,0,0.5) !important;
+    border:1px solid currentColor;
+    border-bottom:3px solid currentColor;
+    opacity:0.85;
+    box-shadow:0 3px 8px rgba(0,0,0,0.4) !important;
+  }
+  .btn-ghost:hover{
+    opacity:1;
+    box-shadow:0 8px 20px rgba(0,0,0,0.5) !important;
   }
   .field{background:#0A0A0E;border:1px solid #1C1C2C;border-radius:3px;
     color:#F4F4FF;padding:9px 12px;font-size:13px;width:100%;
@@ -259,9 +277,24 @@ const css = `
   .tag{display:inline-flex;align-items:center;padding:2px 8px;font-size:10px;font-weight:700;
     letter-spacing:.07em;text-transform:uppercase;
     clip-path:polygon(5px 0%,100% 0%,calc(100% - 5px) 100%,0% 100%)}
-  .nav-item{cursor:pointer;transition:all .15s;border-left:2px solid transparent}
-  .nav-item:hover{background:#1C1C2C44;border-left-color:#FF6B0044}
-  .nav-active{background:#FF6B0014!important;border-left-color:#FF6B00!important}
+  .nav-item{
+    cursor:pointer;transition:all .13s ease;
+    border-left:3px solid transparent;
+    border-bottom:1px solid rgba(0,0,0,0.4);
+    background:linear-gradient(90deg,#080810,#060608);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,0.03),inset 0 -1px 0 rgba(0,0,0,0.5);
+  }
+  .nav-item:hover{
+    background:linear-gradient(90deg,#1e1208,#120a04) !important;
+    border-left-color:#FF6B0077 !important;
+    transform:translateX(3px);
+    box-shadow:inset 0 1px 0 rgba(255,150,0,0.08),inset 0 -1px 0 rgba(0,0,0,0.6),4px 0 16px rgba(255,107,0,0.12) !important;
+  }
+  .nav-active{
+    background:linear-gradient(90deg,#221208,#160c04) !important;
+    border-left:3px solid #FF6B00 !important;
+    box-shadow:inset 0 1px 0 rgba(255,150,0,0.12),inset 0 -1px 0 rgba(0,0,0,0.7),inset 0 0 30px rgba(255,107,0,0.08),4px 0 20px rgba(255,107,0,0.2) !important;
+  }
   .card{background:#111119;border:1px solid #1C1C2C}
   .tab-btn{background:none;border:none;cursor:pointer;padding:8px 16px;
     font-family:'Rajdhani',sans-serif;font-weight:700;font-size:12px;
@@ -305,20 +338,28 @@ const Spin = ({s=18}) => <div style={{width:s,height:s,border:`2px solid ${B.bor
 const Dot  = ({c,pulse,s=7}) => <div style={{width:s,height:s,borderRadius:"50%",background:c,flexShrink:0}} className={pulse?"live":""}/>;
 
 const Bb = ({label,onClick,color=B.orange,ghost,small,disabled,icon,style={},full,saving}) => {
-  const isOrange = color===B.orange || color==="#FF6B00";
-  const className = ["btn", ghost?"btn-ghost":isOrange?"btn-orange":""].filter(Boolean).join(" ");
-  const bg = ghost
-    ? "transparent"
-    : isOrange
-      ? undefined // handled by CSS class
-      : `linear-gradient(180deg,${color}EE 0%,${color} 60%,${color}CC 100%)`;
+  // Map color to CSS class
+  const colorMap = {
+    [B.orange]:"btn-orange","#FF6B00":"btn-orange",
+    [B.green]:"btn-green","#00E87A":"btn-green",
+    [B.red]:"btn-red","#FF2040":"btn-red",
+    [B.blue]:"btn-blue","#00A8FF":"btn-blue",
+    [B.yellow]:"btn-yellow","#FFD020":"btn-yellow",
+    [B.purple]:"btn-orange", // fallback
+  };
+  const colorClass = ghost ? "btn-ghost" : (colorMap[color]||"btn-orange");
+  const textCol = ghost ? color : (
+    colorClass==="btn-green"?"#020F06":
+    colorClass==="btn-blue"?"#000810":
+    colorClass==="btn-yellow"?"#0F0A00":
+    colorClass==="btn-red"?color:
+    "#050507"
+  );
   return (
-    <button className={className} onClick={onClick} disabled={disabled||saving} style={{
-      ...(bg ? {background:bg} : {}),
-      color: ghost ? color : "#050507",
-      border: ghost ? `1px solid ${color}66` : `1px solid ${color}`,
-      padding: small ? "6px 14px" : "11px 22px",
-      fontSize: small ? 11 : 13,
+    <button className={`btn ${colorClass}`} onClick={onClick} disabled={disabled||saving} style={{
+      color: ghost ? color : textCol,
+      padding: small ? "6px 14px" : "12px 22px",
+      fontSize: small ? 10 : 12,
       width: full ? "100%" : "auto",
       justifyContent: full ? "center" : "flex-start",
       ...style
@@ -328,6 +369,7 @@ const Bb = ({label,onClick,color=B.orange,ghost,small,disabled,icon,style={},ful
     </button>
   );
 };
+
 
 
 const Tg = ({label,color}) => (
@@ -367,28 +409,10 @@ const Modal = ({title,onClose,children,width=680}) => (
   </div>
 );
 const BtnVolver = ({onClick, label="← VOLVER"}) => (
-  <button onClick={onClick} style={{
-    background:"linear-gradient(180deg,#FF6B00EE 0%,#FF6B00 60%,#CC5500 100%)",
-    border:"1px solid #FF6B00",
-    color:"#050507",
-    cursor:"pointer",
-    padding:"11px 22px",
-    fontSize:12,
-    fontWeight:700,
-    fontFamily:"'Orbitron',sans-serif",
-    letterSpacing:".08em",
-    borderRadius:2,
-    display:"inline-flex",
-    alignItems:"center",
-    gap:8,
-    boxShadow:"0 1px 0 rgba(255,255,255,0.15) inset,0 -2px 0 rgba(0,0,0,0.35) inset,0 4px 12px rgba(255,107,0,0.25),0 2px 4px rgba(0,0,0,0.5)",
-    transition:"all .12s ease",
-  }}
-  onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.filter="brightness(1.12)";}}
-  onMouseOut={e=>{e.currentTarget.style.transform="";e.currentTarget.style.filter="";}}
-  onMouseDown={e=>{e.currentTarget.style.transform="translateY(1px)";e.currentTarget.style.filter="brightness(0.9)";}}
-  onMouseUp={e=>{e.currentTarget.style.transform="";e.currentTarget.style.filter="";}}
-  >{label}</button>
+  <button onClick={onClick} className="btn btn-orange"
+    style={{color:"#050507",padding:"11px 20px",fontSize:11}}>
+    {label}
+  </button>
 );
 
 const Ticker = ({casos}) => {
@@ -531,10 +555,16 @@ const Sidebar = ({view,setView,user,onLogout,casos,perfil,noLeidosChat}) => {
       <nav style={{flex:1,overflowY:"auto",padding:"8px 0"}}>
         {menu.map(item=>(
           <div key={item.id} className={`nav-item ${view===item.id?"nav-active":""}`} onClick={()=>setView(item.id)}
-            style={{padding:"9px 14px",display:"flex",alignItems:"center",gap:9,marginBottom:1}}>
-            <span style={{fontSize:13,color:view===item.id?B.orange:B.t3,minWidth:16,textAlign:"center"}}>{item.icon}</span>
-            <span style={{fontSize:12,fontWeight:700,letterSpacing:".05em",color:view===item.id?B.t1:B.t2,flex:1}}>{item.label}</span>
-            {item.badge>0&&<span style={{background:B.orange,color:"#050507",padding:"1px 6px",fontSize:9,fontWeight:900,fontFamily:"'Orbitron',sans-serif",clipPath:"polygon(4px 0%,100% 0%,calc(100% - 4px) 100%,0% 100%)"}}>{item.badge}</span>}
+            style={{padding:"10px 14px",display:"flex",alignItems:"center",gap:10,marginBottom:0}}>
+            <span style={{fontSize:14,color:view===item.id?"#FF6B00":"#404060",minWidth:18,textAlign:"center",transition:"color .13s"}}>{item.icon}</span>
+            <span style={{fontSize:11,fontWeight:700,letterSpacing:".08em",fontFamily:"'Orbitron',sans-serif",
+              color:view===item.id?"#FF9040":"#505070",flex:1,transition:"color .13s"}}>{item.label}</span>
+            {item.badge>0&&<span style={{
+              background:item.id==="comunicaciones"?"#FF2040":"#FF6B00",
+              color:"#050507",padding:"2px 7px",fontSize:9,fontWeight:900,
+              fontFamily:"'Orbitron',sans-serif",borderRadius:2,
+              boxShadow:`0 2px 6px ${item.id==="comunicaciones"?"rgba(255,32,64,0.5)":"rgba(255,107,0,0.5)"}`,
+            }}>{item.badge}</span>}
           </div>
         ))}
       </nav>
