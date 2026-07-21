@@ -5632,7 +5632,7 @@ const ChatListaCanales = ({canales,canalAct,noLeidos,onAbrirCanal}) => {
 };
 
 // ── COMUNICACIONES — solo orquesta, no define subcomponentes ─
-const Comunicaciones=({user,perfil,toast})=>{
+const Comunicaciones=({user,perfil,toast,onLeer})=>{
   const [canales,   setCanales]   = useState([]);
   const [canalAct,  setCanalAct]  = useState(null);
   const [mensajes,  setMensajes]  = useState([]);
@@ -5686,6 +5686,8 @@ const Comunicaciones=({user,perfil,toast})=>{
   useEffect(()=>{
     supabase.from("usuarios").select("*").eq("activo",true)
       .then(({data})=>setUsuarios(data||[]));
+    // Resetear badge al entrar al chat
+    if(onLeer) onLeer();
   },[]);
 
   useEffect(()=>{
@@ -6961,17 +6963,35 @@ export default function App(){
   const sessionLoadedRef = useRef(false);
   const [noLeidosChat, setNoLeidosChat] = useState(0);
 
-  // Calcular mensajes no leídos para el badge del menú
+  // Badge de no leídos — carga inicial + actualización en tiempo real
   useEffect(()=>{
     if(!perfil) return;
-    const storageKey=`boolean_chat_leido_${perfil.id}`;
-    let ultimosLeidos={};
-    try{ ultimosLeidos=JSON.parse(localStorage.getItem(storageKey)||"{}"); }catch{}
-    const ultimoGlobal = Object.values(ultimosLeidos).sort().pop()||"2000-01-01";
-    supabase.from("mensajes_chat").select("*",{count:"exact",head:true})
-      .neq("autor_id",perfil.id)
-      .gt("created_at",ultimoGlobal)
-      .then(({count})=>setNoLeidosChat(count||0));
+
+    const calcularNoLeidos = () => {
+      const storageKey=`boolean_chat_leido_${perfil.id}`;
+      let ultimosLeidos={};
+      try{ ultimosLeidos=JSON.parse(localStorage.getItem(storageKey)||"{}"); }catch{}
+      const ultimoGlobal = Object.values(ultimosLeidos).sort().pop()||"2000-01-01";
+      supabase.from("mensajes_chat").select("*",{count:"exact",head:true})
+        .neq("autor_id",perfil.id)
+        .gt("created_at",ultimoGlobal)
+        .then(({count})=>setNoLeidosChat(count||0));
+    };
+
+    // Carga inicial
+    calcularNoLeidos();
+
+    // Suscripción realtime para actualizar badge aunque estés en otro módulo
+    const sub = supabase.channel("badge_chat_global")
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"mensajes_chat"},
+        payload=>{
+          // Solo contar si el mensaje no es mío
+          if(payload.new.autor_id === perfil.id) return;
+          setNoLeidosChat(prev=>prev+1);
+        }
+      ).subscribe();
+
+    return ()=>{ supabase.removeChannel(sub); };
   },[perfil]);
 
   useEffect(()=>{
@@ -7130,7 +7150,7 @@ export default function App(){
           />}
           {view==="bulk"&&<BulkUpload user={user} toast={async(m)=>{toast(m);await recargarCasos();}}/>}
           {view==="analitica"&&<Analitica user={user} toast={toast}/>}
-          {view==="comunicaciones"&&<Comunicaciones user={user} perfil={perfil} toast={toast}/>}
+          {view==="comunicaciones"&&<Comunicaciones user={user} perfil={perfil} toast={toast} onLeer={()=>setNoLeidosChat(0)}/>}
           {view==="logros"&&<Logros user={user} toast={toast}/>}
           {view==="usuarios"&&<Usuarios user={user} perfil={perfil} toast={toast} casos={casos}/>}
           {view==="config"&&<Config user={user} toast={toast} minutosAntes={minutosAntes} setMinutosAntes={setMinutosAntes}/>}
