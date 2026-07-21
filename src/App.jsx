@@ -1090,6 +1090,7 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
   const [fP,       setFP]       = useState([]);
   const [fT,       setFT]       = useState([]);
   const [fAsig,    setFAsig]    = useState([]);
+  const [fDepto,   setFDepto]   = useState([]);
   const [selIds,   setSelIds]   = useState(new Set());
   const [tecnicos, setTecnicos] = useState([]);
   const [tecSel,   setTecSel]   = useState("");
@@ -1116,6 +1117,7 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
     if(!matchFiltro(fP,c.prioridad)) return false;
     if(fAsig.includes("ASIGNADO")&&!c.tecnico_id) return false;
     if(fAsig.includes("SIN_ASIGNAR")&&c.tecnico_id) return false;
+    if(fDepto.length>0&&!fDepto.includes(c.departamento)) return false;
     if(search){
       const q=search.toLowerCase();
       return (c.razon_social||"").toLowerCase().includes(q)||
@@ -1253,6 +1255,8 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
           opciones={PRIORS.map(p=>[p,p])}/>
         {!esRolTecnico&&<FiltroMultiple label="Asignación" valor={fAsig} onChange={setFAsig}
           opciones={[["ASIGNADO","✓ Asignados"],["SIN_ASIGNAR","○ Sin asignar"]]}/>}
+        <FiltroMultiple label="Departamento" valor={fDepto||[]} onChange={v=>setFDepto&&setFDepto(v)}
+          opciones={[...new Set(casos.map(c=>c.departamento).filter(Boolean))].sort().map(d=>[d,d])}/>
       </div>
 
       {/* Tarjetas */}
@@ -1449,18 +1453,20 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
         <FiltroMultiple label="Prioridad" valor={fP} onChange={setFP} opciones={PRIORS.map(p=>[p,p])}/>
         {!esRolTecnico&&<FiltroMultiple label="Asignación" valor={fAsig} onChange={setFAsig}
           opciones={[["ASIGNADO","✓ Asignados"],["SIN_ASIGNAR","○ Sin asignar"]]}/>}
+        <FiltroMultiple label="Departamento" valor={fDepto} onChange={setFDepto}
+          opciones={[...new Set(casos.map(c=>c.departamento).filter(Boolean))].sort().map(d=>[d,d])}/>
       </div>
 
       {/* Tabla */}
-      <div className="card" style={{overflow:"auto"}}>
-        <table>
+      <div style={{width:"100%",overflowX:"auto",background:B.card,border:`1px solid ${B.border}`}}>
+        <table style={{width:"100%",minWidth:900}}>
           <thead>
             <tr>
               {!esRolTecnico&&<th style={{width:36}}>
                 <input type="checkbox" checked={selIds.size===fil.length&&fil.length>0}
                   onChange={toggleAll} style={{width:14,height:14,accentColor:B.orange,cursor:"pointer"}}/>
               </th>}
-              {["TIPO","RAZÓN SOCIAL","ESTADO","PRIOR.","FRANJA","SLA","TÉCNICO"].map(h=><th key={h}>{h}</th>)}
+              {["TIPO","RAZÓN SOCIAL","DEPTO · LOCALIDAD","ESTADO","PRIOR.","FRANJA","SLA","TÉCNICO"].map(h=><th key={h}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -1481,6 +1487,10 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
                   <td>
                     <div style={{fontSize:12,fontWeight:600}}>{c.razon_social||"—"}</div>
                     <div style={{fontSize:10,color:B.t3}}>{c.numero||c.id_externo}</div>
+                  </td>
+                  <td>
+                    <div style={{fontSize:11,fontWeight:600,color:B.t1}}>{c.departamento||"—"}</div>
+                    <div style={{fontSize:10,color:B.t3}}>{c.localidad||""}</div>
                   </td>
                   <td>
                     <Tg label={c.estado||"—"} color={EC[c.estado]||B.t3}/>
@@ -1515,17 +1525,26 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
             {selIds.size} CASO{selIds.size>1?"S":""} SEL.
           </div>
           <select className="field" value={tecSel} onChange={e=>setTecSel(e.target.value)}
-            style={{flex:1,maxWidth:260}}>
+            style={{flex:1,maxWidth:280}}>
             <option value="">👤 Asignar técnico...</option>
             {tecnicos
               .filter(t=>{
-                // Filtrar por empresa de los casos seleccionados
-                const empresasCasos=[...new Set([...selIds].map(id=>casos.find(c=>c.id===id)?.empresa_id).filter(Boolean))];
-                return empresasCasos.length===0||empresasCasos.some(emp=>t.empresa_codigo===emp);
+                // Filtrar por departamento de los casos seleccionados
+                const deptosCasos=[...new Set(
+                  [...selIds].map(id=>casos.find(c=>c.id===id)?.departamento).filter(Boolean)
+                )];
+                if(deptosCasos.length===0) return true;
+                // El técnico debe cubrir al menos uno de los departamentos de los casos
+                const deptosT = t.departamentos||[];
+                if(deptosT.length===0) return true; // sin restricción configurada
+                return deptosCasos.some(d=>deptosT.includes(d));
               })
               .map(t=>{
                 const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
-                return <option key={t.id} value={t.id}>{t.nombre} {t.apellido} ({t.empresa_codigo}) — {carga} casos</option>;
+                const deptos=(t.departamentos||[]).slice(0,2).join(", ");
+                return <option key={t.id} value={t.id}>
+                  {t.nombre} {t.apellido} ({t.empresa_codigo}){deptos?` · ${deptos}`:""} — {carga} casos
+                </option>;
               })}
           </select>
           <Bb label={asignando?"...":"⚡ ASIGNAR"} onClick={asignarMasivo} disabled={!tecSel||asignando} small/>
