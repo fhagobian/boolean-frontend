@@ -6880,18 +6880,33 @@ export default function App(){
   };
   const puedeVer=(v)=>(PERMISOS[rol]||PERMISOS.DIRECTOR).includes(v);
 
+  const isMobileApp = window.innerWidth < 768;
+
   return(
     <div style={{minHeight:"100vh",background:B.bg,color:B.t1,fontFamily:"'Rajdhani',sans-serif",display:"flex",flexDirection:"column"}}>
       <Ticker casos={casos}/>
       <div style={{display:"flex",flex:1,overflow:"hidden",height:"calc(100vh - 24px)"}}>
-        <Sidebar view={view} setView={v=>{setViewPersist(v);setCasoDetalle(null);}} user={user} onLogout={async()=>{
-          setCasos([]); setPerfil(null); setCasoDetalle(null);
-          setViewPersist("mision");
-          sessionLoadedRef.current = false;
-          try{ localStorage.removeItem("boolean_view"); }catch{}
-          await supabase.auth.signOut();
-        }} casos={casos} perfil={perfil} noLeidosChat={noLeidosChat}/>
-        <main className={window.innerWidth<768?"mobile-main":""} style={{flex:1,overflowY:"auto",padding:window.innerWidth<768?"16px 14px":"24px 28px"}}>
+        {/* Sidebar — solo en desktop */}
+        {!isMobileApp && (
+          <Sidebar view={view} setView={v=>{setViewPersist(v);setCasoDetalle(null);}} user={user} onLogout={async()=>{
+            setCasos([]); setPerfil(null); setCasoDetalle(null);
+            setViewPersist("mision");
+            sessionLoadedRef.current = false;
+            try{ localStorage.removeItem("boolean_view"); }catch{}
+            await supabase.auth.signOut();
+          }} casos={casos} perfil={perfil} noLeidosChat={noLeidosChat}/>
+        )}
+        {/* Main content */}
+        <main style={{
+          flex:1,
+          overflowY:"auto",
+          padding: isMobileApp ? "12px 12px 80px" : "24px 32px",
+          maxWidth: isMobileApp ? "100%" : "none",
+          width: isMobileApp ? "100%" : "auto",
+        }}>
+          {view==="mision"&&!casoDetalle&&<Mision casos={casos} setView={setView} user={user} perfil={perfil}/>}
+          {view==="ruta"&&<MiRutaDelDia user={user} toast={toast} perfil={perfil}/>}
+          {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);}} onNew={()=>setViewPersist("nuevo")}/>}
           {view==="mision"&&!casoDetalle&&<Mision casos={casos} setView={setView} user={user} perfil={perfil}/>}
           {view==="ruta"&&<MiRutaDelDia user={user} toast={toast} perfil={perfil}/>}
           {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);}} onNew={()=>setViewPersist("nuevo")}/>}
@@ -6950,6 +6965,16 @@ export default function App(){
           {view==="config"&&<Config user={user} toast={toast} minutosAntes={minutosAntes} setMinutosAntes={setMinutosAntes}/>}
         </main>
       </div>
+      {/* Sidebar mobile — barra inferior, siempre visible */}
+      {isMobileApp && (
+        <Sidebar view={view} setView={v=>{setViewPersist(v);setCasoDetalle(null);}} user={user} onLogout={async()=>{
+          setCasos([]); setPerfil(null); setCasoDetalle(null);
+          setViewPersist("mision");
+          sessionLoadedRef.current = false;
+          try{ localStorage.removeItem("boolean_view"); }catch{}
+          await supabase.auth.signOut();
+        }} casos={casos} perfil={perfil} noLeidosChat={noLeidosChat}/>
+      )}
       {toastMsg&&<Toast msg={toastMsg}/>}
     </div>
   );
