@@ -338,37 +338,103 @@ const Spin = ({s=18}) => <div style={{width:s,height:s,border:`2px solid ${B.bor
 const Dot  = ({c,pulse,s=7}) => <div style={{width:s,height:s,borderRadius:"50%",background:c,flexShrink:0}} className={pulse?"live":""}/>;
 
 const Bb = ({label,onClick,color=B.orange,ghost,small,disabled,icon,style={},full,saving}) => {
-  // Map color to CSS class
-  const colorMap = {
-    [B.orange]:"btn-orange","#FF6B00":"btn-orange",
-    [B.green]:"btn-green","#00E87A":"btn-green",
-    [B.red]:"btn-red","#FF2040":"btn-red",
-    [B.blue]:"btn-blue","#00A8FF":"btn-blue",
-    [B.yellow]:"btn-yellow","#FFD020":"btn-yellow",
-    [B.purple]:"btn-orange", // fallback
+  const STYLES = {
+    [B.orange]: {
+      bg:"linear-gradient(180deg,#FF9040 0%,#FF6B00 50%,#CC4400 100%)",
+      color:"#050507", borderTop:"1px solid #FFB060", borderBottom:"3px solid #882200",
+      shadow:"0 4px 14px rgba(255,107,0,0.35),0 2px 4px rgba(0,0,0,0.6)",
+      shadowHover:"0 10px 24px rgba(255,107,0,0.55),0 4px 8px rgba(0,0,0,0.7)",
+    },
+    [B.green]: {
+      bg:"linear-gradient(180deg,#20E870 0%,#00C860 50%,#008040 100%)",
+      color:"#020F06", borderTop:"1px solid #40FF90", borderBottom:"3px solid #004020",
+      shadow:"0 4px 14px rgba(0,232,122,0.3),0 2px 4px rgba(0,0,0,0.6)",
+      shadowHover:"0 10px 24px rgba(0,232,122,0.5),0 4px 8px rgba(0,0,0,0.7)",
+    },
+    [B.red]: {
+      bg:"linear-gradient(180deg,#2a0810 0%,#1a0408 50%,#0a0203 100%)",
+      color:"#FF2040", borderTop:"1px solid #3a1020", borderBottom:"3px solid #050102",
+      shadow:"0 4px 14px rgba(255,32,64,0.2),0 2px 4px rgba(0,0,0,0.6)",
+      shadowHover:"0 10px 24px rgba(255,32,64,0.4),0 4px 8px rgba(0,0,0,0.7)",
+    },
+    [B.blue]: {
+      bg:"linear-gradient(180deg,#20A8E0 0%,#0088CC 50%,#004880 100%)",
+      color:"#000810", borderTop:"1px solid #40C8FF", borderBottom:"3px solid #002040",
+      shadow:"0 4px 14px rgba(0,168,255,0.25),0 2px 4px rgba(0,0,0,0.6)",
+      shadowHover:"0 10px 24px rgba(0,168,255,0.45),0 4px 8px rgba(0,0,0,0.7)",
+    },
+    [B.yellow||"#FFD020"]: {
+      bg:"linear-gradient(180deg,#FFE040 0%,#FFD020 50%,#CC9000 100%)",
+      color:"#0F0A00", borderTop:"1px solid #FFF060", borderBottom:"3px solid #805800",
+      shadow:"0 4px 14px rgba(255,208,32,0.25),0 2px 4px rgba(0,0,0,0.6)",
+      shadowHover:"0 10px 24px rgba(255,208,32,0.45),0 4px 8px rgba(0,0,0,0.7)",
+    },
+    [B.purple||"#9B6DFF"]: {
+      bg:"linear-gradient(180deg,#7050E0 0%,#5030C0 50%,#301880 100%)",
+      color:"#F0E8FF", borderTop:"1px solid #9070FF", borderBottom:"3px solid #180840",
+      shadow:"0 4px 14px rgba(155,109,255,0.25),0 2px 4px rgba(0,0,0,0.6)",
+      shadowHover:"0 10px 24px rgba(155,109,255,0.45),0 4px 8px rgba(0,0,0,0.7)",
+    },
   };
-  const colorClass = ghost ? "btn-ghost" : (colorMap[color]||"btn-orange");
-  const textCol = ghost ? color : (
-    colorClass==="btn-green"?"#020F06":
-    colorClass==="btn-blue"?"#000810":
-    colorClass==="btn-yellow"?"#0F0A00":
-    colorClass==="btn-red"?color:
-    "#050507"
-  );
+  const s = STYLES[color] || STYLES[B.orange];
+  const baseStyle = ghost ? {
+    background:"transparent",
+    color:color,
+    border:`1px solid ${color}77`,
+    borderBottom:`2px solid ${color}44`,
+    boxShadow:"0 3px 8px rgba(0,0,0,0.4)",
+  } : {
+    background:s.bg,
+    color:s.color,
+    border:"none",
+    borderTop:s.borderTop,
+    borderBottom:s.borderBottom,
+    boxShadow:s.shadow,
+  };
   return (
-    <button className={`btn ${colorClass}`} onClick={onClick} disabled={disabled||saving} style={{
-      color: ghost ? color : textCol,
-      padding: small ? "6px 14px" : "12px 22px",
-      fontSize: small ? 10 : 12,
-      width: full ? "100%" : "auto",
-      justifyContent: full ? "center" : "flex-start",
-      ...style
-    }}>
+    <button
+      onClick={onClick}
+      disabled={disabled||saving}
+      onMouseOver={e=>{
+        if(disabled||saving) return;
+        e.currentTarget.style.transform="translateY(-3px)";
+        e.currentTarget.style.filter="brightness(1.12)";
+        e.currentTarget.style.boxShadow=ghost?`0 8px 20px rgba(0,0,0,0.5)`:s.shadowHover;
+      }}
+      onMouseOut={e=>{
+        e.currentTarget.style.transform="";
+        e.currentTarget.style.filter="";
+        e.currentTarget.style.boxShadow=baseStyle.boxShadow||"";
+      }}
+      onMouseDown={e=>{ e.currentTarget.style.transform="translateY(2px)"; e.currentTarget.style.filter="brightness(0.85)"; }}
+      onMouseUp={e=>{ e.currentTarget.style.transform="translateY(-3px)"; e.currentTarget.style.filter="brightness(1.12)"; }}
+      style={{
+        ...baseStyle,
+        cursor:disabled||saving?"not-allowed":"pointer",
+        opacity:disabled||saving?0.4:1,
+        padding:small?"6px 14px":"12px 22px",
+        fontSize:small?10:12,
+        fontFamily:"'Orbitron',sans-serif",
+        fontWeight:700,
+        letterSpacing:".1em",
+        textTransform:"uppercase",
+        borderRadius:3,
+        display:"inline-flex",
+        alignItems:"center",
+        gap:8,
+        transition:"transform .13s ease,filter .13s ease",
+        width:full?"100%":"auto",
+        justifyContent:full?"center":"flex-start",
+        position:"relative",
+        overflow:"hidden",
+        ...style,
+      }}>
       {icon&&<span>{icon}</span>}
       {saving?"GUARDANDO...":label}
     </button>
   );
 };
+
 
 
 
@@ -409,8 +475,22 @@ const Modal = ({title,onClose,children,width=680}) => (
   </div>
 );
 const BtnVolver = ({onClick, label="← VOLVER"}) => (
-  <button onClick={onClick} className="btn btn-orange"
-    style={{color:"#050507",padding:"11px 20px",fontSize:11}}>
+  <button onClick={onClick}
+    onMouseOver={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 10px 24px rgba(255,107,0,0.55),0 4px 8px rgba(0,0,0,0.7)";e.currentTarget.style.filter="brightness(1.12)";}}
+    onMouseOut={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="0 4px 14px rgba(255,107,0,0.35),0 2px 4px rgba(0,0,0,0.6)";e.currentTarget.style.filter="";}}
+    onMouseDown={e=>{e.currentTarget.style.transform="translateY(2px)";e.currentTarget.style.filter="brightness(0.85)";}}
+    onMouseUp={e=>{e.currentTarget.style.transform="translateY(-3px)";}}
+    style={{
+      background:"linear-gradient(180deg,#FF9040 0%,#FF6B00 50%,#CC4400 100%)",
+      color:"#050507", border:"none",
+      borderTop:"1px solid #FFB060", borderBottom:"3px solid #882200",
+      padding:"11px 20px", fontSize:11, fontWeight:700,
+      fontFamily:"'Orbitron',sans-serif", letterSpacing:".1em",
+      textTransform:"uppercase", borderRadius:3, cursor:"pointer",
+      display:"inline-flex", alignItems:"center", gap:8,
+      boxShadow:"0 4px 14px rgba(255,107,0,0.35),0 2px 4px rgba(0,0,0,0.6)",
+      transition:"transform .13s ease,filter .13s ease",
+    }}>
     {label}
   </button>
 );
@@ -3889,16 +3969,22 @@ const PantallaAccion = ({color, icono, titulo, subtitulo, pasoActual, totalPasos
       borderBottom:`1px solid ${color}33`,
       background:"#0A0A0F",
     }}>
-      <button onClick={onVolver} style={{
-        background:"linear-gradient(180deg,#FF6B00EE 0%,#FF6B00 60%,#CC5500 100%)",
-        border:"1px solid #FF6B00",
-        color:"#050507", cursor:"pointer", padding:"10px 18px",
-        fontSize:12, fontWeight:700, letterSpacing:".08em",
-        fontFamily:"'Orbitron',sans-serif",
-        borderRadius:2, marginBottom:14,
-        display:"flex", alignItems:"center", gap:8,
-        boxShadow:"0 1px 0 rgba(255,255,255,0.15) inset,0 -2px 0 rgba(0,0,0,0.35) inset,0 4px 12px rgba(255,107,0,0.2),0 2px 4px rgba(0,0,0,0.5)",
-      }}>← VOLVER</button>
+      <button onClick={onVolver}
+        onMouseOver={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 10px 24px rgba(255,107,0,0.55)";e.currentTarget.style.filter="brightness(1.12)";}}
+        onMouseOut={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="0 4px 14px rgba(255,107,0,0.35),0 2px 4px rgba(0,0,0,0.6)";e.currentTarget.style.filter="";}}
+        onMouseDown={e=>{e.currentTarget.style.transform="translateY(2px)";e.currentTarget.style.filter="brightness(0.85)";}}
+        onMouseUp={e=>{e.currentTarget.style.transform="translateY(-3px)";}}
+        style={{
+          background:"linear-gradient(180deg,#FF9040 0%,#FF6B00 50%,#CC4400 100%)",
+          color:"#050507",border:"none",
+          borderTop:"1px solid #FFB060",borderBottom:"3px solid #882200",
+          padding:"10px 18px",fontSize:10,fontWeight:700,
+          fontFamily:"'Orbitron',sans-serif",letterSpacing:".1em",
+          textTransform:"uppercase",borderRadius:3,cursor:"pointer",
+          display:"flex",alignItems:"center",gap:8,marginBottom:14,
+          boxShadow:"0 4px 14px rgba(255,107,0,0.35),0 2px 4px rgba(0,0,0,0.6)",
+          transition:"transform .13s ease,filter .13s ease",
+        }}>← VOLVER</button>
 
       {/* Barra de progreso */}
       {totalPasos>1&&(
