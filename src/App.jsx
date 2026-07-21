@@ -183,6 +183,10 @@ const css = `
   /* Mobile */
   @media(max-width:767px){
     .mobile-main{padding:12px 12px 80px 12px!important;}
+    .main-content{padding:24px 32px;}
+    @media(max-width:767px){
+      .main-content{padding:12px 12px 80px 12px !important;}
+    }
     table{font-size:12px;}
     th,td{padding:7px 8px!important;}
     .modal-box{clip-path:none!important;border-radius:8px 8px 0 0;}
@@ -6880,33 +6884,22 @@ export default function App(){
   };
   const puedeVer=(v)=>(PERMISOS[rol]||PERMISOS.DIRECTOR).includes(v);
 
-  const isMobileApp = window.innerWidth < 768;
-
   return(
     <div style={{minHeight:"100vh",background:B.bg,color:B.t1,fontFamily:"'Rajdhani',sans-serif",display:"flex",flexDirection:"column"}}>
       <Ticker casos={casos}/>
       <div style={{display:"flex",flex:1,overflow:"hidden",height:"calc(100vh - 24px)"}}>
-        {/* Sidebar — solo en desktop */}
-        {!isMobileApp && (
-          <Sidebar view={view} setView={v=>{setViewPersist(v);setCasoDetalle(null);}} user={user} onLogout={async()=>{
-            setCasos([]); setPerfil(null); setCasoDetalle(null);
-            setViewPersist("mision");
-            sessionLoadedRef.current = false;
-            try{ localStorage.removeItem("boolean_view"); }catch{}
-            await supabase.auth.signOut();
-          }} casos={casos} perfil={perfil} noLeidosChat={noLeidosChat}/>
-        )}
-        {/* Main content */}
-        <main style={{
-          flex:1,
-          overflowY:"auto",
-          padding: isMobileApp ? "12px 12px 80px" : "24px 32px",
-          maxWidth: isMobileApp ? "100%" : "none",
-          width: isMobileApp ? "100%" : "auto",
+        <Sidebar view={view} setView={v=>{setViewPersist(v);setCasoDetalle(null);}} user={user} onLogout={async()=>{
+          setCasos([]); setPerfil(null); setCasoDetalle(null);
+          setViewPersist("mision");
+          sessionLoadedRef.current = false;
+          try{ localStorage.removeItem("boolean_view"); }catch{}
+          await supabase.auth.signOut();
+        }} casos={casos} perfil={perfil} noLeidosChat={noLeidosChat}/>
+        <main className="main-content" style={{
+          flex:1, overflowY:"auto",
+          padding:"24px 32px",
+          width:0,
         }}>
-          {view==="mision"&&!casoDetalle&&<Mision casos={casos} setView={setView} user={user} perfil={perfil}/>}
-          {view==="ruta"&&<MiRutaDelDia user={user} toast={toast} perfil={perfil}/>}
-          {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);}} onNew={()=>setViewPersist("nuevo")}/>}
           {view==="mision"&&!casoDetalle&&<Mision casos={casos} setView={setView} user={user} perfil={perfil}/>}
           {view==="ruta"&&<MiRutaDelDia user={user} toast={toast} perfil={perfil}/>}
           {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);}} onNew={()=>setViewPersist("nuevo")}/>}
@@ -6915,7 +6908,6 @@ export default function App(){
             const instrEsp = f.tiene_instrucciones && f.instrucciones_texto?.trim()
               ? { texto: f.instrucciones_texto.trim(), adjuntos: [], autor: user.email, ts: new Date().toISOString(), editado: false }
               : null;
-            // Calcular SLA en días hábiles
             const feriados = await cargarFeriados();
             const diasHab = SLA_DIAS_HABILES[f.tipo_proceso] || 3;
             const slaDeadline = sumarDiasHabiles(new Date(), diasHab, feriados);
@@ -6926,7 +6918,7 @@ export default function App(){
               tiene_instrucciones: undefined,
               instrucciones_texto: undefined,
               estado:"PENDIENTE",creado_por:user.id,
-              sla_horas: diasHab * 8, // referencia en horas para compatibilidad
+              sla_horas: diasHab * 8,
               sla_deadline: slaDeadline.toISOString(),
               sla_dias_habiles: diasHab,
               historial:[
@@ -6965,16 +6957,6 @@ export default function App(){
           {view==="config"&&<Config user={user} toast={toast} minutosAntes={minutosAntes} setMinutosAntes={setMinutosAntes}/>}
         </main>
       </div>
-      {/* Sidebar mobile — barra inferior, siempre visible */}
-      {isMobileApp && (
-        <Sidebar view={view} setView={v=>{setViewPersist(v);setCasoDetalle(null);}} user={user} onLogout={async()=>{
-          setCasos([]); setPerfil(null); setCasoDetalle(null);
-          setViewPersist("mision");
-          sessionLoadedRef.current = false;
-          try{ localStorage.removeItem("boolean_view"); }catch{}
-          await supabase.auth.signOut();
-        }} casos={casos} perfil={perfil} noLeidosChat={noLeidosChat}/>
-      )}
       {toastMsg&&<Toast msg={toastMsg}/>}
     </div>
   );
