@@ -194,12 +194,39 @@ const css = `
   .spin{animation:spin .75s linear infinite}
   .glow{animation:glow 3s ease-in-out infinite}
   .float{animation:float 3.5s ease-in-out infinite}
-  .btn{cursor:pointer;border:none;outline:none;font-family:'Rajdhani',sans-serif;font-weight:700;
-    letter-spacing:.07em;text-transform:uppercase;transition:all .15s;
-    display:inline-flex;align-items:center;gap:6px}
-  .btn:hover{filter:brightness(1.18);transform:translateY(-1px)}
-  .btn:active{filter:brightness(.88);transform:translateY(0)}
-  .btn:disabled{opacity:.3;pointer-events:none}
+  .btn{
+    cursor:pointer;border:none;outline:none;
+    font-family:'Orbitron',sans-serif;font-weight:700;
+    letter-spacing:.08em;text-transform:uppercase;
+    transition:all .12s ease;
+    display:inline-flex;align-items:center;gap:6px;
+    position:relative;
+    border-radius:2px;
+    /* Relieve sutil */
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.08) inset,
+      0 -1px 0 rgba(0,0,0,0.4) inset,
+      0 3px 8px rgba(0,0,0,0.4),
+      0 1px 2px rgba(0,0,0,0.6);
+  }
+  .btn:hover{
+    transform:translateY(-2px);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.12) inset,
+      0 -1px 0 rgba(0,0,0,0.5) inset,
+      0 6px 16px rgba(0,0,0,0.4),
+      0 2px 4px rgba(0,0,0,0.6);
+    filter:brightness(1.12);
+  }
+  .btn:active{
+    transform:translateY(1px);
+    box-shadow:
+      0 -1px 0 rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(0,0,0,0.5) inset,
+      0 1px 3px rgba(0,0,0,0.5);
+    filter:brightness(0.9);
+  }
+  .btn:disabled{opacity:.35;pointer-events:none;box-shadow:none;}
   .field{background:#0A0A0E;border:1px solid #1C1C2C;border-radius:3px;
     color:#F4F4FF;padding:9px 12px;font-size:13px;width:100%;
     font-family:'Rajdhani',sans-serif;font-weight:500;transition:border-color .15s,box-shadow .15s}
@@ -254,16 +281,29 @@ const css = `
 const Spin = ({s=18}) => <div style={{width:s,height:s,border:`2px solid ${B.border}`,borderTopColor:B.orange,borderRadius:"50%"}} className="spin"/>;
 const Dot  = ({c,pulse,s=7}) => <div style={{width:s,height:s,borderRadius:"50%",background:c,flexShrink:0}} className={pulse?"live":""}/>;
 
-const Bb = ({label,onClick,color=B.orange,ghost,small,disabled,icon,style={},full}) => (
-  <button className="btn" onClick={onClick} disabled={disabled} style={{
-    background:ghost?color+"18":color, color:ghost?color:"#050507",
-    border:`1px solid ${ghost?color+"55":"transparent"}`,
-    padding:small?"5px 13px":"10px 20px", fontSize:small?11:13,
-    clipPath:"polygon(6px 0%,100% 0%,calc(100% - 6px) 100%,0% 100%)",
-    width:full?"100%":"auto", justifyContent:full?"center":"flex-start", ...style}}>
-  {icon&&<span>{icon}</span>}{label}
-  </button>
-);
+const Bb = ({label,onClick,color=B.orange,ghost,small,disabled,icon,style={},full,saving}) => {
+  const bg = ghost ? "transparent" : color;
+  const textCol = ghost ? color : "#050507";
+  const border = ghost ? `1px solid ${color}66` : `1px solid ${color}`;
+  const shadow = ghost
+    ? "0 2px 6px rgba(0,0,0,0.3)"
+    : `0 1px 0 rgba(255,255,255,0.15) inset,0 -2px 0 rgba(0,0,0,0.35) inset,0 4px 12px ${color}33,0 2px 4px rgba(0,0,0,0.5)`;
+  const bgImg = ghost ? "none" : `linear-gradient(180deg,${color}EE 0%,${color} 60%,${color}CC 100%)`;
+  return (
+    <button className="btn" onClick={onClick} disabled={disabled||saving} style={{
+      background:bg, color:textCol, border,
+      padding:small?"6px 14px":"11px 22px",
+      fontSize:small?11:13,
+      width:full?"100%":"auto",
+      justifyContent:full?"center":"flex-start",
+      boxShadow:shadow, backgroundImage:bgImg, ...style
+    }}>
+      {icon&&<span>{icon}</span>}
+      {saving?"GUARDANDO...":label}
+    </button>
+  );
+};
+
 
 const Tg = ({label,color}) => (
   <span className="tag" style={{background:color+"20",color,border:`1px solid ${color}33`}}>{label}</span>
@@ -303,21 +343,27 @@ const Modal = ({title,onClose,children,width=680}) => (
 );
 const BtnVolver = ({onClick, label="← VOLVER"}) => (
   <button onClick={onClick} style={{
-    background:"#FF6B0022",
-    border:"2px solid #FF6B00",
-    color:"#FF6B00",
+    background:"linear-gradient(180deg,#FF6B00EE 0%,#FF6B00 60%,#CC5500 100%)",
+    border:"1px solid #FF6B00",
+    color:"#050507",
     cursor:"pointer",
-    padding:"10px 20px",
-    fontSize:14,
+    padding:"11px 22px",
+    fontSize:12,
     fontWeight:700,
     fontFamily:"'Orbitron',sans-serif",
-    borderRadius:4,
-    letterSpacing:".04em",
-    display:"flex",
+    letterSpacing:".08em",
+    borderRadius:2,
+    display:"inline-flex",
     alignItems:"center",
     gap:8,
-    transition:"all .15s",
-  }}>{label}</button>
+    boxShadow:"0 1px 0 rgba(255,255,255,0.15) inset,0 -2px 0 rgba(0,0,0,0.35) inset,0 4px 12px rgba(255,107,0,0.25),0 2px 4px rgba(0,0,0,0.5)",
+    transition:"all .12s ease",
+  }}
+  onMouseOver={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.filter="brightness(1.12)";}}
+  onMouseOut={e=>{e.currentTarget.style.transform="";e.currentTarget.style.filter="";}}
+  onMouseDown={e=>{e.currentTarget.style.transform="translateY(1px)";e.currentTarget.style.filter="brightness(0.9)";}}
+  onMouseUp={e=>{e.currentTarget.style.transform="";e.currentTarget.style.filter="";}}
+  >{label}</button>
 );
 
 const Ticker = ({casos}) => {
@@ -3789,10 +3835,14 @@ const PantallaAccion = ({color, icono, titulo, subtitulo, pasoActual, totalPasos
       background:"#0A0A0F",
     }}>
       <button onClick={onVolver} style={{
-        background:"none", border:`1px solid #333`,
-        color:"#888", cursor:"pointer", padding:"10px 18px",
-        fontSize:14, marginBottom:14, borderRadius:2,
+        background:"linear-gradient(180deg,#FF6B00EE 0%,#FF6B00 60%,#CC5500 100%)",
+        border:"1px solid #FF6B00",
+        color:"#050507", cursor:"pointer", padding:"10px 18px",
+        fontSize:12, fontWeight:700, letterSpacing:".08em",
+        fontFamily:"'Orbitron',sans-serif",
+        borderRadius:2, marginBottom:14,
         display:"flex", alignItems:"center", gap:8,
+        boxShadow:"0 1px 0 rgba(255,255,255,0.15) inset,0 -2px 0 rgba(0,0,0,0.35) inset,0 4px 12px rgba(255,107,0,0.2),0 2px 4px rgba(0,0,0,0.5)",
       }}>← VOLVER</button>
 
       {/* Barra de progreso */}
@@ -5835,10 +5885,12 @@ const Comunicaciones=({user,perfil,toast,onLeer})=>{
               localStorage.removeItem(`boolean_chat_canal_${miId}`);
             }catch{}
           }} style={{
-            background:"#FF6B0022",border:"2px solid #FF6B00",
-            color:"#FF6B00",cursor:"pointer",padding:"10px 16px",
-            fontSize:16,borderRadius:4,flexShrink:0,fontWeight:700,
+            background:"linear-gradient(180deg,#FF6B00EE 0%,#FF6B00 60%,#CC5500 100%)",
+            border:"1px solid #FF6B00",
+            color:"#050507",cursor:"pointer",padding:"10px 16px",
+            fontSize:16,borderRadius:2,flexShrink:0,fontWeight:700,
             fontFamily:"'Orbitron',sans-serif",
+            boxShadow:"0 1px 0 rgba(255,255,255,0.15) inset,0 -2px 0 rgba(0,0,0,0.35) inset,0 4px 12px rgba(255,107,0,0.2),0 2px 4px rgba(0,0,0,0.5)",
           }}>←</button>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:14,fontWeight:700,color:"#ccc",
