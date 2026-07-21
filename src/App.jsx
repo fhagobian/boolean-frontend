@@ -6165,333 +6165,355 @@ const Comunicaciones=({user,perfil,toast,onLeer})=>{
 };
 
 const Usuarios=({user,perfil,toast,casos})=>{
-  const [usuarios,  setUsuarios]  = useState([]);
-  const [loading,   setLoading]   = useState(true);
-  const [editando,  setEditando]  = useState(null); // null | "nuevo" | usuario
-  const [filtroRol, setFiltroRol] = useState("ALL");
-  const [search,    setSearch]    = useState("");
-  const [form, setForm] = useState({
-    nombre:"", apellido:"", email:"", rol:"TECNICO",
-    empresa_codigo:"", supervisor_id:"", activo:true,
-  });
+  const [usuarios,   setUsuarios]   = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [showForm,   setShowForm]   = useState(false);
+  const [editUser,   setEditUser]   = useState(null); // null = nuevo, obj = editar
+  const [saving,     setSaving]     = useState(false);
+  const [filtroEmp,  setFiltroEmp]  = useState("");
+  const [filtroRol,  setFiltroRol]  = useState("");
+  const [busqueda,   setBusqueda]   = useState("");
 
-  const esDirector   = perfil?.rol==="DIRECTOR";
-  const esRegional   = perfil?.rol==="REGIONAL";
-  const esSupervisor = perfil?.rol==="SUPERVISOR";
-  const soloLectura  = esSupervisor;
+  const esDirector  = perfil?.rol==="DIRECTOR";
+  const esRegional  = perfil?.rol==="REGIONAL";
+  const esSupervisor= perfil?.rol==="SUPERVISOR";
+  const puedeEditar = esDirector||esRegional;
+
+  const FORM_INIT = {
+    nombre:"", apellido:"", email:"", password:"",
+    rol:"TECNICO", empresa_codigo:perfil?.empresa_codigo||"",
+    supervisor_id:"", activo:true,
+  };
+  const [form, setForm] = useState(FORM_INIT);
+  const sf = (k,v) => setForm(p=>({...p,[k]:v}));
 
   useEffect(()=>{ cargar(); },[]);
 
-  const cargar=async()=>{
+  const cargar = async()=>{
     setLoading(true);
-    let q = supabase.from("usuarios").select("*").order("empresa_codigo").order("rol");
-    if(esRegional||esSupervisor){
-      q = q.eq("empresa_codigo", perfil.empresa_codigo);
-    }
-    const{data}=await q;
+    let q = supabase.from("usuarios").select("*").order("empresa_codigo").order("rol").order("nombre");
+    if(esRegional) q = q.eq("empresa_codigo", perfil?.empresa_codigo);
+    if(esSupervisor) q = q.eq("empresa_codigo", perfil?.empresa_codigo);
+    const {data} = await q;
     setUsuarios(data||[]);
     setLoading(false);
   };
 
-  const supervisores = usuarios.filter(u=>u.rol==="SUPERVISOR"&&u.activo);
-  const tecnicos     = usuarios.filter(u=>u.rol==="TECNICO");
-
-  const fil = usuarios.filter(u=>{
-    if(filtroRol!=="ALL"&&u.rol!==filtroRol) return false;
-    if(search){
-      const q=search.toLowerCase();
-      return (u.nombre||"").toLowerCase().includes(q)||
-             (u.apellido||"").toLowerCase().includes(q)||
-             (u.email||"").toLowerCase().includes(q);
-    }
-    return true;
-  });
-
-  const s=(k,v)=>setForm(f=>({...f,[k]:v}));
-
-  const abrirNuevo=()=>{
-    setForm({nombre:"",apellido:"",email:"",rol:"TECNICO",
-      empresa_codigo:esRegional?perfil.empresa_codigo:"",
-      supervisor_id:"",activo:true});
-    setEditando("nuevo");
+  const abrirNuevo = ()=>{
+    setForm({...FORM_INIT, empresa_codigo:esRegional?perfil?.empresa_codigo:""});
+    setEditUser(null);
+    setShowForm(true);
   };
 
-  const abrirEditar=(u)=>{
-    setForm({nombre:u.nombre||"",apellido:u.apellido||"",
-      email:u.email||"",rol:u.rol||"TECNICO",
+  const abrirEditar = (u)=>{
+    setForm({
+      nombre:u.nombre||"", apellido:u.apellido||"",
+      email:u.email||"", password:"",
+      rol:u.rol||"TECNICO",
       empresa_codigo:u.empresa_codigo||"",
-      supervisor_id:u.supervisor_id||"",activo:u.activo!==false});
-    setEditando(u);
+      supervisor_id:u.supervisor_id||"",
+      activo:u.activo!==false,
+    });
+    setEditUser(u);
+    setShowForm(true);
   };
 
-  const guardar=async()=>{
-    if(editando==="nuevo"){
-      // Crear usuario en Supabase Auth via Admin API no disponible en frontend
-      // Insertamos en tabla usuarios — el email se usa para login manual
-      const{error}=await supabase.from("usuarios").insert({
-        ...form,
-        created_at:new Date().toISOString(),
-      });
-      if(error){ toast("Error: "+error.message); return; }
-      toast("✓ Usuario creado. Pedile que se registre con ese email.");
-    } else {
-      const{error}=await supabase.from("usuarios").update({
-        nombre:form.nombre, apellido:form.apellido,
-        rol:form.rol, empresa_codigo:form.empresa_codigo,
-        supervisor_id:form.supervisor_id||null,
-        activo:form.activo, updated_at:new Date().toISOString(),
-      }).eq("id",editando.id);
-      if(error){ toast("Error: "+error.message); return; }
-      toast("✓ Usuario actualizado");
+  const guardar = async()=>{
+    if(!form.nombre||!form.apellido||!form.email||!form.empresa_codigo){
+      toast("Completá todos los campos obligatorios"); return;
     }
-    await cargar(); setEditando(null);
+    if(!editUser && !form.password){
+      toast("La contraseña es obligatoria para usuarios nuevos"); return;
+    }
+    setSaving(true);
+    try {
+      if(editUser){
+        // Editar usuario existente
+        const {error} = await supabase.from("usuarios").update({
+          nombre:form.nombre, apellido:form.apellido,
+          rol:form.rol, empresa_codigo:form.empresa_codigo,
+          supervisor_id:form.supervisor_id||null,
+          activo:form.activo,
+          updated_at:new Date().toISOString(),
+        }).eq("id",editUser.id);
+        if(error){ toast("Error: "+error.message); return; }
+        // Resetear contraseña si se ingresó una nueva
+        if(form.password.trim()){
+          const res = await fetch(`https://mvavxxhjazwfovjvjnbm.supabase.co/auth/v1/admin/users/${editUser.auth_id}`,{
+            method:"PUT",
+            headers:{"Content-Type":"application/json",
+              "apikey":import.meta.env.VITE_SUPABASE_ANON_KEY,
+              "Authorization":`Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`},
+            body:JSON.stringify({password:form.password}),
+          });
+          if(!res.ok) toast("Usuario actualizado pero no se pudo cambiar la contraseña");
+        }
+        toast("✓ Usuario actualizado");
+      } else {
+        // Crear usuario nuevo en Supabase Auth
+        const {data:authData, error:authError} = await supabase.auth.admin?.createUser?.({
+          email:form.email, password:form.password, email_confirm:true,
+        }) || {};
+
+        if(authError){ toast("Error creando auth: "+authError.message); return; }
+
+        const authId = authData?.user?.id;
+        if(!authId){ toast("No se pudo obtener el ID del usuario"); return; }
+
+        const {error} = await supabase.from("usuarios").insert({
+          id:authId, auth_id:authId,
+          email:form.email, nombre:form.nombre, apellido:form.apellido,
+          rol:form.rol, empresa_codigo:form.empresa_codigo,
+          supervisor_id:form.supervisor_id||null,
+          activo:true, created_at:new Date().toISOString(),
+        });
+        if(error){ toast("Error: "+error.message); return; }
+        toast("✓ Usuario creado");
+      }
+      await cargar();
+      setShowForm(false);
+    } catch(e){
+      toast("Error: "+e.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const toggleActivo=async(u)=>{
+  const toggleActivo = async(u)=>{
     await supabase.from("usuarios").update({activo:!u.activo}).eq("id",u.id);
     await cargar();
     toast(u.activo?"Usuario desactivado":"Usuario activado");
   };
 
-  const asignarSupervisor=async(tecnicoId, supId)=>{
-    await supabase.from("usuarios").update({
-      supervisor_id: supId||null
-    }).eq("id",tecnicoId);
-    await cargar();
-    toast("✓ Supervisor asignado");
-  };
+  const ROL_COLOR = {DIRECTOR:"#FF6B00",REGIONAL:"#00A8FF",SUPERVISOR:"#9B6DFF",TECNICO:"#00E87A"};
+  const supervisores = usuarios.filter(u=>u.rol==="SUPERVISOR"&&u.empresa_codigo===form.empresa_codigo);
 
-  const ROL_COLOR={DIRECTOR:B.orange,REGIONAL:B.blue,SUPERVISOR:B.purple,TECNICO:B.green};
-  const ROL_ICON={DIRECTOR:"👑",REGIONAL:"🏢",SUPERVISOR:"👔",TECNICO:"🔧"};
+  const usuariosFiltrados = usuarios.filter(u=>{
+    if(filtroEmp && u.empresa_codigo!==filtroEmp) return false;
+    if(filtroRol && u.rol!==filtroRol) return false;
+    if(busqueda){
+      const b=busqueda.toLowerCase();
+      if(!`${u.nombre} ${u.apellido} ${u.email}`.toLowerCase().includes(b)) return false;
+    }
+    return true;
+  });
 
-  // ── FORMULARIO ─────────────────────────────────────────
-  if(editando&&!soloLectura) return(
-    <div style={{maxWidth:600}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
-        <button onClick={()=>setEditando(null)}
-          style={{background:"none",border:`1px solid ${B.border}`,color:B.t2,
-            cursor:"pointer",padding:"8px 16px",fontSize:13,fontFamily:"'Orbitron',sans-serif"}}>
-          ← VOLVER
-        </button>
-        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,fontWeight:900,color:B.t1}}>
-          {editando==="nuevo"?"NUEVO USUARIO":`EDITANDO: ${editando.nombre} ${editando.apellido}`}
+  // Agrupar por empresa
+  const porEmpresa = {};
+  usuariosFiltrados.forEach(u=>{
+    if(!porEmpresa[u.empresa_codigo]) porEmpresa[u.empresa_codigo]=[];
+    porEmpresa[u.empresa_codigo].push(u);
+  });
+
+  if(showForm) return (
+    <div style={{maxWidth:520}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:28}}>
+        <BtnVolver onClick={()=>setShowForm(false)}/>
+        <div>
+          <div style={{fontSize:9,color:B.t3,letterSpacing:".18em"}}>
+            {editUser?"EDITAR":"NUEVO"} USUARIO
+          </div>
+          <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900,margin:0}}>
+            {editUser?`${editUser.nombre} ${editUser.apellido}`:"Crear Usuario"}
+          </h2>
         </div>
       </div>
 
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        {/* Nombre y Apellido */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <div><FL label="Nombre" req/>
-            <input className="field" value={form.nombre}
-              onChange={e=>s("nombre",e.target.value)} placeholder="Nombre"/></div>
+            <input className="field" value={form.nombre} onChange={e=>sf("nombre",e.target.value)} placeholder="Ej: Juan"/></div>
           <div><FL label="Apellido" req/>
-            <input className="field" value={form.apellido}
-              onChange={e=>s("apellido",e.target.value)} placeholder="Apellido"/></div>
+            <input className="field" value={form.apellido} onChange={e=>sf("apellido",e.target.value)} placeholder="Ej: García"/></div>
         </div>
 
-        <div><FL label="Email" req/>
-          <input className="field" type="email" value={form.email}
-            onChange={e=>s("email",e.target.value)}
-            placeholder="usuario@boolean.uy"
-            disabled={editando!=="nuevo"}
-            style={{opacity:editando!=="nuevo"?0.5:1}}/></div>
-
-        <div><FL label="Rol" req/>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"].map(r=>(
-              <button key={r} onClick={()=>s("rol",r)}
-                style={{padding:"12px 10px",border:`2px solid ${form.rol===r?ROL_COLOR[r]:B.border}`,
-                  background:form.rol===r?ROL_COLOR[r]+"22":B.deep,
-                  color:form.rol===r?ROL_COLOR[r]:B.t2,
-                  cursor:"pointer",fontSize:13,fontWeight:700,borderRadius:2,
-                  transition:"all .15s"}}>
-                {ROL_ICON[r]} {r}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div><FL label="Empresa" req/>
-          <select className="field" value={form.empresa_codigo}
-            onChange={e=>s("empresa_codigo",e.target.value)}
-            disabled={esRegional}>
-            <option value="">Seleccioná una empresa...</option>
-            {EMPRESAS.map(e=>(
-              <option key={e.codigo} value={e.codigo}>{e.nombre}</option>
-            ))}
-          </select>
-        </div>
-
-        {form.rol==="TECNICO"&&(
-          <div><FL label="Supervisor asignado"/>
-            <select className="field" value={form.supervisor_id}
-              onChange={e=>s("supervisor_id",e.target.value)}>
-              <option value="">Sin supervisor asignado</option>
-              {supervisores
-                .filter(su=>!form.empresa_codigo||su.empresa_codigo===form.empresa_codigo)
-                .map(su=>(
-                  <option key={su.id} value={su.id}>
-                    {su.nombre} {su.apellido} ({su.empresa_codigo})
-                  </option>
-                ))}
-            </select>
-          </div>
+        {/* Email */}
+        {!editUser&&(
+          <div><FL label="Email" req/>
+            <input className="field" type="email" value={form.email}
+              onChange={e=>sf("email",e.target.value)} placeholder="usuario@empresa.com"/></div>
         )}
 
-        <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",
-          background:B.card,border:`1px solid ${B.border}`,borderRadius:2}}>
-          <div style={{flex:1}}>
-            <div style={{fontSize:13,fontWeight:700,color:B.t1}}>Usuario activo</div>
-            <div style={{fontSize:11,color:B.t3}}>Puede iniciar sesión en el sistema</div>
-          </div>
-          <button onClick={()=>s("activo",!form.activo)}
-            style={{width:52,height:28,borderRadius:14,border:"none",cursor:"pointer",
-              background:form.activo?B.green:B.t3,position:"relative",transition:"background .2s"}}>
-            <div style={{position:"absolute",top:3,left:form.activo?26:3,
-              width:22,height:22,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
-          </button>
+        {/* Contraseña */}
+        <div><FL label={editUser?"Nueva Contraseña (opcional)":"Contraseña"} req={!editUser}/>
+          <input className="field" type="password" value={form.password}
+            onChange={e=>sf("password",e.target.value)}
+            placeholder={editUser?"Dejá vacío para no cambiar":"Mínimo 6 caracteres"}/></div>
+
+        {/* Rol y Empresa */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div><FL label="Rol" req/>
+            <select className="field" value={form.rol} onChange={e=>sf("rol",e.target.value)}>
+              {(esDirector?["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]:["SUPERVISOR","TECNICO"]).map(r=>(
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select></div>
+          <div><FL label="Empresa" req/>
+            <select className="field" value={form.empresa_codigo}
+              onChange={e=>{sf("empresa_codigo",e.target.value);sf("supervisor_id","");}}
+              disabled={esRegional}>
+              <option value="">Seleccioná...</option>
+              {EMPRESAS.map(e=><option key={e.codigo} value={e.codigo}>{e.nombre}</option>)}
+            </select></div>
         </div>
 
-        <div style={{padding:"12px 14px",background:B.orangeDim,
-          border:`1px solid ${B.orange}22`,fontSize:12,color:B.t2,lineHeight:1.6}}>
-          ℹ Para que el usuario pueda iniciar sesión, debés crearlo también en
-          <strong style={{color:B.orange}}> Supabase → Authentication → Users</strong> con
-          el mismo email y contraseña <strong style={{color:B.orange}}>boolean</strong>.
-        </div>
+        {/* Supervisor — solo si es Técnico */}
+        {form.rol==="TECNICO"&&form.empresa_codigo&&(
+          <div><FL label="Supervisor"/>
+            <select className="field" value={form.supervisor_id} onChange={e=>sf("supervisor_id",e.target.value)}>
+              <option value="">Sin supervisor asignado</option>
+              {supervisores.map(s=>(
+                <option key={s.id} value={s.id}>{s.nombre} {s.apellido}</option>
+              ))}
+            </select></div>
+        )}
 
-        <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
-          <Bb label="CANCELAR" onClick={()=>setEditando(null)} ghost small color={B.t2}/>
-          <Bb label="GUARDAR" onClick={guardar}
-            disabled={!form.nombre.trim()||!form.apellido.trim()||!form.email.trim()||!form.empresa_codigo}/>
-        </div>
+        {/* Activo — solo al editar */}
+        {editUser&&(
+          <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",
+            padding:"12px 16px",background:B.card,border:`1px solid ${B.border}`}}>
+            <input type="checkbox" checked={form.activo} onChange={e=>sf("activo",e.target.checked)}
+              style={{accentColor:B.green,width:16,height:16}}/>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:form.activo?B.green:B.red}}>
+                {form.activo?"Usuario Activo":"Usuario Inactivo"}
+              </div>
+              <div style={{fontSize:11,color:B.t3}}>Los usuarios inactivos no pueden iniciar sesión</div>
+            </div>
+          </label>
+        )}
+      </div>
+
+      {/* Botón guardar */}
+      <div style={{marginTop:24}}>
+        <Bb label={editUser?"GUARDAR CAMBIOS":"CREAR USUARIO"} onClick={guardar}
+          saving={saving} full color={B.green}/>
       </div>
     </div>
   );
 
-  // ── LISTA ─────────────────────────────────────────────
-  return(
-    <div style={{padding:"0 0 40px"}}>
+  return (
+    <div>
       {/* Header */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+        marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
           <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>GESTIÓN DE</div>
-          <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>USUARIOS</h1>
-          <div style={{fontSize:11,color:B.t2,marginTop:2}}>{fil.length} de {usuarios.length} usuarios</div>
+          <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,margin:0}}>
+            USUARIOS
+          </h1>
         </div>
-        {!soloLectura&&<Bb label="+ NUEVO USUARIO" onClick={abrirNuevo}/>}
+        {puedeEditar&&(
+          <Bb label="+ NUEVO USUARIO" onClick={abrirNuevo} color={B.orange}/>
+        )}
       </div>
 
       {/* Filtros */}
-      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-        <input className="field" placeholder="🔍 Buscar nombre, email..."
-          style={{flex:2,minWidth:180}} value={search} onChange={e=>setSearch(e.target.value)}/>
-        <select className="field" style={{flex:1,minWidth:120}}
+      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+        <input className="field" style={{flex:1,minWidth:180,fontSize:13}}
+          placeholder="Buscar por nombre o email..."
+          value={busqueda} onChange={e=>setBusqueda(e.target.value)}/>
+        {esDirector&&(
+          <select className="field" style={{width:160,fontSize:13}}
+            value={filtroEmp} onChange={e=>setFiltroEmp(e.target.value)}>
+            <option value="">Todas las empresas</option>
+            {EMPRESAS.map(e=><option key={e.codigo} value={e.codigo}>{e.nombre}</option>)}
+          </select>
+        )}
+        <select className="field" style={{width:140,fontSize:13}}
           value={filtroRol} onChange={e=>setFiltroRol(e.target.value)}>
-          <option value="ALL">Todos los roles</option>
+          <option value="">Todos los roles</option>
           {["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"].map(r=>(
-            <option key={r} value={r}>{ROL_ICON[r]} {r}</option>
+            <option key={r} value={r}>{r}</option>
           ))}
         </select>
       </div>
 
-      {/* Lista de usuarios */}
-      {loading?<div style={{textAlign:"center",padding:40}}><Spin/></div>:(
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {fil.map(u=>{
-            const sup = usuarios.find(s=>s.id===u.supervisor_id);
-            const casosActivos = casos.filter(c=>c.tecnico_id===(u.auth_id||u.id)&&
-              !["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
-            const initials = `${(u.nombre||"?")[0]}${(u.apellido||"?")[0]}`.toUpperCase();
-            return(
-              <div key={u.id} style={{
-                background:B.card,
-                border:`1px solid ${u.activo?B.border:"#1a1a1a"}`,
-                borderLeft:`3px solid ${u.activo?ROL_COLOR[u.rol]||B.t3:"#333"}`,
-                padding:"14px 16px",
-                opacity:u.activo?1:0.6,
-              }}>
-                <div style={{display:"flex",alignItems:"center",gap:12}}>
-                  {/* Avatar */}
-                  <div style={{width:42,height:42,borderRadius:"50%",flexShrink:0,
-                    background:`linear-gradient(135deg,${ROL_COLOR[u.rol]||B.t3}66,${ROL_COLOR[u.rol]||B.t3}22)`,
-                    border:`2px solid ${ROL_COLOR[u.rol]||B.t3}`,
-                    display:"flex",alignItems:"center",justifyContent:"center",
-                    fontSize:14,fontWeight:900,color:ROL_COLOR[u.rol]||B.t1,
-                    fontFamily:"'Orbitron',sans-serif"}}>
-                    {initials}
-                  </div>
-                  {/* Info */}
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                      <span style={{fontSize:14,fontWeight:700,color:B.t1}}>
-                        {u.nombre} {u.apellido}
-                      </span>
-                      <Tg label={`${ROL_ICON[u.rol]} ${u.rol}`} color={ROL_COLOR[u.rol]||B.t3}/>
-                      {!u.activo&&<Tg label="INACTIVO" color={B.t3}/>}
-                    </div>
-                    <div style={{fontSize:12,color:B.t3,marginTop:2}}>{u.email}</div>
-                    <div style={{display:"flex",gap:12,marginTop:4,flexWrap:"wrap"}}>
-                      {u.empresa_codigo&&(
-                        <span style={{fontSize:11,color:EMPRESAS.find(e=>e.codigo===u.empresa_codigo)?.color||B.t2,fontWeight:600}}>
-                          🏢 {EMPRESAS.find(e=>e.codigo===u.empresa_codigo)?.nombre||u.empresa_codigo}
-                        </span>
-                      )}
-                      {u.rol==="TECNICO"&&sup&&(
-                        <span style={{fontSize:11,color:B.purple}}>
-                          👔 {sup.nombre} {sup.apellido}
-                        </span>
-                      )}
-                      {u.rol==="TECNICO"&&casosActivos>0&&(
-                        <span style={{fontSize:11,color:B.orange,fontWeight:700}}>
-                          📋 {casosActivos} casos activos
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {/* Acciones */}
-                  {!soloLectura&&(
-                    <div style={{display:"flex",gap:6,flexShrink:0}}>
-                      <Bb label="✎" onClick={()=>abrirEditar(u)} ghost small color={B.blue}/>
-                      <button onClick={()=>toggleActivo(u)}
-                        style={{background:"none",border:`1px solid ${B.border}`,
-                          color:u.activo?B.red:B.green,cursor:"pointer",
-                          padding:"4px 10px",fontSize:10,borderRadius:2}}>
-                        {u.activo?"DESACTIVAR":"ACTIVAR"}
-                      </button>
-                    </div>
-                  )}
-                </div>
+      {/* Conteo */}
+      <div style={{fontSize:11,color:B.t3,marginBottom:16}}>
+        {usuariosFiltrados.length} usuarios · {usuariosFiltrados.filter(u=>u.activo!==false).length} activos
+      </div>
 
-                {/* Asignación de supervisor para técnicos */}
-                {u.rol==="TECNICO"&&!soloLectura&&(
-                  <div style={{marginTop:10,paddingTop:10,
-                    borderTop:`1px solid ${B.border}22`,
-                    display:"flex",alignItems:"center",gap:10}}>
-                    <span style={{fontSize:11,color:B.t3,flexShrink:0}}>👔 Supervisor:</span>
-                    <select
-                      value={u.supervisor_id||""}
-                      onChange={e=>asignarSupervisor(u.id,e.target.value)}
-                      onClick={e=>e.stopPropagation()}
-                      style={{flex:1,background:B.deep,border:`1px solid ${B.border}`,
-                        color:B.t1,padding:"6px 10px",fontSize:12,cursor:"pointer",
-                        outline:"none",borderRadius:2}}>
-                      <option value="">Sin supervisor</option>
-                      {supervisores
-                        .filter(su=>su.empresa_codigo===u.empresa_codigo)
-                        .map(su=>(
-                          <option key={su.id} value={su.id}>
-                            {su.nombre} {su.apellido}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                )}
+      {loading ? <div style={{display:"flex",justifyContent:"center",padding:40}}><Spin s={36}/></div> : (
+        <div style={{display:"flex",flexDirection:"column",gap:20}}>
+          {Object.entries(porEmpresa).map(([emp,lista])=>{
+            const empData = EMPRESAS.find(e=>e.codigo===emp);
+            return (
+              <div key={emp}>
+                <div style={{fontSize:10,color:empData?.color||B.orange,fontWeight:700,
+                  letterSpacing:".14em",marginBottom:10,display:"flex",
+                  alignItems:"center",gap:10}}>
+                  <span style={{width:24,height:1,background:empData?.color||B.orange,display:"inline-block"}}/>
+                  {empData?.nombre||emp} · {lista.length} usuarios
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                  {lista.map(u=>{
+                    const rolCol = ROL_COLOR[u.rol]||B.t3;
+                    const sup = usuarios.find(s=>s.id===u.supervisor_id);
+                    const cargaCasos = casos?.filter(c=>c.tecnico_id===(u.auth_id||u.id)&&
+                      !["FINALIZADO","CANCELADO"].includes(c.estado||"")).length||0;
+                    return(
+                      <div key={u.id} style={{
+                        display:"flex",alignItems:"center",gap:12,
+                        padding:"12px 16px",
+                        background:u.activo===false?"#080810":B.card,
+                        border:`1px solid ${u.activo===false?"#1a1a1a":B.border}`,
+                        borderLeft:`3px solid ${u.activo===false?"#2a2a2a":rolCol}`,
+                        opacity:u.activo===false?0.5:1,
+                        transition:"all .15s",
+                      }}>
+                        {/* Avatar */}
+                        <div style={{width:38,height:38,borderRadius:"50%",flexShrink:0,
+                          background:`${rolCol}22`,border:`2px solid ${rolCol}`,
+                          display:"flex",alignItems:"center",justifyContent:"center",
+                          fontSize:12,fontWeight:900,color:rolCol,
+                          fontFamily:"'Orbitron',sans-serif"}}>
+                          {(u.nombre?.[0]||"?")}{ (u.apellido?.[0]||"")}
+                        </div>
+                        {/* Info */}
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                            <span style={{fontSize:13,fontWeight:700,color:u.activo===false?B.t3:B.t1}}>
+                              {u.nombre} {u.apellido}
+                            </span>
+                            <span style={{fontSize:9,fontWeight:700,
+                              color:rolCol,background:`${rolCol}18`,
+                              padding:"2px 7px",borderRadius:2,letterSpacing:".08em"}}>
+                              {u.rol}
+                            </span>
+                            {u.activo===false&&(
+                              <span style={{fontSize:9,color:B.red,background:"#FF204018",
+                                padding:"2px 7px",borderRadius:2}}>INACTIVO</span>
+                            )}
+                          </div>
+                          <div style={{fontSize:11,color:B.t3,marginTop:2}}>
+                            {u.email}
+                            {sup&&<span style={{marginLeft:8,color:B.t3}}>· Sup: {sup.nombre}</span>}
+                            {cargaCasos>0&&<span style={{marginLeft:8,color:B.orange}}>· {cargaCasos} casos activos</span>}
+                          </div>
+                        </div>
+                        {/* Acciones */}
+                        {puedeEditar&&(
+                          <div style={{display:"flex",gap:8,flexShrink:0}}>
+                            <Bb label="EDITAR" onClick={()=>abrirEditar(u)} small ghost color={B.blue}/>
+                            <Bb label={u.activo===false?"ACTIVAR":"DESACTIVAR"}
+                              onClick={()=>toggleActivo(u)} small ghost
+                              color={u.activo===false?B.green:B.red}/>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             );
           })}
-          {fil.length===0&&(
-            <div style={{textAlign:"center",padding:40,color:B.t3}}>
-              <div style={{fontSize:32,marginBottom:10}}>👥</div>
-              <div style={{fontSize:13}}>Sin usuarios que coincidan</div>
+          {usuariosFiltrados.length===0&&(
+            <div style={{textAlign:"center",padding:60,color:B.t3}}>
+              <div style={{fontSize:32,marginBottom:12}}>👤</div>
+              <div style={{fontSize:14}}>Sin usuarios que coincidan</div>
             </div>
           )}
         </div>
@@ -6500,446 +6522,6 @@ const Usuarios=({user,perfil,toast,casos})=>{
   );
 };
 
-// ─── CONFIG ──────────────────────────────────────────────
-// ─── BULK UPLOAD ─────────────────────────────────────────────
-const BulkUpload = ({ user, toast }) => {
-  const [csv, setCsv]         = useState("");
-  const [preview, setPreview] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [resultado, setRes]   = useState(null);
-
-  const COLS = ["tipo_proceso","numero_serie","razon_social","rut","telefono","rubro",
-    "empresa_id","departamento","localidad","direccion","prioridad","franja_horaria",
-    "sla_horas","descripcion","observaciones","tier"];
-
-  const parsear = (texto) => {
-    const lineas = texto.trim().split("\n").filter(l=>l.trim());
-    if(!lineas.length) return [];
-    const headers = lineas[0].split(";").map(h=>h.trim().toLowerCase().replace(/ /g,"_"));
-    return lineas.slice(1).map(linea=>{
-      const vals = linea.split(";").map(v=>v.trim());
-      const obj = {};
-      headers.forEach((h,i)=>{ if(vals[i]) obj[h]=vals[i]; });
-      return obj;
-    });
-  };
-
-  const handleFile = (e) => {
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const texto = ev.target.result;
-      setCsv(texto);
-      setPreview(parsear(texto).slice(0,5));
-    };
-    reader.readAsText(file);
-  };
-
-  const importar = async () => {
-    const casos = parsear(csv);
-    if(!casos.length){ toast("Sin datos para importar"); return; }
-    setLoading(true);
-    let ok=0, err=0;
-    const ts = new Date().toISOString();
-    for(const c of casos){
-      const slaH = parseInt(c.sla_horas)||4;
-      const deadline = new Date(Date.now()+slaH*3600000).toISOString();
-      const {error} = await supabase.from("casos").insert({
-        ...c,
-        estado:"PENDIENTE",
-        sla_horas:slaH,
-        sla_deadline:deadline,
-        creado_por:user?.email,
-        historial:[{id:Date.now(),tipo:"CREACION",
-          texto:"Caso creado por carga masiva",usuario:user?.email,ts}],
-        created_at:ts, updated_at:ts,
-      });
-      if(error) err++; else ok++;
-    }
-    setRes({ok,err,total:casos.length});
-    setLoading(false);
-    if(ok>0) toast(`✓ ${ok} casos importados correctamente`);
-    if(err>0) toast(`⚠ ${err} casos con error`);
-  };
-
-  const TEMPLATE = "tipo_proceso;numero_serie;razon_social;rut;telefono;rubro;empresa_id;departamento;localidad;direccion;prioridad;franja_horaria;sla_horas;descripcion;observaciones;tier\nSERVICIO_TECNICO;12345678;Comercio Ejemplo;210000000001;099123456;Retail;TRANS;Montevideo;Montevideo;Rivera 1234;MEDIA;FH2 (12-16);4;Equipo no enciende;;T1b";
-
-  return (
-    <div style={{maxWidth:700,padding:"0 0 40px"}}>
-      <div style={{marginBottom:20}}>
-        <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>IMPORTACIÓN</div>
-        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>CARGA MASIVA DE CASOS</h1>
-      </div>
-
-      {/* Plantilla */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
-        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>◈ PLANTILLA CSV</div>
-        <div style={{fontSize:12,color:B.t2,marginBottom:12,lineHeight:1.6}}>
-          Descargá la plantilla, completá los datos y subí el archivo. Separador: punto y coma (;)
-        </div>
-        <button onClick={()=>{
-          const blob = new Blob([TEMPLATE],{type:"text/csv"});
-          const a = document.createElement("a");
-          a.href = URL.createObjectURL(blob);
-          a.download = "plantilla_casos_boolean.csv";
-          a.click();
-        }} style={{background:B.deep,border:`1px solid ${B.border}`,color:B.t1,
-          cursor:"pointer",padding:"10px 20px",fontSize:13,fontWeight:700,borderRadius:2}}>
-          ⬇ DESCARGAR PLANTILLA
-        </button>
-      </div>
-
-      {/* Subir archivo */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
-        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ SUBIR ARCHIVO</div>
-        <input type="file" accept=".csv,.txt" onChange={handleFile}
-          style={{fontSize:13,color:B.t1,marginBottom:12,display:"block"}}/>
-        {preview.length>0&&(
-          <div>
-            <div style={{fontSize:10,color:B.t3,marginBottom:8}}>Vista previa (primeras {preview.length} filas):</div>
-            <div style={{overflowX:"auto"}}>
-              <table><thead><tr>{Object.keys(preview[0]).map(k=><th key={k}>{k}</th>)}</tr></thead>
-                <tbody>{preview.map((r,i)=><tr key={i}>{Object.values(r).map((v,j)=><td key={j}>{v}</td>)}</tr>)}</tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {resultado&&(
-        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
-          <div style={{fontSize:13,fontWeight:700,color:B.t1,marginBottom:8}}>Resultado de importación</div>
-          <div style={{display:"flex",gap:16}}>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:28,color:B.green,fontWeight:900}}>{resultado.ok}</div>
-              <div style={{fontSize:10,color:B.t3}}>IMPORTADOS</div>
-            </div>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:28,color:resultado.err>0?B.red:B.t3,fontWeight:900}}>{resultado.err}</div>
-              <div style={{fontSize:10,color:B.t3}}>ERRORES</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {preview.length>0&&(
-        <Bb label={loading?`IMPORTANDO...`:`⬆ IMPORTAR ${parsear(csv).length} CASOS`}
-          onClick={importar} disabled={loading} full/>
-      )}
-    </div>
-  );
-};
-
-// ─── ANALÍTICA ───────────────────────────────────────────────
-const Analitica = ({ user, toast }) => {
-  const [casos, setCasos]   = useState([]);
-  const [loading,setLoading]= useState(true);
-  const [rango, setRango]   = useState("7d");
-
-  useEffect(()=>{
-    const desde = new Date();
-    desde.setDate(desde.getDate()-({7:7,30:30,90:90}[rango.replace("d","")]||7));
-    supabase.from("casos").select("*")
-      .gte("created_at",desde.toISOString())
-      .then(({data})=>{ setCasos(data||[]); setLoading(false); });
-  },[rango]);
-
-  const finalizados = casos.filter(c=>c.estado==="FINALIZADO");
-  const cancelados  = casos.filter(c=>c.estado==="CANCELADO");
-  const enCurso     = casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||""));
-  const slaOk       = finalizados.filter(c=>c.sla_deadline&&new Date(c.updated_at)<new Date(c.sla_deadline)).length;
-  const slaPct      = finalizados.length ? Math.round(slaOk/finalizados.length*100) : 0;
-  const resueltos   = finalizados.filter(c=>c.resolvio===true).length;
-  const resPct      = finalizados.length ? Math.round(resueltos/finalizados.length*100) : 0;
-
-  const porTipo = TIPOS_PROCESO.map(t=>({
-    nombre:t.nombre, icono:t.icono, color:t.color,
-    total:casos.filter(c=>c.tipo_proceso===t.codigo).length,
-    fin:casos.filter(c=>c.tipo_proceso===t.codigo&&c.estado==="FINALIZADO").length,
-  }));
-
-  const porEmpresa = EMPRESAS.map(e=>({
-    nombre:e.nombre, color:e.color,
-    total:casos.filter(c=>c.empresa_id===e.codigo).length,
-    fin:casos.filter(c=>c.empresa_id===e.codigo&&c.estado==="FINALIZADO").length,
-  })).filter(e=>e.total>0);
-
-  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh"}}><Spin s={36}/></div>;
-
-  return (
-    <div style={{maxWidth:800,padding:"0 0 40px"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
-        <div>
-          <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MÓDULO DE</div>
-          <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>ANALÍTICA OPERATIVA</h1>
-        </div>
-        <div style={{display:"flex",gap:8}}>
-          {[["7d","7 días"],["30d","30 días"],["90d","90 días"]].map(([v,l])=>(
-            <button key={v} onClick={()=>setRango(v)}
-              style={{padding:"8px 14px",background:rango===v?B.orangeDim:B.deep,
-                border:`1px solid ${rango===v?B.orange:B.border}`,
-                color:rango===v?B.orange:B.t2,cursor:"pointer",fontSize:12,fontWeight:700,borderRadius:2}}>
-              {l}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* KPIs principales */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:20}}>
-        {[
-          {label:"CASOS TOTALES",   val:casos.length,        color:B.blue,   icono:"📋"},
-          {label:"FINALIZADOS",     val:finalizados.length,  color:B.green,  icono:"✅"},
-          {label:"SLA CUMPLIDO",    val:`${slaPct}%`,        color:slaPct>=90?B.green:B.red, icono:"⏱"},
-          {label:"TASA RESOLUCIÓN", val:`${resPct}%`,        color:resPct>=80?B.green:B.orange, icono:"🔧"},
-          {label:"EN CURSO",        val:enCurso.length,      color:B.yellow, icono:"⚡"},
-          {label:"CANCELADOS",      val:cancelados.length,   color:B.red,    icono:"✗"},
-        ].map(k=>(
-          <div key={k.label} style={{background:B.card,border:`1px solid ${B.border}`,
-            borderLeft:`3px solid ${k.color}`,padding:"14px 16px"}}>
-            <div style={{fontSize:10,color:B.t3,fontWeight:700,letterSpacing:".08em",marginBottom:6}}>
-              {k.icono} {k.label}
-            </div>
-            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:26,fontWeight:900,color:k.color}}>
-              {k.val}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Por tipo de proceso */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
-        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ POR TIPO DE PROCESO</div>
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {porTipo.filter(t=>t.total>0).map(t=>(
-            <div key={t.nombre}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <span style={{fontSize:13,color:B.t1}}>{t.icono} {t.nombre}</span>
-                <span style={{fontSize:12,color:t.color,fontWeight:700}}>{t.fin}/{t.total}</span>
-              </div>
-              <div style={{height:6,background:B.deep,borderRadius:3}}>
-                <div style={{height:6,width:t.total?`${Math.round(t.fin/t.total*100)}%`:"0%",
-                  background:t.color,borderRadius:3,transition:"width .5s"}}/>
-              </div>
-            </div>
-          ))}
-          {porTipo.every(t=>t.total===0)&&(
-            <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:20}}>Sin datos para el período seleccionado</div>
-          )}
-        </div>
-      </div>
-
-      {/* Por empresa */}
-      {porEmpresa.length>0&&(
-        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
-          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ POR EMPRESA</div>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {porEmpresa.map(e=>(
-              <div key={e.nombre}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                  <span style={{fontSize:13,color:e.color,fontWeight:600}}>{e.nombre}</span>
-                  <span style={{fontSize:12,color:B.t2}}>{e.fin}/{e.total} finalizados</span>
-                </div>
-                <div style={{height:6,background:B.deep,borderRadius:3}}>
-                  <div style={{height:6,width:e.total?`${Math.round(e.fin/e.total*100)}%`:"0%",
-                    background:e.color,borderRadius:3,transition:"width .5s"}}/>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ─── LOGROS ──────────────────────────────────────────────────
-const Logros = ({ user, toast }) => {
-  const [perfil, setPerfil] = useState(null);
-
-  useEffect(()=>{
-    supabase.from("usuarios").select("*").eq("auth_id",user?.id).maybeSingle()
-      .then(({data})=>setPerfil(data));
-  },[]);
-
-  const LOGROS_DEF = [
-    {id:"primer_caso",   icono:"🎯", nombre:"Primer Caso",        desc:"Finalizaste tu primer caso",          xp:50,  condicion:p=>p?.casos_finalizados>=1},
-    {id:"diez_casos",    icono:"⚡", nombre:"Velocista",          desc:"10 casos finalizados",                xp:200, condicion:p=>p?.casos_finalizados>=10},
-    {id:"cincuenta",     icono:"🏆", nombre:"Medio Centenar",     desc:"50 casos finalizados",                xp:500, condicion:p=>p?.casos_finalizados>=50},
-    {id:"sla_master",    icono:"⏱", nombre:"SLA Master",         desc:"100% SLA cumplido en una semana",     xp:300, condicion:()=>false},
-    {id:"sin_cancelar",  icono:"💪", nombre:"Sin Rendirse",       desc:"30 días sin cancelaciones",           xp:400, condicion:()=>false},
-    {id:"velocidad",     icono:"🚀", nombre:"Velocidad Máxima",   desc:"5 casos en un día",                   xp:250, condicion:()=>false},
-    {id:"instalador",    icono:"📦", nombre:"Instalador Pro",     desc:"20 instalaciones completadas",        xp:350, condicion:p=>p?.instalaciones>=20},
-    {id:"tecnico_elite", icono:"🔧", nombre:"Técnico Elite",      desc:"Nivel 50 alcanzado",                  xp:1000,condicion:p=>(p?.nivel||0)>=50},
-  ];
-
-  const xpTotal = perfil?.xp_total || 0;
-  const nivel   = Math.floor(xpTotal/500)+1;
-  const xpNivel = xpTotal%500;
-  const pctNivel = Math.round(xpNivel/500*100);
-
-  return (
-    <div style={{maxWidth:600,padding:"0 0 40px"}}>
-      <div style={{marginBottom:20}}>
-        <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MÓDULO DE</div>
-        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>LOGROS Y PROGRESO</h1>
-      </div>
-
-      {/* XP y nivel */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:20,marginBottom:20,
-        borderLeft:`4px solid ${B.orange}`}}>
-        <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16}}>
-          <div style={{width:60,height:60,borderRadius:"50%",
-            background:`linear-gradient(135deg,${B.orange},${B.amber})`,
-            display:"flex",alignItems:"center",justifyContent:"center",
-            fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:"#050507"}}>
-            {nivel}
-          </div>
-          <div style={{flex:1}}>
-            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:B.orange}}>
-              NIVEL {nivel}
-            </div>
-            <div style={{fontSize:12,color:B.t2,marginTop:2}}>
-              {xpNivel} / 500 XP para el siguiente nivel
-            </div>
-          </div>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:22,fontWeight:700,color:B.amber}}>
-              {xpTotal.toLocaleString()}
-            </div>
-            <div style={{fontSize:9,color:B.t3,letterSpacing:".1em"}}>XP TOTAL</div>
-          </div>
-        </div>
-        <div style={{height:8,background:B.deep,borderRadius:4}}>
-          <div style={{height:8,width:`${pctNivel}%`,borderRadius:4,
-            background:`linear-gradient(90deg,${B.orange},${B.amber})`,transition:"width .5s"}}/>
-        </div>
-      </div>
-
-      {/* Tabla XP por acción */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,marginBottom:20,overflow:"hidden"}}>
-        <div style={{padding:"10px 16px",borderBottom:`1px solid ${B.border}`,fontSize:10,
-          color:B.orange,fontWeight:700,letterSpacing:".12em"}}>◈ XP POR ACCIÓN</div>
-        {XP_ACCIONES.map((a,i)=>(
-          <div key={a.accion} style={{display:"flex",alignItems:"center",gap:12,
-            padding:"12px 16px",
-            borderBottom:i<XP_ACCIONES.length-1?`1px solid ${B.border}22`:"none",
-            background:i%2===0?"transparent":B.deep+"44"}}>
-            <span style={{fontSize:20,flexShrink:0}}>{a.icono}</span>
-            <span style={{fontSize:13,color:B.t1,flex:1}}>{a.accion}</span>
-            <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:B.green}}>
-              +{a.xp} XP
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* Logros */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
-        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ LOGROS</div>
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {LOGROS_DEF.map(l=>{
-            const desbloqueado = l.condicion(perfil);
-            return(
-              <div key={l.id} style={{display:"flex",alignItems:"center",gap:14,
-                padding:"12px 14px",
-                background:desbloqueado?B.green+"11":B.deep,
-                border:`1px solid ${desbloqueado?B.green+"44":B.border}`,
-                borderRadius:2,opacity:desbloqueado?1:0.5}}>
-                <span style={{fontSize:32,flexShrink:0,filter:desbloqueado?"none":"grayscale(1)"}}>
-                  {l.icono}
-                </span>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:13,fontWeight:700,color:desbloqueado?B.green:B.t2}}>
-                    {l.nombre}
-                  </div>
-                  <div style={{fontSize:11,color:B.t3,marginTop:2}}>{l.desc}</div>
-                </div>
-                <div style={{textAlign:"right",flexShrink:0}}>
-                  <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,
-                    color:desbloqueado?B.green:B.t3}}>
-                    +{l.xp} XP
-                  </div>
-                  {desbloqueado&&<div style={{fontSize:9,color:B.green,marginTop:2}}>✓ DESBLOQUEADO</div>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ─── CONFIG NOTIFICACIONES ───────────────────────────────────
-const ConfigNotificaciones = ({ user, minutosAntes, setMinutosAntes, toast }) => {
-  const [permiso, setPermiso] = useState(Notification.permission);
-  const [guardando, setGuardando] = useState(false);
-
-  const pedirPermiso = async () => {
-    const result = await Notification.requestPermission();
-    setPermiso(result);
-    if(result === "granted") toast("✓ Notificaciones activadas");
-    else toast("Permiso denegado por el browser");
-  };
-
-  const guardar = async () => {
-    setGuardando(true);
-    await supabase.from("usuarios").update({minutos_recordatorio: minutosAntes})
-      .eq("auth_id", user?.id);
-    toast("✓ Preferencias guardadas");
-    setGuardando(false);
-  };
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:480}}>
-      {/* Estado del permiso */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,borderRadius:2}}>
-        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>
-          ◈ PERMISOS DEL BROWSER
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
-          <div style={{width:10,height:10,borderRadius:"50%",flexShrink:0,
-            background:permiso==="granted"?B.green:permiso==="denied"?B.red:B.orange}}/>
-          <span style={{fontSize:13,color:B.t1}}>
-            {permiso==="granted"?"Notificaciones activadas":
-             permiso==="denied"?"Bloqueadas por el browser — cambiá en la configuración del sitio":
-             "Sin configurar"}
-          </span>
-        </div>
-        {permiso!=="granted"&&(
-          <Bb label="ACTIVAR NOTIFICACIONES" onClick={pedirPermiso} small/>
-        )}
-      </div>
-
-      {/* Minutos de anticipación */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,borderRadius:2}}>
-        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>
-          ◈ ANTICIPACIÓN DEL RECORDATORIO
-        </div>
-        <div style={{fontSize:12,color:B.t2,marginBottom:16,lineHeight:1.6}}>
-          Recibís una notificación este tiempo antes del inicio de cada franja horaria.
-        </div>
-        <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:16}}>
-          {[15,30,45,60].map(m=>(
-            <button key={m} onClick={()=>setMinutosAntes(m)}
-              style={{flex:1,padding:"12px 0",
-                border:`2px solid ${minutosAntes===m?B.orange:B.border}`,
-                background:minutosAntes===m?B.orangeDim:B.deep,
-                color:minutosAntes===m?B.orange:B.t2,
-                cursor:"pointer",fontSize:13,fontWeight:700,borderRadius:2,
-                transition:"all .15s"}}>
-              {m} min
-            </button>
-          ))}
-        </div>
-        <Bb label={guardando?"GUARDANDO...":"GUARDAR PREFERENCIAS"}
-          onClick={guardar} disabled={guardando} small/>
-      </div>
-    </div>
-  );
-};
 
 const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
   const [tab,setTab]=useState("notificaciones");
