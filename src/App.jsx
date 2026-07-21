@@ -202,31 +202,54 @@ const css = `
     display:inline-flex;align-items:center;gap:6px;
     position:relative;
     border-radius:2px;
-    /* Relieve sutil */
     box-shadow:
-      0 1px 0 rgba(255,255,255,0.08) inset,
-      0 -1px 0 rgba(0,0,0,0.4) inset,
-      0 3px 8px rgba(0,0,0,0.4),
-      0 1px 2px rgba(0,0,0,0.6);
+      0 1px 0 rgba(255,255,255,0.18) inset,
+      0 -2px 0 rgba(0,0,0,0.45) inset,
+      0 4px 14px rgba(0,0,0,0.45),
+      0 2px 4px rgba(0,0,0,0.6) !important;
   }
   .btn:hover{
-    transform:translateY(-2px);
+    transform:translateY(-2px) !important;
+    filter:brightness(1.14);
     box-shadow:
-      0 1px 0 rgba(255,255,255,0.12) inset,
-      0 -1px 0 rgba(0,0,0,0.5) inset,
-      0 6px 16px rgba(0,0,0,0.4),
-      0 2px 4px rgba(0,0,0,0.6);
-    filter:brightness(1.12);
+      0 1px 0 rgba(255,255,255,0.22) inset,
+      0 -2px 0 rgba(0,0,0,0.5) inset,
+      0 8px 20px rgba(0,0,0,0.4),
+      0 3px 6px rgba(0,0,0,0.6) !important;
   }
   .btn:active{
-    transform:translateY(1px);
+    transform:translateY(1px) !important;
+    filter:brightness(0.88);
     box-shadow:
-      0 -1px 0 rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(0,0,0,0.5) inset,
-      0 1px 3px rgba(0,0,0,0.5);
-    filter:brightness(0.9);
+      0 -1px 0 rgba(255,255,255,0.06) inset,
+      0 2px 0 rgba(0,0,0,0.5) inset,
+      0 1px 4px rgba(0,0,0,0.5) !important;
   }
-  .btn:disabled{opacity:.35;pointer-events:none;box-shadow:none;}
+  .btn:disabled{opacity:.35;pointer-events:none;box-shadow:none !important;}
+  .btn-orange{
+    background:linear-gradient(180deg,#FF8020 0%,#FF6B00 55%,#CC5200 100%);
+    border:1px solid #FF6B00;
+    color:#050507;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.18) inset,
+      0 -2px 0 rgba(0,0,0,0.45) inset,
+      0 4px 14px rgba(255,107,0,0.3),
+      0 2px 4px rgba(0,0,0,0.6) !important;
+  }
+  .btn-orange:hover{
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.22) inset,
+      0 -2px 0 rgba(0,0,0,0.5) inset,
+      0 8px 24px rgba(255,107,0,0.4),
+      0 3px 6px rgba(0,0,0,0.5) !important;
+  }
+  .btn-ghost{
+    background:transparent !important;
+    background-image:none !important;
+    box-shadow:
+      0 2px 8px rgba(0,0,0,0.3),
+      0 1px 3px rgba(0,0,0,0.5) !important;
+  }
   .field{background:#0A0A0E;border:1px solid #1C1C2C;border-radius:3px;
     color:#F4F4FF;padding:9px 12px;font-size:13px;width:100%;
     font-family:'Rajdhani',sans-serif;font-weight:500;transition:border-color .15s,box-shadow .15s}
@@ -282,21 +305,23 @@ const Spin = ({s=18}) => <div style={{width:s,height:s,border:`2px solid ${B.bor
 const Dot  = ({c,pulse,s=7}) => <div style={{width:s,height:s,borderRadius:"50%",background:c,flexShrink:0}} className={pulse?"live":""}/>;
 
 const Bb = ({label,onClick,color=B.orange,ghost,small,disabled,icon,style={},full,saving}) => {
-  const bg = ghost ? "transparent" : color;
-  const textCol = ghost ? color : "#050507";
-  const border = ghost ? `1px solid ${color}66` : `1px solid ${color}`;
-  const shadow = ghost
-    ? "0 2px 6px rgba(0,0,0,0.3)"
-    : `0 1px 0 rgba(255,255,255,0.15) inset,0 -2px 0 rgba(0,0,0,0.35) inset,0 4px 12px ${color}33,0 2px 4px rgba(0,0,0,0.5)`;
-  const bgImg = ghost ? "none" : `linear-gradient(180deg,${color}EE 0%,${color} 60%,${color}CC 100%)`;
+  const isOrange = color===B.orange || color==="#FF6B00";
+  const className = ["btn", ghost?"btn-ghost":isOrange?"btn-orange":""].filter(Boolean).join(" ");
+  const bg = ghost
+    ? "transparent"
+    : isOrange
+      ? undefined // handled by CSS class
+      : `linear-gradient(180deg,${color}EE 0%,${color} 60%,${color}CC 100%)`;
   return (
-    <button className="btn" onClick={onClick} disabled={disabled||saving} style={{
-      background:bg, color:textCol, border,
-      padding:small?"6px 14px":"11px 22px",
-      fontSize:small?11:13,
-      width:full?"100%":"auto",
-      justifyContent:full?"center":"flex-start",
-      boxShadow:shadow, backgroundImage:bgImg, ...style
+    <button className={className} onClick={onClick} disabled={disabled||saving} style={{
+      ...(bg ? {background:bg} : {}),
+      color: ghost ? color : "#050507",
+      border: ghost ? `1px solid ${color}66` : `1px solid ${color}`,
+      padding: small ? "6px 14px" : "11px 22px",
+      fontSize: small ? 11 : 13,
+      width: full ? "100%" : "auto",
+      justifyContent: full ? "center" : "flex-start",
+      ...style
     }}>
       {icon&&<span>{icon}</span>}
       {saving?"GUARDANDO...":label}
