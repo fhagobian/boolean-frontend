@@ -181,12 +181,10 @@ const css = `
   @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
   @keyframes scanLine{0%{top:0}50%{top:calc(100% - 3px)}100%{top:0}}
   /* Mobile */
+  .main-content{padding:24px 32px;}
   @media(max-width:767px){
     .mobile-main{padding:12px 12px 80px 12px!important;}
-    .main-content{padding:24px 32px;}
-    @media(max-width:767px){
-      .main-content{padding:12px 12px 80px 12px !important;}
-    }
+    .main-content{padding:12px 12px 80px 12px!important;}
     table{font-size:12px;}
     th,td{padding:7px 8px!important;}
     .modal-box{clip-path:none!important;border-radius:8px 8px 0 0;}
@@ -337,6 +335,16 @@ const css = `
   .corner-tl{position:absolute;top:0;left:0;width:44px;height:44px;
     border-top:2px solid #FF6B00;border-left:2px solid #FF6B00;pointer-events:none;z-index:5}
 `;
+
+// Inyectar CSS global una sola vez
+(function(){
+  if(typeof document==="undefined") return;
+  if(document.getElementById("boolean-global-css")) return;
+  const el=document.createElement("style");
+  el.id="boolean-global-css";
+  el.textContent=css;
+  document.head.appendChild(el);
+})();
 
 const Spin = ({s=18}) => <div style={{width:s,height:s,border:`2px solid ${B.border}`,borderTopColor:B.orange,borderRadius:"50%"}} className="spin"/>;
 const Dot  = ({c,pulse,s=7}) => <div style={{width:s,height:s,borderRadius:"50%",background:c,flexShrink:0}} className={pulse?"live":""}/>;
@@ -1463,7 +1471,7 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
 
       {/* Tabla */}
       <div style={{width:"100%",overflowX:"auto",background:B.card,border:`1px solid ${B.border}`}}>
-        <table style={{width:"100%",minWidth:900}}>
+        <table style={{width:"100%"}}>
           <thead>
             <tr>
               {!esRolTecnico&&<th style={{width:36}}>
