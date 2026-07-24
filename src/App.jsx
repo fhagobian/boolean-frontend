@@ -181,7 +181,10 @@ const css = `
   @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
   @keyframes scanLine{0%{top:0}50%{top:calc(100% - 3px)}100%{top:0}}
   /* Mobile */
-  .main-content{padding:24px 32px;}
+  .app-root{height:100vh;display:flex;flex-direction:column;background:#050507}
+  @supports(height:100dvh){.app-root{height:100dvh}}
+  .app-shell{display:flex;flex:1;min-height:0;overflow:hidden}
+  .main-content{flex:1;width:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:24px 32px;}
   @media(max-width:767px){
     .mobile-main{padding:12px 12px 80px 12px!important;}
     .main-content{padding:12px 12px 80px 12px!important;}
@@ -6041,7 +6044,7 @@ const Comunicaciones=({user,perfil,toast,onLeer})=>{
       <div style={{
         position:"fixed",top:0,left:0,right:0,bottom:0,
         display:"flex",flexDirection:"column",
-        background:"#050507",zIndex:50,
+        background:"#050507",zIndex:250,
       }}>
         {/* Header fijo arriba */}
         <div style={{
@@ -6092,7 +6095,7 @@ const Comunicaciones=({user,perfil,toast,onLeer})=>{
           paddingBottom:"max(8px, env(safe-area-inset-bottom))",
           borderTop:"2px solid #1a1a1a",
           background:"#0A0A0F",
-          zIndex:100,
+          zIndex:260,
           display:"flex",gap:8,
         }}>
           <textarea
@@ -6554,6 +6557,467 @@ const Usuarios=({user,perfil,toast,casos})=>{
 };
 
 
+// ─── BULK UPLOAD ─────────────────────────────────────────────
+const BulkUpload = ({ user, toast }) => {
+  const [csv, setCsv]         = useState("");
+  const [preview, setPreview] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [resultado, setRes]   = useState(null);
+
+  const COLS = ["tipo_proceso","numero_serie","razon_social","rut","telefono","rubro",
+    "empresa_id","departamento","localidad","direccion","prioridad","franja_horaria",
+    "sla_horas","descripcion","observaciones","tier"];
+
+  const parsear = (texto) => {
+    const lineas = texto.trim().split("\n").filter(l=>l.trim());
+    if(!lineas.length) return [];
+    const headers = lineas[0].split(";").map(h=>h.trim().toLowerCase().replace(/ /g,"_"));
+    return lineas.slice(1).map(linea=>{
+      const vals = linea.split(";").map(v=>v.trim());
+      const obj = {};
+      headers.forEach((h,i)=>{ if(vals[i]) obj[h]=vals[i]; });
+      return obj;
+    });
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const texto = ev.target.result;
+      setCsv(texto);
+      setPreview(parsear(texto).slice(0,5));
+    };
+    reader.readAsText(file);
+  };
+
+  const importar = async () => {
+    const casos = parsear(csv);
+    if(!casos.length){ toast("Sin datos para importar"); return; }
+    setLoading(true);
+    let ok=0, err=0;
+    const ts = new Date().toISOString();
+    for(const c of casos){
+      const slaH = parseInt(c.sla_horas)||4;
+      const deadline = new Date(Date.now()+slaH*3600000).toISOString();
+      const {error} = await supabase.from("casos").insert({
+        ...c,
+        estado:"PENDIENTE",
+        sla_horas:slaH,
+        sla_deadline:deadline,
+        creado_por:user?.email,
+        historial:[{id:Date.now(),tipo:"CREACION",
+          texto:"Caso creado por carga masiva",usuario:user?.email,ts}],
+        created_at:ts, updated_at:ts,
+      });
+      if(error) err++; else ok++;
+    }
+    setRes({ok,err,total:casos.length});
+    setLoading(false);
+    if(ok>0) toast(`✓ ${ok} casos importados correctamente`);
+    if(err>0) toast(`⚠ ${err} casos con error`);
+  };
+
+  const TEMPLATE = "tipo_proceso;numero_serie;razon_social;rut;telefono;rubro;empresa_id;departamento;localidad;direccion;prioridad;franja_horaria;sla_horas;descripcion;observaciones;tier\nSERVICIO_TECNICO;12345678;Comercio Ejemplo;210000000001;099123456;Retail;TRANS;Montevideo;Montevideo;Rivera 1234;MEDIA;FH2 (12-16);4;Equipo no enciende;;T1b";
+
+  return (
+    <div style={{maxWidth:700,padding:"0 0 40px"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>IMPORTACIÓN</div>
+        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>CARGA MASIVA DE CASOS</h1>
+      </div>
+
+      {/* Plantilla */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>◈ PLANTILLA CSV</div>
+        <div style={{fontSize:12,color:B.t2,marginBottom:12,lineHeight:1.6}}>
+          Descargá la plantilla, completá los datos y subí el archivo. Separador: punto y coma (;)
+        </div>
+        <button onClick={()=>{
+          const blob = new Blob([TEMPLATE],{type:"text/csv"});
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "plantilla_casos_boolean.csv";
+          a.click();
+        }} style={{background:B.deep,border:`1px solid ${B.border}`,color:B.t1,
+          cursor:"pointer",padding:"10px 20px",fontSize:13,fontWeight:700,borderRadius:2}}>
+          ⬇ DESCARGAR PLANTILLA
+        </button>
+      </div>
+
+      {/* Subir archivo */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ SUBIR ARCHIVO</div>
+        <input type="file" accept=".csv,.txt" onChange={handleFile}
+          style={{fontSize:13,color:B.t1,marginBottom:12,display:"block"}}/>
+        {preview.length>0&&(
+          <div>
+            <div style={{fontSize:10,color:B.t3,marginBottom:8}}>Vista previa (primeras {preview.length} filas):</div>
+            <div style={{overflowX:"auto"}}>
+              <table><thead><tr>{Object.keys(preview[0]).map(k=><th key={k}>{k}</th>)}</tr></thead>
+                <tbody>{preview.map((r,i)=><tr key={i}>{Object.values(r).map((v,j)=><td key={j}>{v}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {resultado&&(
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:700,color:B.t1,marginBottom:8}}>Resultado de importación</div>
+          <div style={{display:"flex",gap:16}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:28,color:B.green,fontWeight:900}}>{resultado.ok}</div>
+              <div style={{fontSize:10,color:B.t3}}>IMPORTADOS</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:28,color:resultado.err>0?B.red:B.t3,fontWeight:900}}>{resultado.err}</div>
+              <div style={{fontSize:10,color:B.t3}}>ERRORES</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {preview.length>0&&(
+        <Bb label={loading?`IMPORTANDO...`:`⬆ IMPORTAR ${parsear(csv).length} CASOS`}
+          onClick={importar} disabled={loading} full/>
+      )}
+    </div>
+  );
+};
+
+// ─── ANALÍTICA ───────────────────────────────────────────────
+const Analitica = ({ user, toast }) => {
+  const [casos, setCasos]   = useState([]);
+  const [loading,setLoading]= useState(true);
+  const [rango, setRango]   = useState("7d");
+
+  useEffect(()=>{
+    const desde = new Date();
+    desde.setDate(desde.getDate()-({7:7,30:30,90:90}[rango.replace("d","")]||7));
+    supabase.from("casos").select("*")
+      .gte("created_at",desde.toISOString())
+      .then(({data})=>{ setCasos(data||[]); setLoading(false); });
+  },[rango]);
+
+  const finalizados = casos.filter(c=>c.estado==="FINALIZADO");
+  const cancelados  = casos.filter(c=>c.estado==="CANCELADO");
+  const enCurso     = casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||""));
+  const slaOk       = finalizados.filter(c=>c.sla_deadline&&new Date(c.updated_at)<new Date(c.sla_deadline)).length;
+  const slaPct      = finalizados.length ? Math.round(slaOk/finalizados.length*100) : 0;
+  const resueltos   = finalizados.filter(c=>c.resolvio===true).length;
+  const resPct      = finalizados.length ? Math.round(resueltos/finalizados.length*100) : 0;
+
+  const porTipo = TIPOS_PROCESO.map(t=>({
+    nombre:t.nombre, icono:t.icono, color:t.color,
+    total:casos.filter(c=>c.tipo_proceso===t.codigo).length,
+    fin:casos.filter(c=>c.tipo_proceso===t.codigo&&c.estado==="FINALIZADO").length,
+  }));
+
+  const porEmpresa = EMPRESAS.map(e=>({
+    nombre:e.nombre, color:e.color,
+    total:casos.filter(c=>c.empresa_id===e.codigo).length,
+    fin:casos.filter(c=>c.empresa_id===e.codigo&&c.estado==="FINALIZADO").length,
+  })).filter(e=>e.total>0);
+
+  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh"}}><Spin s={36}/></div>;
+
+  return (
+    <div style={{maxWidth:800,padding:"0 0 40px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MÓDULO DE</div>
+          <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>ANALÍTICA OPERATIVA</h1>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          {[["7d","7 días"],["30d","30 días"],["90d","90 días"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setRango(v)}
+              style={{padding:"8px 14px",background:rango===v?B.orangeDim:B.deep,
+                border:`1px solid ${rango===v?B.orange:B.border}`,
+                color:rango===v?B.orange:B.t2,cursor:"pointer",fontSize:12,fontWeight:700,borderRadius:2}}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPIs principales */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:20}}>
+        {[
+          {label:"CASOS TOTALES",   val:casos.length,        color:B.blue,   icono:"📋"},
+          {label:"FINALIZADOS",     val:finalizados.length,  color:B.green,  icono:"✅"},
+          {label:"SLA CUMPLIDO",    val:`${slaPct}%`,        color:slaPct>=90?B.green:B.red, icono:"⏱"},
+          {label:"TASA RESOLUCIÓN", val:`${resPct}%`,        color:resPct>=80?B.green:B.orange, icono:"🔧"},
+          {label:"EN CURSO",        val:enCurso.length,      color:B.yellow, icono:"⚡"},
+          {label:"CANCELADOS",      val:cancelados.length,   color:B.red,    icono:"✗"},
+        ].map(k=>(
+          <div key={k.label} style={{background:B.card,border:`1px solid ${B.border}`,
+            borderLeft:`3px solid ${k.color}`,padding:"14px 16px"}}>
+            <div style={{fontSize:10,color:B.t3,fontWeight:700,letterSpacing:".08em",marginBottom:6}}>
+              {k.icono} {k.label}
+            </div>
+            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:26,fontWeight:900,color:k.color}}>
+              {k.val}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Por tipo de proceso */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ POR TIPO DE PROCESO</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {porTipo.filter(t=>t.total>0).map(t=>(
+            <div key={t.nombre}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{fontSize:13,color:B.t1}}>{t.icono} {t.nombre}</span>
+                <span style={{fontSize:12,color:t.color,fontWeight:700}}>{t.fin}/{t.total}</span>
+              </div>
+              <div style={{height:6,background:B.deep,borderRadius:3}}>
+                <div style={{height:6,width:t.total?`${Math.round(t.fin/t.total*100)}%`:"0%",
+                  background:t.color,borderRadius:3,transition:"width .5s"}}/>
+              </div>
+            </div>
+          ))}
+          {porTipo.every(t=>t.total===0)&&(
+            <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:20}}>Sin datos para el período seleccionado</div>
+          )}
+        </div>
+      </div>
+
+      {/* Por empresa */}
+      {porEmpresa.length>0&&(
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ POR EMPRESA</div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {porEmpresa.map(e=>(
+              <div key={e.nombre}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:13,color:e.color,fontWeight:600}}>{e.nombre}</span>
+                  <span style={{fontSize:12,color:B.t2}}>{e.fin}/{e.total} finalizados</span>
+                </div>
+                <div style={{height:6,background:B.deep,borderRadius:3}}>
+                  <div style={{height:6,width:e.total?`${Math.round(e.fin/e.total*100)}%`:"0%",
+                    background:e.color,borderRadius:3,transition:"width .5s"}}/>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── LOGROS ──────────────────────────────────────────────────
+const Logros = ({ user, toast }) => {
+  const [perfil, setPerfil] = useState(null);
+
+  useEffect(()=>{
+    supabase.from("usuarios").select("*").eq("auth_id",user?.id).maybeSingle()
+      .then(({data})=>setPerfil(data));
+  },[]);
+
+  const LOGROS_DEF = [
+    {id:"primer_caso",   icono:"🎯", nombre:"Primer Caso",        desc:"Finalizaste tu primer caso",          xp:50,  condicion:p=>p?.casos_finalizados>=1},
+    {id:"diez_casos",    icono:"⚡", nombre:"Velocista",          desc:"10 casos finalizados",                xp:200, condicion:p=>p?.casos_finalizados>=10},
+    {id:"cincuenta",     icono:"🏆", nombre:"Medio Centenar",     desc:"50 casos finalizados",                xp:500, condicion:p=>p?.casos_finalizados>=50},
+    {id:"sla_master",    icono:"⏱", nombre:"SLA Master",         desc:"100% SLA cumplido en una semana",     xp:300, condicion:()=>false},
+    {id:"sin_cancelar",  icono:"💪", nombre:"Sin Rendirse",       desc:"30 días sin cancelaciones",           xp:400, condicion:()=>false},
+    {id:"velocidad",     icono:"🚀", nombre:"Velocidad Máxima",   desc:"5 casos en un día",                   xp:250, condicion:()=>false},
+    {id:"instalador",    icono:"📦", nombre:"Instalador Pro",     desc:"20 instalaciones completadas",        xp:350, condicion:p=>p?.instalaciones>=20},
+    {id:"tecnico_elite", icono:"🔧", nombre:"Técnico Elite",      desc:"Nivel 50 alcanzado",                  xp:1000,condicion:p=>(p?.nivel||0)>=50},
+  ];
+
+  const xpTotal = perfil?.xp_total || 0;
+  const nivel   = Math.floor(xpTotal/500)+1;
+  const xpNivel = xpTotal%500;
+  const pctNivel = Math.round(xpNivel/500*100);
+
+  return (
+    <div style={{maxWidth:600,padding:"0 0 40px"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MÓDULO DE</div>
+        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>LOGROS Y PROGRESO</h1>
+      </div>
+
+      {/* XP y nivel */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:20,marginBottom:20,
+        borderLeft:`4px solid ${B.orange}`}}>
+        <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16}}>
+          <div style={{width:60,height:60,borderRadius:"50%",
+            background:`linear-gradient(135deg,${B.orange},${B.amber})`,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:"#050507"}}>
+            {nivel}
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:B.orange}}>
+              NIVEL {nivel}
+            </div>
+            <div style={{fontSize:12,color:B.t2,marginTop:2}}>
+              {xpNivel} / 500 XP para el siguiente nivel
+            </div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:22,fontWeight:700,color:B.amber}}>
+              {xpTotal.toLocaleString()}
+            </div>
+            <div style={{fontSize:9,color:B.t3,letterSpacing:".1em"}}>XP TOTAL</div>
+          </div>
+        </div>
+        <div style={{height:8,background:B.deep,borderRadius:4}}>
+          <div style={{height:8,width:`${pctNivel}%`,borderRadius:4,
+            background:`linear-gradient(90deg,${B.orange},${B.amber})`,transition:"width .5s"}}/>
+        </div>
+      </div>
+
+      {/* Tabla XP por acción */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,marginBottom:20,overflow:"hidden"}}>
+        <div style={{padding:"10px 16px",borderBottom:`1px solid ${B.border}`,fontSize:10,
+          color:B.orange,fontWeight:700,letterSpacing:".12em"}}>◈ XP POR ACCIÓN</div>
+        {XP_ACCIONES.map((a,i)=>(
+          <div key={a.accion} style={{display:"flex",alignItems:"center",gap:12,
+            padding:"12px 16px",
+            borderBottom:i<XP_ACCIONES.length-1?`1px solid ${B.border}22`:"none",
+            background:i%2===0?"transparent":B.deep+"44"}}>
+            <span style={{fontSize:20,flexShrink:0}}>{a.icono}</span>
+            <span style={{fontSize:13,color:B.t1,flex:1}}>{a.accion}</span>
+            <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:B.green}}>
+              +{a.xp} XP
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Logros */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ LOGROS</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {LOGROS_DEF.map(l=>{
+            const desbloqueado = l.condicion(perfil);
+            return(
+              <div key={l.id} style={{display:"flex",alignItems:"center",gap:14,
+                padding:"12px 14px",
+                background:desbloqueado?B.green+"11":B.deep,
+                border:`1px solid ${desbloqueado?B.green+"44":B.border}`,
+                borderRadius:2,opacity:desbloqueado?1:0.5}}>
+                <span style={{fontSize:32,flexShrink:0,filter:desbloqueado?"none":"grayscale(1)"}}>
+                  {l.icono}
+                </span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:desbloqueado?B.green:B.t2}}>
+                    {l.nombre}
+                  </div>
+                  <div style={{fontSize:11,color:B.t3,marginTop:2}}>{l.desc}</div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:900,
+                    color:desbloqueado?B.green:B.t3}}>
+                    +{l.xp} XP
+                  </div>
+                  {desbloqueado&&<div style={{fontSize:9,color:B.green,marginTop:2}}>✓ DESBLOQUEADO</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── CONFIG NOTIFICACIONES ──────────────────────────────────
+const ConfigNotificaciones = ({ user, minutosAntes, setMinutosAntes, toast }) => {
+  const soportado = typeof Notification !== "undefined";
+  const [permiso, setPermiso] = useState(soportado ? Notification.permission : "no_soportado");
+  const [guardando, setGuardando] = useState(false);
+
+  const solicitar = async () => {
+    if(!soportado){ toast("Tu browser no soporta notificaciones"); return; }
+    const r = await Notification.requestPermission();
+    setPermiso(r);
+    if(r==="granted") toast("✓ Notificaciones activadas");
+    else if(r==="denied") toast("⚠ Permiso denegado — activalo desde la configuración del browser");
+  };
+
+  const probar = () => {
+    if(permiso!=="granted") return;
+    const n = new Notification("📦 RECORDATORIO DE PRUEBA · BOOLEAN", {
+      body:"Así vas a ver los avisos de tus casos.\nFH2 (12-16) — desde las 12:00",
+      tag:"boolean-test",
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+    setTimeout(()=>n.close(), 8000);
+  };
+
+  const guardar = async () => {
+    setGuardando(true);
+    await supabase.from("usuarios").update({ minutos_recordatorio: minutosAntes }).eq("auth_id", user.id);
+    toast(`✓ Recordatorio configurado: ${minutosAntes} min + 10 min fijos`);
+    setGuardando(false);
+  };
+
+  const PERM = {
+    granted:{color:B.green, icon:"✓", label:"ACTIVAS", sub:"Recibirás recordatorios en este dispositivo"},
+    denied:{color:B.red, icon:"✗", label:"BLOQUEADAS", sub:"Activá los permisos desde la configuración del browser"},
+    default:{color:B.orange, icon:"?", label:"SIN CONFIGURAR", sub:"Tocá ACTIVAR para recibir recordatorios"},
+    no_soportado:{color:B.t3, icon:"—", label:"NO SOPORTADO", sub:"Tu browser no soporta notificaciones push"},
+  };
+  const pi = PERM[permiso] || PERM.default;
+  const OPCIONES = [15,20,30,45,60,90,120];
+
+  return (
+    <div>
+      <div style={{background:B.card,border:`1px solid ${pi.color}44`,borderLeft:`4px solid ${pi.color}`,
+        padding:16,marginBottom:16,display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+        <div style={{width:44,height:44,borderRadius:"50%",background:pi.color+"22",
+          border:`2px solid ${pi.color}`,display:"flex",alignItems:"center",
+          justifyContent:"center",fontSize:20,flexShrink:0}}>{pi.icon}</div>
+        <div style={{flex:1,minWidth:180}}>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:900,
+            color:pi.color,letterSpacing:".08em",marginBottom:3}}>NOTIFICACIONES {pi.label}</div>
+          <div style={{fontSize:11,color:B.t2}}>{pi.sub}</div>
+        </div>
+        {permiso!=="granted"&&permiso!=="no_soportado"&&(
+          <Bb label="ACTIVAR" onClick={solicitar} small color={B.orange}/>
+        )}
+        {permiso==="granted"&&(
+          <Bb label="🔔 PROBAR" onClick={probar} small ghost color={B.green}/>
+        )}
+      </div>
+
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:18}}>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>
+          ◈ TIEMPO DE ANTICIPACIÓN
+        </div>
+        <div style={{fontSize:12,color:B.t2,marginBottom:14,lineHeight:1.6}}>
+          Elegí cuántos minutos antes del inicio de la franja horaria querés recibir el primer aviso.
+          El segundo aviso llega siempre <strong style={{color:B.t1}}>10 minutos antes</strong>, fijo.
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+          {OPCIONES.map(min=>(
+            <button key={min} onClick={()=>setMinutosAntes(min)}
+              style={{padding:"8px 16px",fontFamily:"'Orbitron',sans-serif",fontWeight:700,
+                fontSize:12,cursor:"pointer",transition:"all .15s",borderRadius:2,
+                background:minutosAntes===min?B.orange:B.deep,
+                color:minutosAntes===min?"#050507":B.t2,
+                border:`1px solid ${minutosAntes===min?B.orange:B.border}`}}>
+              {min>=60?`${min/60}h`:`${min}min`}
+            </button>
+          ))}
+        </div>
+        <Bb label={guardando?"GUARDANDO...":"GUARDAR CONFIGURACIÓN"} onClick={guardar}
+          disabled={guardando||permiso!=="granted"}/>
+        {permiso!=="granted"&&(
+          <div style={{fontSize:10,color:B.t3,marginTop:8}}>Activá las notificaciones primero para guardar</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
   const [tab,setTab]=useState("notificaciones");
   const [procesos,setProcesos]=useState(TIPOS_PROCESO);
@@ -6893,9 +7357,9 @@ export default function App(){
   const puedeVer=(v)=>(PERMISOS[rol]||PERMISOS.DIRECTOR).includes(v);
 
   return(
-    <div style={{minHeight:"100vh",background:B.bg,color:B.t1,fontFamily:"'Rajdhani',sans-serif",display:"flex",flexDirection:"column"}}>
+    <div className="app-root" style={{color:B.t1,fontFamily:"'Rajdhani',sans-serif"}}>
       <Ticker casos={casos}/>
-      <div style={{display:"flex",flex:1,overflow:"hidden",height:"calc(100vh - 24px)"}}>
+      <div className="app-shell">
         <Sidebar view={view} setView={v=>{setViewPersist(v);setCasoDetalle(null);}} user={user} onLogout={async()=>{
           setCasos([]); setPerfil(null); setCasoDetalle(null);
           setViewPersist("mision");
@@ -6903,11 +7367,7 @@ export default function App(){
           try{ localStorage.removeItem("boolean_view"); }catch{}
           await supabase.auth.signOut();
         }} casos={casos} perfil={perfil} noLeidosChat={noLeidosChat}/>
-        <main className="main-content" style={{
-          flex:1, overflowY:"auto",
-          padding:"24px 32px",
-          width:0,
-        }}>
+        <main className="main-content">
           {view==="mision"&&!casoDetalle&&<Mision casos={casos} setView={setView} user={user} perfil={perfil}/>}
           {view==="ruta"&&<MiRutaDelDia user={user} toast={toast} perfil={perfil}/>}
           {view==="casos"&&!casoDetalle&&<CasosList casos={casos} user={user} perfil={perfil} onRecargar={recargarCasos} onSelect={c=>{setCasoDetalle(c);}} onNew={()=>setViewPersist("nuevo")}/>}
