@@ -636,22 +636,22 @@ const Sidebar = ({view,setView,user,onLogout,casos,perfil,noLeidosChat}) => {
 
   // ── DESKTOP — sidebar lateral original ───────────────────
   return (
-    <div style={{width:210,background:B.panel,borderRight:`1px solid ${B.border}`,display:"flex",flexDirection:"column",height:"100%",flexShrink:0}}>
-      <div style={{padding:"12px 16px 10px",borderBottom:`1px solid ${B.border}`,flexShrink:0}}>
+    <div style={{width:210,background:B.panel,borderRight:`1px solid ${B.border}`,display:"flex",flexDirection:"column",height:"100%",flexShrink:0,overflowY:"auto"}}>
+      <div style={{padding:"8px 16px 6px",borderBottom:`1px solid ${B.border}`,flexShrink:0}}>
         <img src="/logo-boolean.png" alt="BOOLEAN"
-          style={{width:"100%",maxWidth:180,height:"auto",
+          style={{width:"100%",maxWidth:150,height:"auto",display:"block",margin:"0 auto",
             filter:"drop-shadow(0 0 8px #FF6B0033)"}}/>
       </div>
       {breach>0&&(
-        <div style={{margin:"8px 10px 0",background:B.redDim,border:`1px solid ${B.red}33`,borderLeft:`2px solid ${B.red}`,padding:"6px 10px",display:"flex",gap:7,alignItems:"center"}}>
-          <Dot c={B.red} pulse s={6}/><span style={{fontSize:11,color:B.red,fontWeight:700}}>{breach} SLA VENCIDO{breach>1?"S":""}</span>
+        <div style={{margin:"6px 10px 0",background:B.redDim,border:`1px solid ${B.red}33`,borderLeft:`2px solid ${B.red}`,padding:"4px 10px",display:"flex",gap:7,alignItems:"center",flexShrink:0}}>
+          <Dot c={B.red} pulse s={6}/><span style={{fontSize:10,color:B.red,fontWeight:700}}>{breach} SLA VENCIDO{breach>1?"S":""}</span>
         </div>
       )}
-      <nav style={{flex:1,overflowY:"auto",padding:"8px 0"}}>
+      <nav style={{flex:1,padding:"6px 0"}}>
         {menu.map(item=>(
           <div key={item.id} className={`nav-item ${view===item.id?"nav-active":""}`} onClick={()=>setView(item.id)}
-            style={{padding:"10px 14px",display:"flex",alignItems:"center",gap:10,marginBottom:0}}>
-            <span style={{fontSize:14,color:view===item.id?"#FF6B00":"#404060",minWidth:18,textAlign:"center",transition:"color .13s"}}>{item.icon}</span>
+            style={{padding:"8px 14px",display:"flex",alignItems:"center",gap:10,marginBottom:0}}>
+            <span style={{fontSize:13,color:view===item.id?"#FF6B00":"#404060",minWidth:18,textAlign:"center",transition:"color .13s"}}>{item.icon}</span>
             <span style={{fontSize:11,fontWeight:700,letterSpacing:".08em",fontFamily:"'Orbitron',sans-serif",
               color:view===item.id?"#FF9040":"#505070",flex:1,transition:"color .13s"}}>{item.label}</span>
             {item.badge>0&&<span style={{
@@ -663,22 +663,22 @@ const Sidebar = ({view,setView,user,onLogout,casos,perfil,noLeidosChat}) => {
           </div>
         ))}
       </nav>
-      <div style={{padding:"12px 14px",borderTop:`1px solid ${B.border}`,flexShrink:0}}>
-        <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:9}}>
-          <div style={{width:32,height:32,borderRadius:"50%",background:`linear-gradient(135deg,${B.orange},${B.amber})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,fontFamily:"'Orbitron',sans-serif",color:"#050507",flexShrink:0}}>{initials}</div>
+      <div style={{padding:"8px 14px 10px",borderTop:`1px solid ${B.border}`,flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:7}}>
+          <div style={{width:28,height:28,borderRadius:"50%",background:`linear-gradient(135deg,${B.orange},${B.amber})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,fontFamily:"'Orbitron',sans-serif",color:"#050507",flexShrink:0}}>{initials}</div>
           <div style={{minWidth:0}}>
             <div style={{fontSize:11,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{perfil?.nombre||user?.email||""}</div>
-            <div style={{fontSize:9,color:B.orange,fontWeight:700,letterSpacing:".06em",marginTop:1}}>
+            <div style={{fontSize:8,color:B.orange,fontWeight:700,letterSpacing:".06em",marginTop:1}}>
               {perfil?.rol==="REGIONAL"?"REPRESENTANTE REGIONAL":perfil?.rol==="SUPERVISOR"?"SUPERVISOR":perfil?.rol==="TECNICO"?"TÉCNICO DE CAMPO":"DIRECTOR OPERATIVO"}
             </div>
           </div>
         </div>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
           <span style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".08em"}}>NIVEL 23</span>
           <span style={{fontSize:9,color:B.amber,fontFamily:"'Share Tech Mono',monospace"}}>8.450 XP</span>
         </div>
         <div className="xp-bar"><div className="xp-fill" style={{width:"84.5%"}}/></div>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:9}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:7}}>
           <div style={{display:"flex",alignItems:"center",gap:5}}><Dot c={B.green} s={5} pulse/><span style={{fontSize:9,color:B.t3}}>EN LÍNEA</span></div>
           <button className="btn" onClick={onLogout} style={{background:"none",color:B.t3,fontSize:10,padding:"2px 8px",border:`1px solid ${B.border}`}}>SALIR</button>
         </div>
