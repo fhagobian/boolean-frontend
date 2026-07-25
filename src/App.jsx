@@ -6544,8 +6544,7 @@ const Usuarios=({user,perfil,toast,casos})=>{
           }
         }
         const {error} = await supabase.from("empresas")
-          .update({lema, departamentos:deptos, escudo})
-          .eq("codigo",codigo);
+          .upsert({codigo, nombre:emp?.nombre||codigo, lema, departamentos:deptos, escudo},{onConflict:"codigo"});
         if(error){ toast("Error: "+error.message); }
         else { toast(`✓ Equipo ${emp?.nombre} actualizado`); await cargar(); setEditEquipo(null); }
       } finally { setGuardando(false); }
