@@ -6785,6 +6785,18 @@ const Usuarios=({user,perfil,toast,casos})=>{
                 </label>
               );
             })}
+            {/* Zonas obsoletas guardadas que ya no existen en la lista actual */}
+            {deptos.filter(d=>!ZONAS_OPERATIVAS.includes(d)).map(d=>(
+              <label key={"obs-"+d} style={{display:"flex",alignItems:"center",gap:6,
+                padding:"6px 12px",cursor:"pointer",borderRadius:2,
+                background:"#FF204014",border:`1px solid ${B.red}`,
+                transition:"all .15s"}}>
+                <input type="checkbox" checked={true}
+                  onChange={()=>setDeptos(p=>p.filter(x=>x!==d))}
+                  style={{accentColor:B.red,width:14,height:14}}/>
+                <span style={{fontSize:12,fontWeight:600,color:B.red}}>⚠ {d} (obsoleta)</span>
+              </label>
+            ))}
           </div>
           <div style={{fontSize:10,color:B.t3,marginTop:6}}>
             {deptos.length} zona{deptos.length!==1?"s":""} habilitada{deptos.length!==1?"s":""} ·
