@@ -21,6 +21,38 @@ const B = {
   bg:"#0A0A0E",
 };
 
+const DEPARTAMENTOS_UY = ["Artigas","Canelones","Cerro Largo","Colonia","Durazno",
+  "Flores","Florida","Lavalleja","Maldonado","Montevideo","Paysandú","Río Negro",
+  "Rivera","Rocha","Salto","San José","Soriano","Tacuarembó","Treinta y Tres"];
+
+const ESCUDO_SIMBOLOS = ["⚡","🦅","🐺","🦁","⭐","🔥","⚙","🛡","🚀","🏔","🌊","☀"];
+const ESCUDO_FORMAS = {
+  clasico: "M50 5 L92 20 L92 55 Q92 85 50 98 Q8 85 8 55 L8 20 Z",
+  frances: "M50 4 L94 12 L94 60 Q94 84 50 97 Q6 84 6 60 L6 12 Z",
+  redondo: "M50 5 Q95 5 95 45 Q95 85 50 98 Q5 85 5 45 Q5 5 50 5 Z",
+};
+
+const EscudoEquipo = ({escudo={}, color="#FF6B00", size=48}) => {
+  const forma = ESCUDO_FORMAS[escudo.forma] || ESCUDO_FORMAS.clasico;
+  const c1 = escudo.color1 || color;
+  const c2 = escudo.color2 || "#0A0A0F";
+  const simbolo = escudo.simbolo || "⚡";
+  const gid = `esc-${c1.replace("#","")}-${c2.replace("#","")}`;
+  return (
+    <svg viewBox="0 0 100 100" width={size} height={size} style={{flexShrink:0,filter:"drop-shadow(0 2px 4px rgba(0,0,0,0.5))"}}>
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={c1}/>
+          <stop offset="100%" stopColor={c2}/>
+        </linearGradient>
+      </defs>
+      <path d={forma} fill={`url(#${gid})`} stroke={c1} strokeWidth="3"/>
+      <path d={forma} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1" transform="translate(0,2) scale(0.94)" style={{transformOrigin:"50% 50%"}}/>
+      <text x="50" y="58" textAnchor="middle" fontSize="34" style={{userSelect:"none"}}>{simbolo}</text>
+    </svg>
+  );
+};
+
 const EMPRESAS = [
   {codigo:"TRANS",    nombre:"Trans",           color:"#FF6B00", deps:["Artigas","Rivera","Tacuarembó","Durazno","Cerro Largo"]},
   {codigo:"MAVILOR",  nombre:"Mavilor",         color:"#00A8FF", deps:["Salto","Paysandú"]},
@@ -6207,6 +6239,9 @@ const Usuarios=({user,perfil,toast,casos})=>{
   const [filtroEmp,  setFiltroEmp]  = useState("");
   const [filtroRol,  setFiltroRol]  = useState("");
   const [busqueda,   setBusqueda]   = useState("");
+  const [tab,        setTab]        = useState("usuarios"); // usuarios | equipos
+  const [equiposDB,  setEquiposDB]  = useState([]); // filas de tabla empresas
+  const [editEquipo, setEditEquipo] = useState(null); // codigo del equipo en edición
 
   const esDirector  = perfil?.rol==="DIRECTOR";
   const esRegional  = perfil?.rol==="REGIONAL";
@@ -6216,7 +6251,7 @@ const Usuarios=({user,perfil,toast,casos})=>{
   const FORM_INIT = {
     nombre:"", apellido:"", email:"", password:"",
     rol:"TECNICO", empresa_codigo:perfil?.empresa_codigo||"",
-    supervisor_id:"", activo:true,
+    supervisor_id:"", activo:true, departamentos:[],
   };
   const [form, setForm] = useState(FORM_INIT);
   const sf = (k,v) => setForm(p=>({...p,[k]:v}));
@@ -6230,6 +6265,9 @@ const Usuarios=({user,perfil,toast,casos})=>{
     if(esSupervisor) q = q.eq("empresa_codigo", perfil?.empresa_codigo);
     const {data} = await q;
     setUsuarios(data||[]);
+    // Cargar equipos (tabla empresas) con departamentos, escudo y lema
+    const {data:emps} = await supabase.from("empresas").select("*");
+    setEquiposDB(emps||[]);
     setLoading(false);
   };
 
@@ -6247,6 +6285,7 @@ const Usuarios=({user,perfil,toast,casos})=>{
       empresa_codigo:u.empresa_codigo||"",
       supervisor_id:u.supervisor_id||"",
       activo:u.activo!==false,
+      departamentos:u.departamentos||[],
     });
     setEditUser(u);
     setShowForm(true);
@@ -6268,6 +6307,7 @@ const Usuarios=({user,perfil,toast,casos})=>{
           rol:form.rol, empresa_codigo:form.empresa_codigo,
           supervisor_id:form.supervisor_id||null,
           activo:form.activo,
+          departamentos:form.departamentos||[],
           updated_at:new Date().toISOString(),
         }).eq("id",editUser.id);
         if(error){ toast("Error: "+error.message); return; }
@@ -6299,6 +6339,7 @@ const Usuarios=({user,perfil,toast,casos})=>{
           email:form.email, nombre:form.nombre, apellido:form.apellido,
           rol:form.rol, empresa_codigo:form.empresa_codigo,
           supervisor_id:form.supervisor_id||null,
+          departamentos:form.departamentos||[],
           activo:true, created_at:new Date().toISOString(),
         });
         if(error){ toast("Error: "+error.message); return; }
@@ -6404,6 +6445,45 @@ const Usuarios=({user,perfil,toast,casos})=>{
             </select></div>
         )}
 
+        {/* Departamentos operativos — solo Técnico/Supervisor, limitados al equipo */}
+        {["TECNICO","SUPERVISOR"].includes(form.rol)&&form.empresa_codigo&&(()=>{
+          const equipoDB = equiposDB.find(e=>e.codigo===form.empresa_codigo);
+          const habilitados = equipoDB?.departamentos||[];
+          if(habilitados.length===0) return (
+            <div style={{padding:"12px 16px",background:B.card,border:`1px solid ${B.border}`,
+              fontSize:12,color:B.t3,lineHeight:1.6}}>
+              ⚠ El equipo <strong style={{color:B.orange}}>{form.empresa_codigo}</strong> no tiene
+              departamentos habilitados. Configuralos primero en la pestaña EQUIPOS.
+            </div>
+          );
+          return (
+            <div>
+              <FL label={`Departamentos donde opera (habilitados en ${form.empresa_codigo})`}/>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,padding:"12px",
+                background:B.card,border:`1px solid ${B.border}`}}>
+                {habilitados.map(d=>{
+                  const on = (form.departamentos||[]).includes(d);
+                  return (
+                    <label key={d} style={{display:"flex",alignItems:"center",gap:6,
+                      padding:"6px 12px",cursor:"pointer",borderRadius:2,
+                      background:on?B.orangeDim:B.deep,
+                      border:`1px solid ${on?B.orange:B.border}`,
+                      transition:"all .15s"}}>
+                      <input type="checkbox" checked={on}
+                        onChange={()=>{
+                          const cur = form.departamentos||[];
+                          sf("departamentos", on?cur.filter(x=>x!==d):[...cur,d]);
+                        }}
+                        style={{accentColor:B.orange,width:14,height:14}}/>
+                      <span style={{fontSize:12,fontWeight:600,color:on?B.orange:B.t2}}>{d}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Activo — solo al editar */}
         {editUser&&(
           <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",
@@ -6428,6 +6508,216 @@ const Usuarios=({user,perfil,toast,casos})=>{
     </div>
   );
 
+  // ── PESTAÑA EQUIPOS ─────────────────────────────────────
+  const EquipoEditor = ({codigo}) => {
+    const emp = EMPRESAS.find(e=>e.codigo===codigo);
+    const db = equiposDB.find(e=>e.codigo===codigo) || {};
+    const [lema, setLema] = useState(db.lema||"");
+    const [deptos, setDeptos] = useState(db.departamentos||[]);
+    const [escudo, setEscudo] = useState(db.escudo||{forma:"clasico",color1:emp?.color||"#FF6B00",color2:"#0A0A0F",simbolo:"⚡"});
+    const [guardando, setGuardando] = useState(false);
+    const se = (k,v)=>setEscudo(p=>({...p,[k]:v}));
+
+    const guardarEquipo = async()=>{
+      setGuardando(true);
+      try{
+        // Cascada: detectar deptos removidos con técnicos asignados
+        const antes = db.departamentos||[];
+        const removidos = antes.filter(d=>!deptos.includes(d));
+        if(removidos.length>0){
+          const afectados = usuarios.filter(u=>u.empresa_codigo===codigo&&
+            (u.departamentos||[]).some(d=>removidos.includes(d)));
+          if(afectados.length>0){
+            const ok = window.confirm(
+              `⚠ Estás quitando: ${removidos.join(", ")}.\n`+
+              `${afectados.length} integrante(s) del equipo tienen esos departamentos asignados `+
+              `y se les quitarán automáticamente:\n\n`+
+              afectados.map(u=>`• ${u.nombre} ${u.apellido}`).join("\n")+
+              `\n\n¿Confirmás?`
+            );
+            if(!ok){ setGuardando(false); return; }
+            // Quitar en cascada
+            for(const u of afectados){
+              const nuevos = (u.departamentos||[]).filter(d=>!removidos.includes(d));
+              await supabase.from("usuarios").update({departamentos:nuevos}).eq("id",u.id);
+            }
+          }
+        }
+        const {error} = await supabase.from("empresas")
+          .update({lema, departamentos:deptos, escudo})
+          .eq("codigo",codigo);
+        if(error){ toast("Error: "+error.message); }
+        else { toast(`✓ Equipo ${emp?.nombre} actualizado`); await cargar(); setEditEquipo(null); }
+      } finally { setGuardando(false); }
+    };
+
+    const COLORES = ["#FF6B00","#00A8FF","#9B6DFF","#00E87A","#FFD020","#FF2040","#00D4B4","#A855F7","#FFFFFF","#0A0A0F"];
+
+    return (
+      <div style={{maxWidth:560}}>
+        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:24}}>
+          <BtnVolver onClick={()=>setEditEquipo(null)}/>
+          <div>
+            <div style={{fontSize:9,color:B.t3,letterSpacing:".18em"}}>EDITAR EQUIPO</div>
+            <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900,margin:0,color:emp?.color}}>
+              {emp?.nombre}
+            </h2>
+          </div>
+        </div>
+
+        {/* Vista previa del escudo */}
+        <div style={{display:"flex",alignItems:"center",gap:20,padding:20,
+          background:B.card,border:`1px solid ${B.border}`,borderLeft:`4px solid ${emp?.color}`,
+          marginBottom:16}}>
+          <EscudoEquipo escudo={escudo} color={emp?.color} size={84}/>
+          <div>
+            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,fontWeight:900,color:emp?.color}}>
+              {emp?.nombre?.toUpperCase()}
+            </div>
+            <div style={{fontSize:12,color:B.t2,fontStyle:"italic",marginTop:4}}>
+              {lema||"« Sin lema todavía »"}
+            </div>
+          </div>
+        </div>
+
+        {/* Editor de escudo */}
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>◈ ESCUDO</div>
+          <FL label="Forma"/>
+          <div style={{display:"flex",gap:10,marginBottom:14}}>
+            {Object.keys(ESCUDO_FORMAS).map(f=>(
+              <div key={f} onClick={()=>se("forma",f)}
+                style={{cursor:"pointer",padding:8,borderRadius:2,
+                  border:`2px solid ${escudo.forma===f?B.orange:B.border}`,
+                  background:escudo.forma===f?B.orangeDim:"transparent"}}>
+                <EscudoEquipo escudo={{...escudo,forma:f}} color={emp?.color} size={40}/>
+              </div>
+            ))}
+          </div>
+          <FL label="Color principal"/>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+            {COLORES.map(c=>(
+              <div key={c} onClick={()=>se("color1",c)}
+                style={{width:28,height:28,background:c,cursor:"pointer",borderRadius:2,
+                  border:`2px solid ${escudo.color1===c?"#fff":B.border}`}}/>
+            ))}
+          </div>
+          <FL label="Color secundario"/>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+            {COLORES.map(c=>(
+              <div key={"s"+c} onClick={()=>se("color2",c)}
+                style={{width:28,height:28,background:c,cursor:"pointer",borderRadius:2,
+                  border:`2px solid ${escudo.color2===c?"#fff":B.border}`}}/>
+            ))}
+          </div>
+          <FL label="Símbolo"/>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {ESCUDO_SIMBOLOS.map(s=>(
+              <div key={s} onClick={()=>se("simbolo",s)}
+                style={{width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:20,cursor:"pointer",borderRadius:2,
+                  background:escudo.simbolo===s?B.orangeDim:B.deep,
+                  border:`2px solid ${escudo.simbolo===s?B.orange:B.border}`}}>{s}</div>
+            ))}
+          </div>
+        </div>
+
+        {/* Lema */}
+        <div style={{marginBottom:16}}>
+          <FL label="Lema del equipo"/>
+          <input className="field" value={lema} onChange={e=>setLema(e.target.value)}
+            placeholder='Ej: "Siempre en ruta, siempre a tiempo"' maxLength={80}/>
+        </div>
+
+        {/* Departamentos */}
+        <div style={{marginBottom:20}}>
+          <FL label="Departamentos donde opera el equipo"/>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,padding:12,
+            background:B.card,border:`1px solid ${B.border}`}}>
+            {DEPARTAMENTOS_UY.map(d=>{
+              const on = deptos.includes(d);
+              return (
+                <label key={d} style={{display:"flex",alignItems:"center",gap:6,
+                  padding:"6px 12px",cursor:"pointer",borderRadius:2,
+                  background:on?B.orangeDim:B.deep,
+                  border:`1px solid ${on?B.orange:B.border}`,
+                  transition:"all .15s"}}>
+                  <input type="checkbox" checked={on}
+                    onChange={()=>setDeptos(p=>on?p.filter(x=>x!==d):[...p,d])}
+                    style={{accentColor:B.orange,width:14,height:14}}/>
+                  <span style={{fontSize:12,fontWeight:600,color:on?B.orange:B.t2}}>{d}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div style={{fontSize:10,color:B.t3,marginTop:6}}>
+            {deptos.length} departamento{deptos.length!==1?"s":""} habilitado{deptos.length!==1?"s":""}
+          </div>
+        </div>
+
+        <Bb label="GUARDAR EQUIPO" onClick={guardarEquipo} saving={guardando} full color={B.green}/>
+      </div>
+    );
+  };
+
+  if(tab==="equipos"&&editEquipo) return <EquipoEditor codigo={editEquipo}/>;
+
+  if(tab==="equipos") return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+        marginBottom:20,flexWrap:"wrap",gap:12}}>
+        <div>
+          <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>GESTIÓN DE</div>
+          <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,margin:0}}>EQUIPOS</h1>
+        </div>
+      </div>
+      {/* Tabs */}
+      <div style={{display:"flex",gap:0,marginBottom:20,borderBottom:`1px solid ${B.border}`}}>
+        <button className="tab-btn" onClick={()=>setTab("usuarios")}>USUARIOS</button>
+        <button className="tab-btn on">EQUIPOS</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:14}}>
+        {EMPRESAS.map(emp=>{
+          const db = equiposDB.find(e=>e.codigo===emp.codigo)||{};
+          const miembros = usuarios.filter(u=>u.empresa_codigo===emp.codigo).length;
+          const deptos = db.departamentos||[];
+          return (
+            <div key={emp.codigo} style={{background:B.card,border:`1px solid ${B.border}`,
+              borderTop:`3px solid ${emp.color}`,padding:18,display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",alignItems:"center",gap:14}}>
+                <EscudoEquipo escudo={db.escudo} color={emp.color} size={56}/>
+                <div style={{minWidth:0}}>
+                  <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,color:emp.color}}>
+                    {emp.nombre.toUpperCase()}
+                  </div>
+                  <div style={{fontSize:11,color:B.t2,fontStyle:"italic",marginTop:2,
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {db.lema||"« Sin lema »"}
+                  </div>
+                </div>
+              </div>
+              <div style={{fontSize:11,color:B.t3}}>
+                👥 {miembros} integrante{miembros!==1?"s":""} · 📍 {deptos.length} departamento{deptos.length!==1?"s":""}
+              </div>
+              {deptos.length>0&&(
+                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                  {deptos.slice(0,4).map(d=>(
+                    <span key={d} style={{fontSize:9,padding:"2px 8px",borderRadius:2,
+                      background:`${emp.color}18`,color:emp.color,fontWeight:700}}>{d}</span>
+                  ))}
+                  {deptos.length>4&&<span style={{fontSize:9,color:B.t3,padding:"2px 4px"}}>+{deptos.length-4}</span>}
+                </div>
+              )}
+              {esDirector&&(
+                <Bb label="✎ EDITAR EQUIPO" onClick={()=>setEditEquipo(emp.codigo)} small ghost color={emp.color}/>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
     <div>
       {/* Header */}
@@ -6442,6 +6732,11 @@ const Usuarios=({user,perfil,toast,casos})=>{
         {puedeEditar&&(
           <Bb label="+ NUEVO USUARIO" onClick={abrirNuevo} color={B.orange}/>
         )}
+      </div>
+      {/* Tabs */}
+      <div style={{display:"flex",gap:0,marginBottom:20,borderBottom:`1px solid ${B.border}`}}>
+        <button className="tab-btn on">USUARIOS</button>
+        <button className="tab-btn" onClick={()=>setTab("equipos")}>EQUIPOS</button>
       </div>
 
       {/* Filtros */}
@@ -6474,13 +6769,15 @@ const Usuarios=({user,perfil,toast,casos})=>{
         <div style={{display:"flex",flexDirection:"column",gap:20}}>
           {Object.entries(porEmpresa).map(([emp,lista])=>{
             const empData = EMPRESAS.find(e=>e.codigo===emp);
+            const dbEq = equiposDB.find(e=>e.codigo===emp)||{};
             return (
               <div key={emp}>
                 <div style={{fontSize:10,color:empData?.color||B.orange,fontWeight:700,
                   letterSpacing:".14em",marginBottom:10,display:"flex",
                   alignItems:"center",gap:10}}>
-                  <span style={{width:24,height:1,background:empData?.color||B.orange,display:"inline-block"}}/>
+                  <EscudoEquipo escudo={dbEq.escudo} color={empData?.color} size={26}/>
                   {empData?.nombre||emp} · {lista.length} usuarios
+                  {dbEq.lema&&<span style={{fontSize:10,color:B.t3,fontStyle:"italic",fontWeight:400,letterSpacing:0}}>— "{dbEq.lema}"</span>}
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:2}}>
                   {lista.map(u=>{
