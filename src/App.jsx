@@ -25,6 +25,88 @@ const DEPARTAMENTOS_UY = ["Artigas","Canelones","Cerro Largo","Colonia","Durazno
   "Flores","Florida","Lavalleja","Maldonado","Montevideo","Paysandú","Río Negro",
   "Rivera","Rocha","Salto","San José","Soriano","Tacuarembó","Treinta y Tres"];
 
+// ─── ZONAS OPERATIVAS ───────────────────────────────────────
+// Canelones se divide en 3 zonas operativas. El resto de los
+// departamentos son zonas en sí mismos.
+const ZONAS_OPERATIVAS = ["Artigas","Canelones Oeste","Canelones Este","Canelones Metropolitana",
+  "Cerro Largo","Colonia","Durazno","Flores","Florida","Lavalleja","Maldonado","Montevideo",
+  "Paysandú","Río Negro","Rivera","Rocha","Salto","San José","Soriano","Tacuarembó","Treinta y Tres"];
+
+// Localidades que componen cada zona de Canelones (para matchear casos por localidad)
+const LOCALIDADES_ZONA = {
+  "Canelones Metropolitana": [
+    "Las Piedras","La Paz","Progreso","18 de Mayo","Villa Felicidad",
+    "Barros Blancos","Joaquín Suárez","Suárez","Toledo","Sauce","Pando","Empalme Olmos",
+    "Paso Carrasco","Colonia Nicolich","Nicolich","Aeroparque","Shangrilá","San José de Carrasco",
+    "Lagomar","Solymar","Lomas de Solymar","El Pinar","El Bosque","Ciudad de la Costa",
+  ],
+  "Canelones Este": [
+    "Neptunia","Pinamar","Salinas","Marindia","Fortín de Santa Rosa","Villa Argentina",
+    "Atlántida","Estación Atlántida","Las Toscas","Parque del Plata","Las Vegas",
+    "La Floresta","Estación La Floresta","Costa Azul","Bello Horizonte","Guazuvirá",
+    "San Luis","Los Titanes","La Tuna","Araminda","Santa Lucía del Este","Cuchilla Alta",
+    "Santa Ana","Balneario Argentino","Jaureguiberry","Soca","Migues","Montes","Tala","San Jacinto",
+  ],
+  "Canelones Oeste": [
+    "Canelones","Santa Lucía","Aguas Corrientes","Los Cerrillos","Juanicó",
+    "San Ramón","San Bautista","Santa Rosa","San Antonio","25 de Agosto","25 de Mayo",
+  ],
+};
+
+// ─── SUBZONAS (para técnicos dentro de zonas grandes) ───────
+const SUBZONAS = {
+  "Montevideo": {
+    "MVD Centro": ["Ciudad Vieja","Centro","Barrio Sur","Palermo","Cordón","Parque Rodó",
+      "Aguada","Villa Muñoz","La Comercial","La Figurita","Tres Cruces"],
+    "MVD Costa Este": ["Punta Carretas","Pocitos","Buceo","Parque Batlle","La Blanqueada",
+      "Malvín","Malvín Norte","Punta Gorda","Carrasco","Carrasco Norte"],
+    "MVD Noreste": ["Unión","Villa Española","Mercado Modelo","Bolívar","Cerrito","Ituzaingó",
+      "Flor de Maroñas","Maroñas","Parque Guaraní","Jardines del Hipódromo","Punta de Rieles",
+      "Bella Italia","Bañados de Carrasco","Piedras Blancas","Manga","Toledo Chico"],
+    "MVD Norte": ["Casavalle","Las Acacias","Aires Puros","Brazo Oriental","Cerrito de la Victoria",
+      "Sayago","Peñarol","Lavalleja","Conciliación","Colón","Lezica","Villa Colón","Melilla","Abayubá"],
+    "MVD Oeste": ["Capurro","Bella Vista","Prado","Reducto","Atahualpa","Jacinto Vera",
+      "Belvedere","Nuevo París","La Teja","Tres Ombúes","Paso de la Arena","Villa del Cerro",
+      "Casabó","Pajas Blancas","La Paloma","Tomkinson","Santiago Vázquez"],
+  },
+  "Canelones Metropolitana": {
+    "Corredor Ruta 5": ["Las Piedras","La Paz","Progreso","18 de Mayo","Villa Felicidad"],
+    "Corredor Rutas 6-7-8": ["Barros Blancos","Joaquín Suárez","Suárez","Toledo","Sauce",
+      "Pando","Empalme Olmos"],
+    "Ciudad de la Costa": ["Paso Carrasco","Colonia Nicolich","Nicolich","Aeroparque",
+      "Shangrilá","San José de Carrasco","Lagomar","Solymar","Lomas de Solymar",
+      "El Pinar","El Bosque","Ciudad de la Costa"],
+  },
+};
+
+// Dado un caso (departamento + localidad), devuelve las zonas operativas que lo cubren
+const zonasDeCaso = (caso) => {
+  const depto = caso?.departamento||"";
+  const loc = (caso?.localidad||"").toLowerCase().trim();
+  if(depto==="Canelones"){
+    if(loc){
+      for(const [zona,locs] of Object.entries(LOCALIDADES_ZONA)){
+        if(locs.some(l=>loc.includes(l.toLowerCase())||l.toLowerCase().includes(loc))) return [zona];
+      }
+    }
+    // Localidad no mapeada — cualquier zona de Canelones puede tomarlo
+    return ["Canelones Oeste","Canelones Este","Canelones Metropolitana"];
+  }
+  return depto ? [depto] : [];
+};
+
+// Dado un caso y una zona con subzonas, devuelve la subzona que lo cubre (o null)
+const subzonaDeCaso = (caso, zona) => {
+  const subz = SUBZONAS[zona];
+  if(!subz) return null;
+  const loc = (caso?.localidad||"").toLowerCase().trim();
+  if(!loc) return null;
+  for(const [nombre,locs] of Object.entries(subz)){
+    if(locs.some(l=>loc.includes(l.toLowerCase())||l.toLowerCase().includes(loc))) return nombre;
+  }
+  return null;
+};
+
 const ESCUDO_SIMBOLOS = ["⚡","🦅","🐺","🦁","⭐","🔥","⚙","🛡","🚀","🏔","🌊","☀"];
 const ESCUDO_FORMAS = {
   clasico: "M50 5 L92 20 L92 55 Q92 85 50 98 Q8 85 8 55 L8 20 Z",
@@ -1576,19 +1658,25 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
             <option value="">👤 Asignar técnico...</option>
             {tecnicos
               .filter(t=>{
-                // Filtrar por departamento de los casos seleccionados
-                const deptosCasos=[...new Set(
-                  [...selIds].map(id=>casos.find(c=>c.id===id)?.departamento).filter(Boolean)
-                )];
-                if(deptosCasos.length===0) return true;
-                // El técnico debe cubrir al menos uno de los departamentos de los casos
-                const deptosT = t.departamentos||[];
-                if(deptosT.length===0) return true; // sin restricción configurada
-                return deptosCasos.some(d=>deptosT.includes(d));
+                // Filtrar por ZONA OPERATIVA de los casos seleccionados
+                const casosSel=[...selIds].map(id=>casos.find(c=>c.id===id)).filter(Boolean);
+                if(casosSel.length===0) return true;
+                const zonasT = t.departamentos||[];
+                if(zonasT.length===0) return true; // técnico sin restricción configurada
+                return casosSel.some(c=>{
+                  const zonasC = zonasDeCaso(c);
+                  const zonaMatch = zonasC.find(z=>zonasT.includes(z));
+                  if(!zonaMatch) return false;
+                  // Refinamiento por subzona (Montevideo / Canelones Metropolitana)
+                  const subsT = t.subzonas||[];
+                  if(subsT.length===0||!SUBZONAS[zonaMatch]) return true;
+                  const subC = subzonaDeCaso(c, zonaMatch);
+                  return subC===null || subsT.includes(subC);
+                });
               })
               .map(t=>{
                 const carga=casos.filter(c=>c.tecnico_id===(t.auth_id||t.id)&&!["FINALIZADO","CANCELADO"].includes(c.estado||"")).length;
-                const deptos=(t.departamentos||[]).slice(0,2).join(", ");
+                const deptos=[...(t.departamentos||[]),...(t.subzonas||[])].slice(0,2).join(", ");
                 return <option key={t.id} value={t.id}>
                   {t.nombre} {t.apellido} ({t.empresa_codigo}){deptos?` · ${deptos}`:""} — {carga} casos
                 </option>;
@@ -6251,7 +6339,7 @@ const Usuarios=({user,perfil,toast,casos})=>{
   const FORM_INIT = {
     nombre:"", apellido:"", email:"", password:"",
     rol:"TECNICO", empresa_codigo:perfil?.empresa_codigo||"",
-    supervisor_id:"", activo:true, departamentos:[],
+    supervisor_id:"", activo:true, departamentos:[], subzonas:[],
   };
   const [form, setForm] = useState(FORM_INIT);
   const sf = (k,v) => setForm(p=>({...p,[k]:v}));
@@ -6286,6 +6374,7 @@ const Usuarios=({user,perfil,toast,casos})=>{
       supervisor_id:u.supervisor_id||"",
       activo:u.activo!==false,
       departamentos:u.departamentos||[],
+      subzonas:u.subzonas||[],
     });
     setEditUser(u);
     setShowForm(true);
@@ -6308,6 +6397,7 @@ const Usuarios=({user,perfil,toast,casos})=>{
           supervisor_id:form.supervisor_id||null,
           activo:form.activo,
           departamentos:form.departamentos||[],
+          subzonas:form.subzonas||[],
           updated_at:new Date().toISOString(),
         }).eq("id",editUser.id);
         if(error){ toast("Error: "+error.message); return; }
@@ -6340,6 +6430,7 @@ const Usuarios=({user,perfil,toast,casos})=>{
           rol:form.rol, empresa_codigo:form.empresa_codigo,
           supervisor_id:form.supervisor_id||null,
           departamentos:form.departamentos||[],
+          subzonas:form.subzonas||[],
           activo:true, created_at:new Date().toISOString(),
         });
         if(error){ toast("Error: "+error.message); return; }
@@ -6445,7 +6536,7 @@ const Usuarios=({user,perfil,toast,casos})=>{
             </select></div>
         )}
 
-        {/* Departamentos operativos — solo Técnico/Supervisor, limitados al equipo */}
+        {/* Zonas operativas — solo Técnico/Supervisor, limitadas al equipo */}
         {["TECNICO","SUPERVISOR"].includes(form.rol)&&form.empresa_codigo&&(()=>{
           const equipoDB = equiposDB.find(e=>e.codigo===form.empresa_codigo);
           const habilitados = equipoDB?.departamentos||[];
@@ -6453,12 +6544,15 @@ const Usuarios=({user,perfil,toast,casos})=>{
             <div style={{padding:"12px 16px",background:B.card,border:`1px solid ${B.border}`,
               fontSize:12,color:B.t3,lineHeight:1.6}}>
               ⚠ El equipo <strong style={{color:B.orange}}>{form.empresa_codigo}</strong> no tiene
-              departamentos habilitados. Configuralos primero en la pestaña EQUIPOS.
+              zonas operativas habilitadas. Configuralas primero en la pestaña EQUIPOS.
             </div>
           );
+          // Zonas con subzonas que el técnico tiene seleccionadas
+          const zonasConSubzonas = (form.departamentos||[]).filter(z=>SUBZONAS[z]);
           return (
+            <>
             <div>
-              <FL label={`Departamentos donde opera (habilitados en ${form.empresa_codigo})`}/>
+              <FL label={`Zonas donde opera (habilitadas en ${form.empresa_codigo})`}/>
               <div style={{display:"flex",flexWrap:"wrap",gap:8,padding:"12px",
                 background:B.card,border:`1px solid ${B.border}`}}>
                 {habilitados.map(d=>{
@@ -6472,7 +6566,13 @@ const Usuarios=({user,perfil,toast,casos})=>{
                       <input type="checkbox" checked={on}
                         onChange={()=>{
                           const cur = form.departamentos||[];
-                          sf("departamentos", on?cur.filter(x=>x!==d):[...cur,d]);
+                          const next = on?cur.filter(x=>x!==d):[...cur,d];
+                          sf("departamentos", next);
+                          // Limpiar subzonas de zonas deseleccionadas
+                          if(on&&SUBZONAS[d]){
+                            const subsDeZona = Object.keys(SUBZONAS[d]);
+                            sf("subzonas",(form.subzonas||[]).filter(s=>!subsDeZona.includes(s)));
+                          }
                         }}
                         style={{accentColor:B.orange,width:14,height:14}}/>
                       <span style={{fontSize:12,fontWeight:600,color:on?B.orange:B.t2}}>{d}</span>
@@ -6481,6 +6581,42 @@ const Usuarios=({user,perfil,toast,casos})=>{
                 })}
               </div>
             </div>
+            {/* Subzonas — cuando el técnico opera en Montevideo o Canelones Metropolitana */}
+            {zonasConSubzonas.map(zona=>(
+              <div key={zona}>
+                <FL label={`Subzonas de ${zona}`}/>
+                <div style={{display:"flex",flexDirection:"column",gap:6,padding:"12px",
+                  background:B.card,border:`1px solid ${B.teal}33`,borderLeft:`3px solid ${B.teal}`}}>
+                  {Object.entries(SUBZONAS[zona]).map(([sub,locs])=>{
+                    const on = (form.subzonas||[]).includes(sub);
+                    return (
+                      <label key={sub} style={{display:"flex",alignItems:"flex-start",gap:8,
+                        padding:"8px 12px",cursor:"pointer",borderRadius:2,
+                        background:on?`${B.teal}14`:B.deep,
+                        border:`1px solid ${on?B.teal:B.border}`,
+                        transition:"all .15s"}}>
+                        <input type="checkbox" checked={on}
+                          onChange={()=>{
+                            const cur = form.subzonas||[];
+                            sf("subzonas", on?cur.filter(x=>x!==sub):[...cur,sub]);
+                          }}
+                          style={{accentColor:B.teal,width:14,height:14,marginTop:2}}/>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontSize:12,fontWeight:700,color:on?B.teal:B.t1}}>{sub}</div>
+                          <div style={{fontSize:10,color:B.t3,lineHeight:1.5}}>
+                            {locs.slice(0,6).join(" · ")}{locs.length>6?` · +${locs.length-6} más`:""}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                  <div style={{fontSize:10,color:B.t3}}>
+                    Sin subzonas marcadas, el técnico cubre toda la zona {zona}
+                  </div>
+                </div>
+              </div>
+            ))}
+            </>
           );
         })()}
 
@@ -6628,18 +6764,19 @@ const Usuarios=({user,perfil,toast,casos})=>{
             placeholder='Ej: "Siempre en ruta, siempre a tiempo"' maxLength={80}/>
         </div>
 
-        {/* Departamentos */}
+        {/* Zonas operativas */}
         <div style={{marginBottom:20}}>
-          <FL label="Departamentos donde opera el equipo"/>
+          <FL label="Zonas operativas donde trabaja el equipo"/>
           <div style={{display:"flex",flexWrap:"wrap",gap:8,padding:12,
             background:B.card,border:`1px solid ${B.border}`}}>
-            {DEPARTAMENTOS_UY.map(d=>{
+            {ZONAS_OPERATIVAS.map(d=>{
               const on = deptos.includes(d);
+              const esCanelones = d.startsWith("Canelones");
               return (
                 <label key={d} style={{display:"flex",alignItems:"center",gap:6,
                   padding:"6px 12px",cursor:"pointer",borderRadius:2,
                   background:on?B.orangeDim:B.deep,
-                  border:`1px solid ${on?B.orange:B.border}`,
+                  border:`1px solid ${on?B.orange:esCanelones?"#FFD02044":B.border}`,
                   transition:"all .15s"}}>
                   <input type="checkbox" checked={on}
                     onChange={()=>setDeptos(p=>on?p.filter(x=>x!==d):[...p,d])}
@@ -6650,7 +6787,8 @@ const Usuarios=({user,perfil,toast,casos})=>{
             })}
           </div>
           <div style={{fontSize:10,color:B.t3,marginTop:6}}>
-            {deptos.length} departamento{deptos.length!==1?"s":""} habilitado{deptos.length!==1?"s":""}
+            {deptos.length} zona{deptos.length!==1?"s":""} habilitada{deptos.length!==1?"s":""} ·
+            Canelones está dividido en Oeste, Este y Metropolitana
           </div>
         </div>
 
