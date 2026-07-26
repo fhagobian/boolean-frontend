@@ -249,6 +249,21 @@ const SLA_DIAS_HABILES = {
   VISITA_PROACTIVA: 7,
 };
 
+// SLA configurable por el Director — se lee de config_sla con
+// fallback a los defaults de SLA_DIAS_HABILES. Cache en memoria.
+let SLA_CACHE = null;
+const cargarSlaDias = async () => {
+  if(SLA_CACHE) return SLA_CACHE;
+  const merged = {...SLA_DIAS_HABILES};
+  try{
+    const {data} = await supabase.from("config_sla").select("tipo_proceso,sla_dias");
+    (data||[]).forEach(r=>{ if(r.sla_dias>0) merged[r.tipo_proceso]=r.sla_dias; });
+  }catch{}
+  SLA_CACHE = merged;
+  return merged;
+};
+const invalidarSlaCache = () => { SLA_CACHE = null; };
+
 // Calcula días hábiles restantes hasta un deadline
 const diasHabilesRestantes = (deadline, feriadosSet) => {
   if(!deadline) return null;
@@ -7045,12 +7060,18 @@ const BulkUpload = ({ user, toast }) => {
     let ok=0, err=0;
     const ts = new Date().toISOString();
     for(const c of casos){
-      const slaH = parseInt(c.sla_horas)||4;
-      const deadline = new Date(Date.now()+slaH*3600000).toISOString();
+      const slaCfg = await cargarSlaDias();
+      const feriadosSet = await cargarFeriados();
+      const diasHab = slaCfg[c.tipo_proceso] || 3;
+      const dl = sumarDiasHabiles(new Date(), diasHab, feriadosSet);
+      dl.setHours(23,59,59,999);
+      const deadline = dl.toISOString();
+      const slaH = diasHab * 8;
       const {error} = await supabase.from("casos").insert({
         ...c,
         estado:"PENDIENTE",
         sla_horas:slaH,
+        sla_dias_habiles:diasHab,
         sla_deadline:deadline,
         creado_por:user?.email,
         historial:[{id:Date.now(),tipo:"CREACION",
@@ -7466,7 +7487,13 @@ const ConfigNotificaciones = ({ user, minutosAntes, setMinutosAntes, toast }) =>
 
 const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
   const [tab,setTab]=useState("notificaciones");
-  const [procesos,setProcesos]=useState(TIPOS_PROCESO);
+  const [procesos,setProcesos]=useState(TIPOS_PROCESO.map(p=>({...p,sla:SLA_DIAS_HABILES[p.codigo]||3})));
+  // Cargar SLA reales (config del Director) al abrir
+  useEffect(()=>{
+    cargarSlaDias().then(sla=>{
+      setProcesos(TIPOS_PROCESO.map(p=>({...p,sla:sla[p.codigo]||SLA_DIAS_HABILES[p.codigo]||3})));
+    });
+  },[]);
   const [misiones,setMisiones]=useState([]);
   const [loading,setLoading]=useState(true);
 
@@ -7514,7 +7541,8 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
         <div>
           <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ SLA POR TIPO DE PROCESO</div>
           <div style={{fontSize:11,color:B.t2,marginBottom:16,lineHeight:1.6}}>
-            Configurá el tiempo máximo de atención para cada tipo de proceso. Se aplica a todos los casos nuevos.
+            Configurá el tiempo máximo de atención para cada tipo de proceso, en días hábiles
+            (lunes a viernes, excluyendo feriados). Se aplica a todos los casos nuevos.
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {procesos.map((p,i)=>(
@@ -7536,7 +7564,7 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
                     }} style={{background:"none",border:"none",color:B.t2,cursor:"pointer",
                       fontSize:18,padding:"0 4px",fontWeight:700}}>−</button>
                     <input
-                      type="number" min={1} max={168}
+                      type="number" min={1} max={30}
                       value={p.sla}
                       onChange={e=>{
                         const np=[...procesos];
@@ -7553,20 +7581,21 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
                     }} style={{background:"none",border:"none",color:B.t2,cursor:"pointer",
                       fontSize:18,padding:"0 4px",fontWeight:700}}>+</button>
                   </div>
-                  <span style={{fontSize:11,color:B.t3,fontWeight:700}}>horas</span>
+                  <span style={{fontSize:11,color:B.t3,fontWeight:700}}>día{"s"} hábiles</span>
                 </div>
               </div>
             ))}
           </div>
           <div style={{marginTop:14,display:"flex",justifyContent:"flex-end"}}>
             <Bb label="GUARDAR CAMBIOS DE SLA" onClick={async()=>{
-              // Guardar en tabla config_sla (o crear si no existe)
               for(const p of procesos){
-                await supabase.from("config_sla").upsert({
-                  tipo_proceso:p.codigo, sla_horas:p.sla, updated_at:new Date().toISOString()
+                const {error} = await supabase.from("config_sla").upsert({
+                  tipo_proceso:p.codigo, sla_dias:p.sla, updated_at:new Date().toISOString()
                 },{onConflict:"tipo_proceso"});
+                if(error){ toast("Error: "+error.message); return; }
               }
-              toast("✓ SLA actualizado correctamente");
+              invalidarSlaCache();
+              toast("✓ SLA actualizado — aplica a los casos nuevos");
             }}/>
           </div>
           <div style={{marginTop:10,padding:"10px 14px",background:B.orangeDim,
@@ -7823,7 +7852,8 @@ export default function App(){
               ? { texto: f.instrucciones_texto.trim(), adjuntos: [], autor: user.email, ts: new Date().toISOString(), editado: false }
               : null;
             const feriados = await cargarFeriados();
-            const diasHab = SLA_DIAS_HABILES[f.tipo_proceso] || 3;
+            const slaConfig = await cargarSlaDias();
+            const diasHab = slaConfig[f.tipo_proceso] || 3;
             const slaDeadline = sumarDiasHabiles(new Date(), diasHab, feriados);
             slaDeadline.setHours(23,59,59,999);
             const{error}=await supabase.from("casos").insert({
