@@ -7155,7 +7155,355 @@ const BulkUpload = ({ user, toast }) => {
 };
 
 // ─── ANALÍTICA ───────────────────────────────────────────────
+// ─── ANÁLISIS AVANZADO — RADIOGRAFÍA OPERATIVA (Bloque A) ───
+const ANALYTICS_API_URL = import.meta.env.VITE_ANALYTICS_API_URL || "";
+const ANALYTICS_API_SECRET = import.meta.env.VITE_ANALYTICS_API_SECRET || "";
+
+const TIPO_LABEL = {
+  INSTALACION:"📦 Instalación", SERVICIO_TECNICO:"🔧 Servicio Técnico",
+  RETIRO:"🔄 Retiro", VISITA_PROACTIVA:"👁 Visita Proactiva",
+};
+const TIPO_COLOR = {
+  INSTALACION:B.green, SERVICIO_TECNICO:B.blue, RETIRO:B.orange, VISITA_PROACTIVA:B.purple,
+};
+
+const SimBadge = () => (
+  <span style={{fontSize:8,background:"#FFD02022",color:B.yellow,padding:"1px 6px",
+    borderRadius:2,fontWeight:700,letterSpacing:".04em",marginLeft:6}}>SIMULADO</span>
+);
+
+const RadiografiaOperativa = ({toast}) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [equipoSel, setEquipoSel] = useState("");
+  const [vistaTendencia, setVistaTendencia] = useState("semanas");
+
+  const cargar = async () => {
+    if(!ANALYTICS_API_URL){
+      setError("Falta configurar VITE_ANALYTICS_API_URL en las variables de entorno de Vercel");
+      setLoading(false);
+      return;
+    }
+    setLoading(true); setError(null);
+    try{
+      const params = new URLSearchParams({vista_tendencia:vistaTendencia});
+      if(equipoSel) params.set("equipo", equipoSel);
+      const res = await fetch(`${ANALYTICS_API_URL}/radiografia?${params}`, {
+        headers:{Authorization:`Bearer ${ANALYTICS_API_SECRET}`},
+      });
+      if(!res.ok){
+        const txt = await res.text().catch(()=>"");
+        throw new Error(`${res.status} — ${txt.slice(0,200)}`);
+      }
+      const json = await res.json();
+      setData(json);
+    }catch(e){
+      setError(e.message||"Error al conectar con el motor de análisis");
+    }finally{
+      setLoading(false);
+    }
+  };
+
+  useEffect(()=>{ cargar(); },[equipoSel, vistaTendencia]);
+
+  if(loading) return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+      height:300,gap:12}}>
+      <Spin s={36}/>
+      <div style={{fontSize:11,color:B.t3}}>Calculando radiografía operativa...</div>
+    </div>
+  );
+
+  if(error) return (
+    <div style={{background:B.redDim,border:`1px solid ${B.red}44`,borderLeft:`3px solid ${B.red}`,
+      padding:20,display:"flex",flexDirection:"column",gap:10}}>
+      <div style={{fontSize:13,fontWeight:700,color:B.red}}>⚠ No se pudo cargar el análisis avanzado</div>
+      <div style={{fontSize:12,color:B.t2,lineHeight:1.6,fontFamily:"'Share Tech Mono',monospace"}}>{error}</div>
+      <div><Bb label="REINTENTAR" onClick={cargar} small color={B.red}/></div>
+    </div>
+  );
+
+  if(!data) return null;
+
+  const kpis = data.kpis_por_proceso || {};
+  const agregado = kpis._agregado || {};
+  const sla = data.sla_responsables || {};
+  const tendencia = data.tendencia_sla?.puntos || [];
+  const ranking = data.ranking_por_equipo || {};
+  const zonas = data.demanda_por_zona?.zonas || [];
+
+  return (
+    <div>
+      {/* Header con filtros */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+        marginBottom:4,flexWrap:"wrap",gap:10}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <Dot c={B.green} pulse s={7}/>
+          <span style={{fontSize:9,color:B.green,fontWeight:700,letterSpacing:".1em"}}>PYTHON ENGINE</span>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <select className="field" style={{width:170,fontSize:12,padding:"6px 10px"}}
+            value={equipoSel} onChange={e=>setEquipoSel(e.target.value)}>
+            <option value="">Todos los equipos</option>
+            {EMPRESAS.map(e=><option key={e.codigo} value={e.codigo}>{e.nombre}</option>)}
+          </select>
+          <Bb label="↻" onClick={cargar} small ghost color={B.orange}/>
+        </div>
+      </div>
+      <div style={{fontSize:10,color:B.t3,marginBottom:20}}>
+        Mes en curso ({data.ventana_actual?.dias_habiles_transcurridos} días hábiles transcurridos) ·
+        comparado vs mismo período mes anterior y mismo mes año anterior · actualizado{" "}
+        {data.generado_en ? new Date(data.generado_en).toLocaleTimeString("es-UY",{hour:"2-digit",minute:"2-digit"}) : ""}
+      </div>
+
+      {/* ── BLOQUE 1: KPIs por proceso ── */}
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
+        ◈ 1 · TIEMPO DE RESOLUCIÓN Y 1ª VISITA — POR PROCESO
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,marginBottom:10}}>
+        {TIPOS_PROCESO.map(tp=>{
+          const k = kpis[tp.codigo];
+          if(!k) return null;
+          const color = TIPO_COLOR[tp.codigo];
+          return (
+            <div key={tp.codigo} style={{background:B.card,border:`1px solid ${B.border}`,
+              borderTop:`2px solid ${color}`,padding:12}}>
+              <div style={{fontSize:9,color:B.t3,marginBottom:4}}>{TIPO_LABEL[tp.codigo]}</div>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:22,fontWeight:900,color}}>
+                {k.tiempo_resolucion_dias ?? "—"}<span style={{fontSize:11}}>d</span>
+              </div>
+              <div style={{fontSize:9,color:B.t3,marginTop:2}}>
+                {k.vs_mes_anterior_pp!=null && (
+                  <span style={{color:k.vs_mes_anterior_pp>=0?B.green:B.red}}>
+                    {k.vs_mes_anterior_pp>=0?"▼":"▲"}{Math.abs(k.vs_mes_anterior_pp)}pp* vs mes ant.
+                    {k.mes_anterior_simulado && <SimBadge/>}
+                  </span>
+                )}
+              </div>
+              <div style={{fontSize:9,color:B.t3}}>
+                {k.vs_anio_anterior_pp!=null && (
+                  <span style={{color:k.vs_anio_anterior_pp>=0?B.green:B.red}}>
+                    {k.vs_anio_anterior_pp>=0?"▼":"▲"}{Math.abs(k.vs_anio_anterior_pp)}pp* vs año ant.
+                    {k.anio_anterior_simulado && <SimBadge/>}
+                  </span>
+                )}
+              </div>
+              {k.riesgo && (
+                <div style={{fontSize:9,marginTop:4,color:k.riesgo.startsWith("⚠")?B.red:B.green,lineHeight:1.4}}>
+                  {k.riesgo}
+                </div>
+              )}
+              <div style={{fontSize:10,color:B.t3,marginTop:6,borderTop:`1px solid ${B.border}`,paddingTop:6}}>
+                1ª visita: <b style={{color}}>{k.primera_visita_pct ?? "—"}%</b>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:"10px 14px",
+        marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+        <span style={{fontSize:11,color:B.t2}}>⚙ Casos cerrados / técnico / día (todos los procesos):</span>
+        <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,fontWeight:900,color:B.green}}>
+          {agregado.casos_tecnico_dia ?? "—"}
+        </span>
+        <span style={{fontSize:10,color:B.t3}}>
+          {agregado.vs_mes_anterior!=null && `${agregado.vs_mes_anterior>=0?"▲":"▼"}${Math.abs(agregado.vs_mes_anterior)} vs mes ant.`}
+        </span>
+      </div>
+
+      {/* ── BLOQUE 2: SLA con responsables ── */}
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
+        ◈ 2 · PROMEDIO MES vs SLA — RESPONSABLES Y META CORRECTIVA
+      </div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:20,
+        display:"flex",flexDirection:"column",gap:14}}>
+        {TIPOS_PROCESO.map(tp=>{
+          const s = sla[tp.codigo];
+          if(!s || s.promedio_dias==null) return null;
+          const pct = Math.min(100, Math.round((s.promedio_dias/s.sla_objetivo_dias)*100));
+          const color = s.en_riesgo ? (s.promedio_dias>s.sla_objetivo_dias?B.red:B.yellow) : B.green;
+          return (
+            <div key={tp.codigo}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:4}}>
+                <span>{TIPO_LABEL[tp.codigo]}</span>
+                <span style={{fontFamily:"'Share Tech Mono',monospace",color}}>
+                  {s.promedio_dias} / SLA {s.sla_objetivo_dias}
+                </span>
+              </div>
+              <div style={{height:8,background:B.deep,position:"relative"}}>
+                <div style={{height:8,width:`${pct}%`,background:color,transition:"width .5s"}}/>
+              </div>
+              {s.responsables?.length>0 && (
+                <div style={{background:B.redDim,borderLeft:`3px solid ${B.red}`,padding:"8px 10px",
+                  marginTop:8,fontSize:10,lineHeight:1.7}}>
+                  ⚠ <b style={{color:B.red}}>En zona de riesgo</b> — afectado por:{" "}
+                  {s.responsables.map((r,i)=>(
+                    <span key={r.empresa}>
+                      {i>0&&", "}<b style={{color:B.yellow}}>{r.empresa}</b> ({r.promedio_dias}d)
+                    </span>
+                  ))}.
+                  <div style={{marginTop:4}}>
+                    Meta correctiva: {s.responsables.map((r,i)=>(
+                      <span key={r.empresa}>
+                        {i>0&&" · "}<b style={{color:B.yellow}}>{r.empresa}</b> debe bajar a{" "}
+                        <b style={{color:B.green}}>≤{r.meta_correctiva_dias}d</b>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── BLOQUE 3: Tendencia con toggle ── */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <span style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em"}}>
+          ◈ 3 · TENDENCIA DE CUMPLIMIENTO SLA
+        </span>
+        <div style={{display:"flex",border:`1px solid ${B.border}`}}>
+          {[["semanas","8 SEMANAS"],["meses","12 MESES"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setVistaTendencia(v)}
+              style={{background:vistaTendencia===v?B.orange:B.deep,
+                color:vistaTendencia===v?"#050507":B.t2,border:"none",
+                padding:"4px 12px",fontSize:9,fontWeight:700,cursor:"pointer"}}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:20}}>
+        {tendencia.length>0 ? (
+          <TendenciaSVG puntos={tendencia}/>
+        ) : (
+          <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:30}}>Sin datos suficientes todavía</div>
+        )}
+      </div>
+
+      {/* ── BLOQUE 4: Ranking por equipo ── */}
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
+        ◈ 4 · RANKING DE TÉCNICOS — DENTRO DE CADA EQUIPO · MES EN CURSO
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:10,marginBottom:20}}>
+        {Object.entries(ranking).map(([codEquipo, lista])=>{
+          const emp = EMPRESAS.find(e=>e.codigo===codEquipo);
+          const medallas = ["🥇","🥈","🥉"];
+          return (
+            <div key={codEquipo} style={{background:B.card,border:`1px solid ${B.border}`,
+              borderTop:`2px solid ${emp?.color||B.orange}`,padding:12}}>
+              <div style={{fontSize:11,fontWeight:900,color:emp?.color||B.orange,marginBottom:8}}>
+                🛡 {emp?.nombre||codEquipo}
+              </div>
+              {lista.map((t,i)=>(
+                <div key={t.id} style={{display:"flex",justifyContent:"space-between",
+                  fontSize:11,padding:"4px 0",borderBottom:i<lista.length-1?`1px solid ${B.border}`:"none"}}>
+                  <span>{medallas[i]||`${i+1}.`} {t.nombre}</span>
+                  <span style={{fontFamily:"'Share Tech Mono',monospace",
+                    color:t.score>=80?B.green:t.score>=60?B.yellow:B.red}}>{t.score} pts</span>
+                </div>
+              ))}
+              {lista.length===0 && <div style={{fontSize:10,color:B.t3}}>Sin técnicos activos</div>}
+            </div>
+          );
+        })}
+        {Object.keys(ranking).length===0 && (
+          <div style={{color:B.t3,fontSize:12,padding:20}}>Sin datos de equipos todavía</div>
+        )}
+      </div>
+
+      {/* ── BLOQUE 5: Demanda por zona ── */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <span style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em"}}>
+          ◈ 5 · DEMANDA POR ZONA × TIPO DE PROCESO
+        </span>
+        <span style={{fontSize:9,color:B.t3,background:B.deep,border:`1px solid ${B.border}`,padding:"3px 8px"}}>
+          📅 ÚLTIMOS {data.demanda_por_zona?.ventana_dias||90} DÍAS
+        </span>
+      </div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,display:"flex",
+        flexDirection:"column",gap:14}}>
+        {zonas.map(z=>{
+          const total = z.total_casos||1;
+          const tipos = Object.entries(z.por_tipo||{});
+          const coberturaColor = z.cobertura_pct==null ? B.t3
+            : z.cobertura_pct>=90 ? B.green : z.cobertura_pct>=60 ? B.yellow : B.red;
+          return (
+            <div key={z.zona}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:4,flexWrap:"wrap",gap:4}}>
+                <span><b>{z.zona}</b> · {z.total_casos} casos</span>
+                <span style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {tipos.map(([tp,n])=>(
+                    <span key={tp} style={{fontSize:8,background:`${TIPO_COLOR[tp]||B.t3}22`,
+                      color:TIPO_COLOR[tp]||B.t3,padding:"1px 6px"}}>
+                      {tp.slice(0,3)} {n}
+                    </span>
+                  ))}
+                </span>
+              </div>
+              <div style={{height:10,background:B.deep,display:"flex",overflow:"hidden"}}>
+                {tipos.map(([tp,n])=>(
+                  <div key={tp} style={{width:`${(n/total)*100}%`,background:TIPO_COLOR[tp]||B.t3}}/>
+                ))}
+              </div>
+              <div style={{fontSize:9,marginTop:3,color:coberturaColor}}>
+                {z.cobertura_pct==null
+                  ? `${z.tecnicos_asignados} técnico(s) asignado(s)`
+                  : z.cobertura_pct>=90
+                    ? `✓ Capacidad adecuada · ${z.tecnicos_asignados} técnico(s) cubren demanda al ${z.cobertura_pct}%`
+                    : `⚠ Capacidad limitada · ${z.tecnicos_asignados} técnico(s) cubren demanda al ${z.cobertura_pct}% (meta: ${z.meta_casos_dia} casos/técnico/día)`
+                }
+              </div>
+            </div>
+          );
+        })}
+        {zonas.length===0 && <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:20}}>Sin casos en los últimos 90 días</div>}
+      </div>
+
+      <div style={{fontSize:9,color:B.t3,marginTop:14,padding:"0 2px",lineHeight:1.6}}>
+        * pp = puntos porcentuales (diferencia absoluta entre dos porcentajes) · Meta de productividad
+        ajustable por departamento · Los valores marcados <SimBadge/> son una estimación mientras no se
+        carguen los casos históricos reales.
+      </div>
+    </div>
+  );
+};
+
+// SVG simple de línea para la tendencia (sin librerías externas)
+const TendenciaSVG = ({puntos}) => {
+  const vals = puntos.map(p=>p.sla_cumplido_pct).filter(v=>v!=null);
+  if(vals.length===0) return <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:30}}>Sin datos</div>;
+  const w = 600, h = 110, pad = 20;
+  const min = 50, max = 100; // escala fija 50-100% para SLA
+  const xStep = (w-pad*2)/(puntos.length-1||1);
+  const yFor = v => h-20 - ((v-min)/(max-min))*(h-40);
+  const pathPts = puntos.map((p,i)=>{
+    const x = pad + i*xStep;
+    const y = p.sla_cumplido_pct!=null ? yFor(p.sla_cumplido_pct) : null;
+    return {x,y,val:p.sla_cumplido_pct};
+  }).filter(p=>p.y!=null);
+  const path = pathPts.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+  const ultimo = pathPts[pathPts.length-1];
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",height:"auto"}}>
+      {[100,85,70].map(v=>(
+        <g key={v}>
+          <line x1={pad} y1={yFor(v)} x2={w-pad} y2={yFor(v)} stroke={B.border} strokeWidth={1}/>
+          <text x={2} y={yFor(v)-2} fontSize={7} fill={B.t3}>{v}%</text>
+        </g>
+      ))}
+      <polyline points={pathPts.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={B.blue} strokeWidth={2.5}/>
+      {ultimo && <circle cx={ultimo.x} cy={ultimo.y} r={4} fill={B.blue}/>}
+      {ultimo && <text x={ultimo.x-24} y={ultimo.y-10} fontSize={10} fill={B.green} fontWeight="bold">{ultimo.val}%</text>}
+    </svg>
+  );
+};
+
+
 const Analitica = ({ user, toast }) => {
+  const [tab, setTab] = useState("basica"); // basica | avanzada
   const [casos, setCasos]   = useState([]);
   const [loading,setLoading]= useState(true);
   const [rango, setRango]   = useState("7d");
@@ -7188,15 +7536,25 @@ const Analitica = ({ user, toast }) => {
     fin:casos.filter(c=>c.empresa_id===e.codigo&&c.estado==="FINALIZADO").length,
   })).filter(e=>e.total>0);
 
-  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh"}}><Spin s={36}/></div>;
-
   return (
-    <div style={{maxWidth:800,padding:"0 0 40px"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+    <div style={{maxWidth:tab==="avanzada"?1100:800,padding:"0 0 40px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
         <div>
           <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MÓDULO DE</div>
           <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>ANALÍTICA OPERATIVA</h1>
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{display:"flex",gap:0,marginBottom:20,borderBottom:`1px solid ${B.border}`}}>
+        <button className={`tab-btn ${tab==="basica"?"on":""}`} onClick={()=>setTab("basica")}>ANÁLISIS BÁSICO</button>
+        <button className={`tab-btn ${tab==="avanzada"?"on":""}`} onClick={()=>setTab("avanzada")}>◈ ANÁLISIS AVANZADO</button>
+      </div>
+
+      {tab==="avanzada" ? <RadiografiaOperativa toast={toast}/> : (
+      loading ? <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}><Spin s={36}/></div> : <>
+
+      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}>
         <div style={{display:"flex",gap:8}}>
           {[["7d","7 días"],["30d","30 días"],["90d","90 días"]].map(([v,l])=>(
             <button key={v} onClick={()=>setRango(v)}
@@ -7273,6 +7631,7 @@ const Analitica = ({ user, toast }) => {
           </div>
         </div>
       )}
+      </>)}
     </div>
   );
 };
