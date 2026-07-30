@@ -17,7 +17,7 @@ const B = {
   blue:"#00A8FF",blueDim:"#00A8FF12",
   purple:"#9B6DFF",purpleDim:"#9B6DFF12",
   teal:"#00D4B4",
-  t1:"#F4F4FF",t2:"#6868A0",t3:"#32324A",t4:"#1A1A28",
+  t1:"#F4F4FF",t2:"#9494C8",t3:"#7A7AA0",t4:"#1A1A28",
   bg:"#0A0A0E",
 };
 
@@ -7173,6 +7173,7 @@ const SimBadge = () => (
 );
 
 const RadiografiaOperativa = ({toast}) => {
+  const isMobile = useMobile();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -7242,8 +7243,8 @@ const RadiografiaOperativa = ({toast}) => {
           <Dot c={B.green} pulse s={7}/>
           <span style={{fontSize:9,color:B.green,fontWeight:700,letterSpacing:".1em"}}>PYTHON ENGINE</span>
         </div>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <select className="field" style={{width:170,fontSize:12,padding:"6px 10px"}}
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",width:isMobile?"100%":"auto"}}>
+          <select className="field" style={{width:isMobile?"100%":170,fontSize:12,padding:"6px 10px"}}
             value={equipoSel} onChange={e=>setEquipoSel(e.target.value)}>
             <option value="">Todos los equipos</option>
             {EMPRESAS.map(e=><option key={e.codigo} value={e.codigo}>{e.nombre}</option>)}
@@ -7251,7 +7252,7 @@ const RadiografiaOperativa = ({toast}) => {
           <Bb label="↻" onClick={cargar} small ghost color={B.orange}/>
         </div>
       </div>
-      <div style={{fontSize:10,color:B.t3,marginBottom:20}}>
+      <div style={{fontSize:11,color:B.t3,marginBottom:20,lineHeight:1.5}}>
         Mes en curso ({data.ventana_actual?.dias_habiles_transcurridos} días hábiles transcurridos) ·
         comparado vs mismo período mes anterior y mismo mes año anterior · actualizado{" "}
         {data.generado_en ? new Date(data.generado_en).toLocaleTimeString("es-UY",{hour:"2-digit",minute:"2-digit"}) : ""}
@@ -7261,7 +7262,7 @@ const RadiografiaOperativa = ({toast}) => {
       <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
         ◈ 1 · TIEMPO DE RESOLUCIÓN Y 1ª VISITA — POR PROCESO
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,marginBottom:10}}>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fit,minmax(200px,1fr))",gap:8,marginBottom:10}}>
         {TIPOS_PROCESO.map(tp=>{
           const k = kpis[tp.codigo];
           if(!k) return null;
@@ -7269,32 +7270,32 @@ const RadiografiaOperativa = ({toast}) => {
           return (
             <div key={tp.codigo} style={{background:B.card,border:`1px solid ${B.border}`,
               borderTop:`2px solid ${color}`,padding:12}}>
-              <div style={{fontSize:9,color:B.t3,marginBottom:4}}>{TIPO_LABEL[tp.codigo]}</div>
+              <div style={{fontSize:10,color:B.t2,marginBottom:4,fontWeight:600}}>{TIPO_LABEL[tp.codigo]}</div>
               <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:22,fontWeight:900,color}}>
-                {k.tiempo_resolucion_dias ?? "—"}<span style={{fontSize:11}}>d</span>
+                {k.tiempo_resolucion_dias!=null ? Math.round(k.tiempo_resolucion_dias) : "—"}<span style={{fontSize:11}}>d</span>
               </div>
-              <div style={{fontSize:9,color:B.t3,marginTop:2}}>
+              <div style={{fontSize:12,color:B.t2,marginTop:2}}>
                 {k.vs_mes_anterior_pp!=null && (
-                  <span style={{color:k.vs_mes_anterior_pp>=0?B.green:B.red}}>
+                  <span style={{color:k.vs_mes_anterior_pp>=0?B.green:B.red,fontWeight:600}}>
                     {k.vs_mes_anterior_pp>=0?"▼":"▲"}{Math.abs(k.vs_mes_anterior_pp)}pp* vs mes ant.
                     {k.mes_anterior_simulado && <SimBadge/>}
                   </span>
                 )}
               </div>
-              <div style={{fontSize:9,color:B.t3}}>
+              <div style={{fontSize:12,color:B.t2}}>
                 {k.vs_anio_anterior_pp!=null && (
-                  <span style={{color:k.vs_anio_anterior_pp>=0?B.green:B.red}}>
+                  <span style={{color:k.vs_anio_anterior_pp>=0?B.green:B.red,fontWeight:600}}>
                     {k.vs_anio_anterior_pp>=0?"▼":"▲"}{Math.abs(k.vs_anio_anterior_pp)}pp* vs año ant.
                     {k.anio_anterior_simulado && <SimBadge/>}
                   </span>
                 )}
               </div>
               {k.riesgo && (
-                <div style={{fontSize:9,marginTop:4,color:k.riesgo.startsWith("⚠")?B.red:B.green,lineHeight:1.4}}>
+                <div style={{fontSize:12,marginTop:4,color:k.riesgo.startsWith("⚠")?B.red:B.green,lineHeight:1.5,fontWeight:500}}>
                   {k.riesgo}
                 </div>
               )}
-              <div style={{fontSize:10,color:B.t3,marginTop:6,borderTop:`1px solid ${B.border}`,paddingTop:6}}>
+              <div style={{fontSize:11,color:B.t2,marginTop:6,borderTop:`1px solid ${B.border}`,paddingTop:6}}>
                 1ª visita: <b style={{color}}>{k.primera_visita_pct ?? "—"}%</b>
               </div>
             </div>
@@ -7305,10 +7306,10 @@ const RadiografiaOperativa = ({toast}) => {
         marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
         <span style={{fontSize:11,color:B.t2}}>⚙ Casos cerrados / técnico / día (todos los procesos):</span>
         <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,fontWeight:900,color:B.green}}>
-          {agregado.casos_tecnico_dia ?? "—"}
+          {agregado.casos_tecnico_dia!=null ? agregado.casos_tecnico_dia.toFixed(1) : "—"}
         </span>
-        <span style={{fontSize:10,color:B.t3}}>
-          {agregado.vs_mes_anterior!=null && `${agregado.vs_mes_anterior>=0?"▲":"▼"}${Math.abs(agregado.vs_mes_anterior)} vs mes ant.`}
+        <span style={{fontSize:10,color:B.t2}}>
+          {agregado.vs_mes_anterior!=null && `${agregado.vs_mes_anterior>=0?"▲":"▼"}${Math.abs(agregado.vs_mes_anterior).toFixed(1)} vs mes ant.`}
         </span>
       </div>
 
@@ -7328,7 +7329,7 @@ const RadiografiaOperativa = ({toast}) => {
               <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:4}}>
                 <span>{TIPO_LABEL[tp.codigo]}</span>
                 <span style={{fontFamily:"'Share Tech Mono',monospace",color}}>
-                  {s.promedio_dias} / SLA {s.sla_objetivo_dias}
+                  {Math.round(s.promedio_dias)} / SLA {s.sla_objetivo_dias}
                 </span>
               </div>
               <div style={{height:8,background:B.deep,position:"relative"}}>
@@ -7340,14 +7341,14 @@ const RadiografiaOperativa = ({toast}) => {
                   ⚠ <b style={{color:B.red}}>En zona de riesgo</b> — afectado por:{" "}
                   {s.responsables.map((r,i)=>(
                     <span key={r.empresa}>
-                      {i>0&&", "}<b style={{color:B.yellow}}>{r.empresa}</b> ({r.promedio_dias}d)
+                      {i>0&&", "}<b style={{color:B.yellow}}>{r.empresa}</b> ({Math.round(r.promedio_dias)}d)
                     </span>
                   ))}.
                   <div style={{marginTop:4}}>
                     Meta correctiva: {s.responsables.map((r,i)=>(
                       <span key={r.empresa}>
                         {i>0&&" · "}<b style={{color:B.yellow}}>{r.empresa}</b> debe bajar a{" "}
-                        <b style={{color:B.green}}>≤{r.meta_correctiva_dias}d</b>
+                        <b style={{color:B.green}}>≤{Math.round(r.meta_correctiva_dias)}d</b>
                       </span>
                     ))}
                   </div>
@@ -7386,7 +7387,7 @@ const RadiografiaOperativa = ({toast}) => {
       <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
         ◈ 4 · RANKING DE TÉCNICOS — DENTRO DE CADA EQUIPO · MES EN CURSO
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:10,marginBottom:20}}>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fit,minmax(240px,1fr))",gap:10,marginBottom:20}}>
         {Object.entries(ranking).map(([codEquipo, lista])=>{
           const emp = EMPRESAS.find(e=>e.codigo===codEquipo);
           const medallas = ["🥇","🥈","🥉"];
@@ -7459,6 +7460,54 @@ const RadiografiaOperativa = ({toast}) => {
           );
         })}
         {zonas.length===0 && <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:20}}>Sin casos en los últimos 90 días</div>}
+      </div>
+
+      {/* ── BLOQUE 6: Reincidencia por terminal ── */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:24,marginBottom:10}}>
+        <span style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em"}}>
+          ◈ 6 · REINCIDENCIA POR TERMINAL — CAUSA vs SÍNTOMA
+        </span>
+        <span style={{fontSize:9,color:B.t2,background:B.deep,border:`1px solid ${B.border}`,padding:"3px 8px"}}>
+          📅 ÚLTIMOS {data.reincidencia_terminales?.ventana_dias||30} DÍAS
+        </span>
+      </div>
+      <div style={{fontSize:11,color:B.t2,marginBottom:10,lineHeight:1.6}}>
+        Terminales con 2 o más Servicios Técnicos en la ventana — señal de posible equipo defectuoso,
+        falta de capacitación del cliente o diagnóstico incompleto en la visita anterior.
+      </div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
+        {(data.reincidencia_terminales?.terminales||[]).length>0 ? (
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {data.reincidencia_terminales.terminales.map(t=>{
+              const empData = EMPRESAS.find(e=>e.codigo===t.empresa);
+              const critico = t.cantidad_st>=3;
+              return (
+                <div key={t.numero_serie} style={{
+                  display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,
+                  padding:"10px 12px",background:critico?B.redDim:B.yellowDim,
+                  borderLeft:`3px solid ${critico?B.red:B.yellow}`,
+                }}>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:700,color:B.t1}}>
+                      {t.razon_social} <span style={{color:B.t2,fontWeight:400}}>· S/N {t.numero_serie}</span>
+                    </div>
+                    <div style={{fontSize:10,color:B.t2,marginTop:2}}>
+                      {empData?.nombre||t.empresa} · visitas: {t.fechas?.join(" · ")}
+                    </div>
+                  </div>
+                  <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900,
+                    color:critico?B.red:B.yellow}}>
+                    {t.cantidad_st}<span style={{fontSize:10}}> ST</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:20}}>
+            ✓ Sin terminales reincidentes en la ventana — buena señal
+          </div>
+        )}
       </div>
 
       <div style={{fontSize:9,color:B.t3,marginTop:14,padding:"0 2px",lineHeight:1.6}}>
@@ -7546,7 +7595,7 @@ const Analitica = ({ user, toast }) => {
       </div>
 
       {/* Tabs */}
-      <div style={{display:"flex",gap:0,marginBottom:20,borderBottom:`1px solid ${B.border}`}}>
+      <div style={{display:"flex",gap:0,marginBottom:20,borderBottom:`1px solid ${B.border}`,flexWrap:"wrap"}}>
         <button className={`tab-btn ${tab==="basica"?"on":""}`} onClick={()=>setTab("basica")}>ANÁLISIS BÁSICO</button>
         <button className={`tab-btn ${tab==="avanzada"?"on":""}`} onClick={()=>setTab("avanzada")}>◈ ANÁLISIS AVANZADO</button>
       </div>
