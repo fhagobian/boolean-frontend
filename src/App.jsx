@@ -7273,6 +7273,7 @@ const RadiografiaOperativa = ({toast}) => {
               <div style={{fontSize:10,color:B.t2,marginBottom:4,fontWeight:600}}>{TIPO_LABEL[tp.codigo]}</div>
               <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:22,fontWeight:900,color}}>
                 {k.tiempo_resolucion_dias!=null ? Math.round(k.tiempo_resolucion_dias) : "—"}<span style={{fontSize:11}}>d</span>
+                {k.casos_cerrados!=null && <span style={{fontSize:11,color:B.t2,fontWeight:400,marginLeft:6}}>({k.casos_cerrados} casos)</span>}
               </div>
               <div style={{fontSize:12,color:B.t2,marginTop:2}}>
                 {k.vs_mes_anterior_pp!=null && (
@@ -7310,6 +7311,9 @@ const RadiografiaOperativa = ({toast}) => {
         </span>
         <span style={{fontSize:10,color:B.t2}}>
           {agregado.vs_mes_anterior!=null && `${agregado.vs_mes_anterior>=0?"▲":"▼"}${Math.abs(agregado.vs_mes_anterior).toFixed(1)} vs mes ant.`}
+        </span>
+        <span style={{fontSize:10,color:B.t2,borderLeft:`1px solid ${B.border}`,paddingLeft:10}}>
+          👥 {agregado.tecnicos_activos ?? "—"} técnicos · {agregado.casos_totales ?? "—"} casos gestionados en el período
         </span>
       </div>
 
