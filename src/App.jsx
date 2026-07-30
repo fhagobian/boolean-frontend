@@ -195,6 +195,25 @@ const cuentaRegresiva = (caso) => {
 };
 const genN = () => "CASO-"+String(Math.floor(Math.random()*900000)+100000);
 
+// Mismo criterio que el backend (analytics.py _nota_de_calidad) para
+// avisarle al técnico ANTES de cerrar si la nota que escribió aporta
+// poco — no bloquea, pero lo hace visible e incómodo de ignorar.
+const FRASES_NOTA_POBRE = new Set(["ok","sin problemas","sin problemas detectados","nada",
+  "listo","resuelto","n/a","na","-","sin novedad","todo bien","correcto","solucionado","ninguno","ninguna"]);
+const notaEsPobre = (texto) => {
+  const t = (texto||"").trim();
+  if(t.length < 15) return true;
+  if(FRASES_NOTA_POBRE.has(t.toLowerCase())) return true;
+  return false;
+};
+const confirmarCalidadNota = (texto) => {
+  if(!notaEsPobre(texto)) return true;
+  return window.confirm(
+    "Tu nota es muy breve.\n\nContanos brevemente qué encontraste y cómo lo resolviste — "+
+    "ayuda a detectar patrones y mejorar el servicio al cliente.\n\n¿Cerrar el caso igual?"
+  );
+};
+
 const useMobile = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   useEffect(()=>{
@@ -4544,7 +4563,10 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
           botonLabel={resolvio===true?"SIGUIENTE →":"✓ FINALIZAR CASO"}
           botonDisabled={!serie.trim()} saving={saving}
           onVolver={()=>setPaso(resolvio===true?2:3)}
-          onBoton={async()=>{ if(resolvio===true){setPaso(4);} else {await guardar();} }}>
+          onBoton={async()=>{
+            if(resolvio===true){setPaso(4);}
+            else { if(!confirmarCalidadNota(detProb)) return; await guardar(); }
+          }}>
           <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:20}}>Serie del equipo</div>
           <button onClick={()=>setScan(true)}
             style={{width:"100%",padding:"22px 0",marginBottom:16,background:"#001a33",
@@ -4594,7 +4616,10 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
       <PantallaAccion color={B.green} icono="🆘" titulo="SOPORTE N2"
         subtitulo={caso.razon_social} pasoActual={6} totalPasos={6}
         botonLabel="✓ FINALIZAR CASO" botonDisabled={n2===null} saving={saving}
-        onVolver={()=>setPaso(5)} onBoton={guardar}>
+        onVolver={()=>setPaso(5)} onBoton={async()=>{
+          if(!confirmarCalidadNota(`${descProb} ${comoRes}`)) return;
+          await guardar();
+        }}>
         <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>¿Requirió soporte de nivel 2?</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
           {[[true,"⚠️","SÍ",B.red],[false,"✓","NO",B.green]].map(([val,ic,lbl,col])=>(
@@ -4753,7 +4778,10 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
       <PantallaAccion color={B.red} icono="📝" titulo="OBSERVACIONES"
         subtitulo={caso.razon_social} pasoActual={2} totalPasos={2}
         botonLabel="✓ FINALIZAR" botonDisabled={!obs.trim()}
-        saving={saving} onVolver={()=>setPaso(1)} onBoton={guardar}>
+        saving={saving} onVolver={()=>setPaso(1)} onBoton={async()=>{
+          if(!confirmarCalidadNota(obs)) return;
+          await guardar();
+        }}>
         <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:8}}>
           ¿Por qué no quedó completa?
         </div>
@@ -4872,7 +4900,10 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
       <PantallaAccion color={B.green} icono="📝" titulo="OBSERVACIONES"
         subtitulo={caso.razon_social} pasoActual={4} totalPasos={4}
         botonLabel="✓ FINALIZAR RETIRO" saving={saving}
-        onVolver={()=>setPaso(3)} onBoton={guardar}>
+        onVolver={()=>setPaso(3)} onBoton={async()=>{
+          if(!confirmarCalidadNota(obs)) return;
+          await guardar();
+        }}>
         <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:10}}>
           Observaciones adicionales (opcional)
         </div>
@@ -4953,7 +4984,10 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
       <PantallaAccion color={B.purple} icono="📋" titulo="OBSERVACIONES"
         subtitulo={caso.razon_social} pasoActual={2} totalPasos={5}
         botonLabel="SIGUIENTE →" botonDisabled={problema&&!descProb.trim()}
-        onVolver={()=>setPaso(1)} onBoton={()=>setPaso(3)}>
+        onVolver={()=>setPaso(1)} onBoton={()=>{
+          if(problema && !confirmarCalidadNota(`${descProb} ${obs}`)) return;
+          setPaso(3);
+        }}>
         {problema&&(
           <div>
             <div style={{fontSize:16,fontWeight:700,color:"#ccc",marginBottom:10}}>Descripción del problema</div>
