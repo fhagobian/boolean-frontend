@@ -7172,12 +7172,14 @@ const SimBadge = () => (
     borderRadius:2,fontWeight:700,letterSpacing:".04em",marginLeft:6}}>SIMULADO</span>
 );
 
-const RadiografiaOperativa = ({toast}) => {
+const RadiografiaOperativa = ({toast, perfil}) => {
   const isMobile = useMobile();
+  const esRegional = perfil?.rol==="REGIONAL";
+  const esDirector = perfil?.rol==="DIRECTOR";
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [equipoSel, setEquipoSel] = useState("");
+  const [equipoSel, setEquipoSel] = useState(esRegional ? (perfil?.empresa_codigo||"") : "");
   const [vistaTendencia, setVistaTendencia] = useState("semanas");
 
   const cargar = async () => {
@@ -7244,11 +7246,18 @@ const RadiografiaOperativa = ({toast}) => {
           <span style={{fontSize:9,color:B.green,fontWeight:700,letterSpacing:".1em"}}>PYTHON ENGINE</span>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",width:isMobile?"100%":"auto"}}>
-          <select className="field" style={{width:isMobile?"100%":170,fontSize:12,padding:"6px 10px"}}
-            value={equipoSel} onChange={e=>setEquipoSel(e.target.value)}>
-            <option value="">Todos los equipos</option>
-            {EMPRESAS.map(e=><option key={e.codigo} value={e.codigo}>{e.nombre}</option>)}
-          </select>
+          {esRegional ? (
+            <div style={{fontSize:11,color:B.t2,background:B.deep,border:`1px solid ${B.border}`,
+              padding:"7px 12px"}}>
+              🛡 {EMPRESAS.find(e=>e.codigo===perfil?.empresa_codigo)?.nombre||perfil?.empresa_codigo}
+            </div>
+          ) : (
+            <select className="field" style={{width:isMobile?"100%":170,fontSize:12,padding:"6px 10px"}}
+              value={equipoSel} onChange={e=>setEquipoSel(e.target.value)}>
+              <option value="">Todos los equipos</option>
+              {EMPRESAS.map(e=><option key={e.codigo} value={e.codigo}>{e.nombre}</option>)}
+            </select>
+          )}
           <Bb label="↻" onClick={cargar} small ghost color={B.orange}/>
         </div>
       </div>
@@ -7519,6 +7528,53 @@ const RadiografiaOperativa = ({toast}) => {
         ajustable por departamento · Los valores marcados <SimBadge/> son una estimación mientras no se
         carguen los casos históricos reales.
       </div>
+
+      {/* ── BLOQUE 7: Calidad de notas por técnico — solo Director/Regional ── */}
+      {(esDirector||esRegional) && (
+        <>
+          <div style={{marginTop:24,marginBottom:10}}>
+            <span style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em"}}>
+              ◈ 7 · CALIDAD DE NOTAS AL CIERRE — POR TÉCNICO
+            </span>
+          </div>
+          <div style={{fontSize:11,color:B.t2,marginBottom:10,lineHeight:1.6}}>
+            % de cierres con una nota que realmente aporta información (no vacía, no genérica tipo "ok").
+            Notas de calidad ayudan a detectar patrones y mejorar el servicio al cliente.
+          </div>
+          <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
+            {(data.calidad_notas_tecnico||[]).length>0 ? (
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {data.calidad_notas_tecnico.map(t=>{
+                  const empData = EMPRESAS.find(e=>e.codigo===t.empresa);
+                  const color = t.pct_notas_de_calidad>=80?B.green:t.pct_notas_de_calidad>=60?B.yellow:B.red;
+                  return (
+                    <div key={t.tecnico_id} style={{display:"flex",alignItems:"center",gap:10,
+                      padding:"8px 10px",background:t.necesita_mejora?B.redDim:"transparent",
+                      borderLeft:t.necesita_mejora?`3px solid ${B.red}`:`3px solid transparent`}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:600,color:B.t1}}>
+                          {t.nombre} <span style={{fontSize:10,color:B.t2,fontWeight:400}}>· {empData?.nombre||t.empresa}</span>
+                        </div>
+                        <div style={{fontSize:9,color:B.t2}}>{t.casos_evaluados} casos evaluados</div>
+                      </div>
+                      <div style={{width:120,height:8,background:B.deep}}>
+                        <div style={{height:8,width:`${t.pct_notas_de_calidad}%`,background:color}}/>
+                      </div>
+                      <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:900,
+                        color,width:50,textAlign:"right"}}>
+                        {t.pct_notas_de_calidad}%
+                      </div>
+                      {t.necesita_mejora && <span style={{fontSize:9,color:B.red,fontWeight:700}}>⚠ MEJORAR</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:20}}>Sin datos suficientes todavía</div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -7555,7 +7611,7 @@ const TendenciaSVG = ({puntos}) => {
 };
 
 
-const Analitica = ({ user, toast }) => {
+const Analitica = ({ user, perfil, toast }) => {
   const [tab, setTab] = useState("basica"); // basica | avanzada
   const [casos, setCasos]   = useState([]);
   const [loading,setLoading]= useState(true);
@@ -7604,7 +7660,7 @@ const Analitica = ({ user, toast }) => {
         <button className={`tab-btn ${tab==="avanzada"?"on":""}`} onClick={()=>setTab("avanzada")}>◈ ANÁLISIS AVANZADO</button>
       </div>
 
-      {tab==="avanzada" ? <RadiografiaOperativa toast={toast}/> : (
+      {tab==="avanzada" ? <RadiografiaOperativa toast={toast} perfil={perfil}/> : (
       loading ? <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}><Spin s={36}/></div> : <>
 
       <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}>
@@ -8306,7 +8362,7 @@ export default function App(){
             }}
           />}
           {view==="bulk"&&<BulkUpload user={user} toast={async(m)=>{toast(m);await recargarCasos();}}/>}
-          {view==="analitica"&&<Analitica user={user} toast={toast}/>}
+          {view==="analitica"&&<Analitica user={user} perfil={perfil} toast={toast}/>}
           {view==="comunicaciones"&&<Comunicaciones user={user} perfil={perfil} toast={toast} onLeer={()=>setNoLeidosChat(0)}/>}
           {view==="logros"&&<Logros user={user} toast={toast}/>}
           {view==="usuarios"&&<Usuarios user={user} perfil={perfil} toast={toast} casos={casos}/>}
