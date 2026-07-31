@@ -4801,6 +4801,8 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
   // ── RETIRO DE TERMINAL ──────────────────────────────────
   const FlujRET = () => {
     const [paso,setPaso] = useState(1);
+    const [exitoso,setExitoso] = useState(null);
+    const [motivoFallo,setMotivoFallo] = useState("");
     const [modelo,setModelo] = useState("");
     const [serie,setSerie] = useState("");
     const [accesorios,setAcc] = useState(null);
@@ -4809,12 +4811,27 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
     const [showScan,setScan] = useState(false);
     const [saving,setSaving] = useState(false);
 
+    const totalPasos = exitoso===true ? 5 : 2;
+
     const guardar = async() => {
       setSaving(true);
+      if(exitoso===false){
+        await onGuardar({
+          estado:"FINALIZADO",
+          resolvio: false,
+          cierre_completado: true,
+          cierre_retiro_exitoso: false,
+          cierre_descripcion_problema: `Retiro NO completado · Motivo: ${motivoFallo}`,
+          cierre_at: new Date().toISOString(),
+        });
+        setSaving(false);
+        return;
+      }
       await onGuardar({
         estado:"FINALIZADO",
         resolvio: true,
         cierre_completado: true,
+        cierre_retiro_exitoso: true,
         cierre_modelo_terminal: modelo,
         cierre_serie_terminal: serie,
         cierre_descripcion_problema: `Retiro completado · Accesorios: ${accesorios?"SÍ":"NO"} · Remito: ${remito}${obs?` · Obs: ${obs}`:""}`,
@@ -4823,11 +4840,57 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
       setSaving(false);
     };
 
+    // Paso 0: ¿se pudo retirar el equipo?
     if(paso===1) return (
+      <PantallaAccion color={B.orange} icono="🔄" titulo="¿RETIRASTE EL EQUIPO?"
+        subtitulo={caso.razon_social} pasoActual={1} totalPasos={totalPasos}
+        botonLabel="SIGUIENTE →" botonDisabled={exitoso===null}
+        onVolver={onVolver} onBoton={()=>setPaso(exitoso===true?1.5:99)}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:24}}>
+          ¿Pudiste retirar el equipo del cliente?
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {[[true,"✅","SÍ, lo retiré",B.green],[false,"❌","NO, no pude retirarlo",B.red]].map(([val,ic,lbl,col])=>(
+            <button key={String(val)} onClick={()=>setExitoso(val)}
+              style={{padding:"24px 20px",border:`3px solid ${exitoso===val?col:"#2a2a2a"}`,
+                background:exitoso===val?col+"22":"#0e0e14",color:exitoso===val?col:"#ccc",
+                cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:18,transition:"all .15s"}}>
+              <span style={{fontSize:44,flexShrink:0}}>{ic}</span>
+              <span style={{fontSize:18,fontWeight:700}}>{lbl}</span>
+            </button>
+          ))}
+        </div>
+      </PantallaAccion>
+    );
+
+    // Rama NO exitoso: motivo y listo, se finaliza como no resuelto
+    if(paso===99) return (
+      <PantallaAccion color={B.red} icono="📝" titulo="MOTIVO"
+        subtitulo={caso.razon_social} pasoActual={2} totalPasos={2}
+        botonLabel="✓ FINALIZAR" botonDisabled={!motivoFallo.trim()} saving={saving}
+        onVolver={()=>{setExitoso(null);setPaso(1);}} onBoton={async()=>{
+          if(!confirmarCalidadNota(motivoFallo)) return;
+          await guardar();
+        }}>
+        <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:8}}>
+          ¿Por qué no se pudo retirar el equipo?
+        </div>
+        <div style={{marginBottom:16,padding:"12px 14px",background:"#1a0000",
+          border:"1px solid #FF204033",fontSize:13,color:"#FF6060",lineHeight:1.7,borderRadius:2}}>
+          Ej: cliente ausente, equipo no ubicado, cliente se niega a entregarlo, local cerrado...
+        </div>
+        <textarea className="field" rows={6}
+          placeholder="Describí qué pasó..."
+          value={motivoFallo} onChange={e=>setMotivoFallo(e.target.value)}
+          style={{fontSize:16,resize:"none",lineHeight:1.7}}/>
+      </PantallaAccion>
+    );
+
+    if(paso===1.5) return (
       <PantallaAccion color={B.orange} icono="🔄" titulo="MODELO DEL EQUIPO"
-        subtitulo={caso.razon_social} pasoActual={1} totalPasos={4}
+        subtitulo={caso.razon_social} pasoActual={2} totalPasos={totalPasos}
         botonLabel="SIGUIENTE →" botonDisabled={!modelo}
-        onVolver={onVolver} onBoton={()=>setPaso(2)}>
+        onVolver={()=>{setExitoso(null);setPaso(1);}} onBoton={()=>setPaso(2)}>
         <div style={{fontSize:17,fontWeight:700,color:"#ccc",marginBottom:20}}>¿Cuál es el modelo del equipo retirado?</div>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           {MODELOS_TERMINAL.map(m=>(
@@ -4847,9 +4910,9 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
       <>
         {showScan&&<EscanerBarras onScan={v=>{setSerie(v);setScan(false);}} onClose={()=>setScan(false)}/>}
         <PantallaAccion color={B.orange} icono="🔢" titulo="SERIE DEL EQUIPO"
-          subtitulo={caso.razon_social} pasoActual={2} totalPasos={4}
+          subtitulo={caso.razon_social} pasoActual={3} totalPasos={totalPasos}
           botonLabel="SIGUIENTE →" botonDisabled={!serie.trim()}
-          onVolver={()=>setPaso(1)} onBoton={()=>setPaso(3)}>
+          onVolver={()=>setPaso(1.5)} onBoton={()=>setPaso(3)}>
           <button onClick={()=>setScan(true)}
             style={{width:"100%",padding:"22px 0",marginBottom:16,background:"#001a33",
               border:`2px solid ${B.blue}`,color:B.blue,cursor:"pointer",fontSize:17,fontWeight:700,
@@ -4868,7 +4931,7 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
 
     if(paso===3) return (
       <PantallaAccion color={B.orange} icono="📦" titulo="ACCESORIOS Y REMITO"
-        subtitulo={caso.razon_social} pasoActual={3} totalPasos={4}
+        subtitulo={caso.razon_social} pasoActual={4} totalPasos={totalPasos}
         botonLabel="SIGUIENTE →" botonDisabled={accesorios===null||!remito.trim()}
         onVolver={()=>setPaso(2)} onBoton={()=>setPaso(4)}>
         <div style={{display:"flex",flexDirection:"column",gap:24}}>
@@ -4898,7 +4961,7 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
 
     if(paso===4) return (
       <PantallaAccion color={B.green} icono="📝" titulo="OBSERVACIONES"
-        subtitulo={caso.razon_social} pasoActual={4} totalPasos={4}
+        subtitulo={caso.razon_social} pasoActual={5} totalPasos={totalPasos}
         botonLabel="✓ FINALIZAR RETIRO" saving={saving}
         onVolver={()=>setPaso(3)} onBoton={async()=>{
           if(!confirmarCalidadNota(obs)) return;
