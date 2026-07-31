@@ -658,9 +658,30 @@ const BtnVolver = ({onClick, label="← VOLVER"}) => (
   </button>
 );
 
-const Ticker = ({casos}) => {
+const Ticker = ({casos, perfil}) => {
+  const [alertasTicker, setAlertasTicker] = useState([]);
+
+  useEffect(()=>{
+    if(!perfil || !ANALYTICS_API_URL) return;
+    // Se pide una sola vez por sesión — el resumen es "del día", no hace
+    // falta refrescarlo a cada rato.
+    const esRegional = perfil?.rol==="REGIONAL";
+    const equipo = esRegional ? perfil?.empresa_codigo : "";
+    const puedeVer = ["DIRECTOR","REGIONAL"].includes(perfil?.rol);
+    if(!puedeVer) return;
+    const params = new URLSearchParams();
+    if(equipo) params.set("equipo", equipo);
+    fetch(`${ANALYTICS_API_URL}/alertas?${params}`, {
+      headers:{Authorization:`Bearer ${ANALYTICS_API_SECRET}`},
+    }).then(r=>r.ok?r.json():null)
+      .then(d=>{ if(d?.resumen_ticker) setAlertasTicker(d.resumen_ticker); })
+      .catch(()=>{}); // si falla, el ticker sigue funcionando sin esto
+  },[perfil?.rol, perfil?.empresa_codigo]);
+
   const breach=casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||"")&&c.sla_deadline&&new Date(c.sla_deadline)<new Date()).length;
-  const items=[`◈ ${casos.length} casos en el sistema`,`⚠ ${breach} casos con SLA vencido`,`✓ ${casos.filter(c=>c.estado==="FINALIZADO").length} casos resueltos`,`⚙ ${casos.filter(c=>c.estado==="EN_PROCESO").length} en progreso`,`★ BOOLEAN · La lógica detrás de toda la operación`];
+  const items=[`◈ ${casos.length} casos en el sistema`,`⚠ ${breach} casos con SLA vencido`,`✓ ${casos.filter(c=>c.estado==="FINALIZADO").length} casos resueltos`,`⚙ ${casos.filter(c=>c.estado==="EN_PROCESO").length} en progreso`,
+    ...alertasTicker,
+    `★ BOOLEAN · La lógica detrás de toda la operación`];
   const full=[...items,...items];
   return (
     <div style={{background:B.orange,height:24,display:"flex",alignItems:"center",overflow:"hidden",flexShrink:0}}>
@@ -7768,42 +7789,222 @@ const TendenciaSVG = ({puntos}) => {
 };
 
 
-const Analitica = ({ user, perfil, toast }) => {
-  const [tab, setTab] = useState("basica"); // basica | avanzada
-  const [casos, setCasos]   = useState([]);
-  const [loading,setLoading]= useState(true);
-  const [rango, setRango]   = useState("7d");
+// ─── ANÁLISIS PROACTIVO — Bloque B ───────────────────────────
+const AnalisisProactivo = ({toast, perfil}) => {
+  const isMobile = useMobile();
+  const esRegional = perfil?.rol==="REGIONAL";
+  const esDirector = perfil?.rol==="DIRECTOR";
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const equipoSel = esRegional ? (perfil?.empresa_codigo||"") : "";
 
-  useEffect(()=>{
-    const desde = new Date();
-    desde.setDate(desde.getDate()-({7:7,30:30,90:90}[rango.replace("d","")]||7));
-    supabase.from("casos").select("*")
-      .gte("created_at",desde.toISOString())
-      .then(({data})=>{ setCasos(data||[]); setLoading(false); });
-  },[rango]);
+  const cargar = async () => {
+    if(!ANALYTICS_API_URL){
+      setError("Falta configurar VITE_ANALYTICS_API_URL");
+      setLoading(false); return;
+    }
+    setLoading(true); setError(null);
+    try{
+      const params = new URLSearchParams();
+      if(equipoSel) params.set("equipo", equipoSel);
+      const res = await fetch(`${ANALYTICS_API_URL}/alertas?${params}`, {
+        headers:{Authorization:`Bearer ${ANALYTICS_API_SECRET}`},
+      });
+      if(!res.ok){
+        const txt = await res.text().catch(()=>"");
+        throw new Error(`${res.status} — ${txt.slice(0,200)}`);
+      }
+      setData(await res.json());
+    }catch(e){
+      setError(e.message||"Error al conectar con el motor de análisis");
+    }finally{
+      setLoading(false);
+    }
+  };
 
-  const finalizados = casos.filter(c=>c.estado==="FINALIZADO");
-  const cancelados  = casos.filter(c=>c.estado==="CANCELADO");
-  const enCurso     = casos.filter(c=>!["FINALIZADO","CANCELADO"].includes(c.estado||""));
-  const slaOk       = finalizados.filter(c=>c.sla_deadline&&new Date(c.updated_at)<new Date(c.sla_deadline)).length;
-  const slaPct      = finalizados.length ? Math.round(slaOk/finalizados.length*100) : 0;
-  const resueltos   = finalizados.filter(c=>c.resolvio===true).length;
-  const resPct      = finalizados.length ? Math.round(resueltos/finalizados.length*100) : 0;
+  useEffect(()=>{ cargar(); },[]);
 
-  const porTipo = TIPOS_PROCESO.map(t=>({
-    nombre:t.nombre, icono:t.icono, color:t.color,
-    total:casos.filter(c=>c.tipo_proceso===t.codigo).length,
-    fin:casos.filter(c=>c.tipo_proceso===t.codigo&&c.estado==="FINALIZADO").length,
-  }));
+  if(loading) return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+      height:300,gap:12}}>
+      <Spin s={36}/>
+      <div style={{fontSize:11,color:B.t3}}>Analizando desvíos y patrones del día...</div>
+    </div>
+  );
 
-  const porEmpresa = EMPRESAS.map(e=>({
-    nombre:e.nombre, color:e.color,
-    total:casos.filter(c=>c.empresa_id===e.codigo).length,
-    fin:casos.filter(c=>c.empresa_id===e.codigo&&c.estado==="FINALIZADO").length,
-  })).filter(e=>e.total>0);
+  if(error) return (
+    <div style={{background:B.redDim,border:`1px solid ${B.red}44`,borderLeft:`3px solid ${B.red}`,
+      padding:20,display:"flex",flexDirection:"column",gap:10}}>
+      <div style={{fontSize:13,fontWeight:700,color:B.red}}>⚠ No se pudo cargar el análisis proactivo</div>
+      <div style={{fontSize:12,color:B.t2,lineHeight:1.6,fontFamily:"'Share Tech Mono',monospace"}}>{error}</div>
+      <div><Bb label="REINTENTAR" onClick={cargar} small color={B.red}/></div>
+    </div>
+  );
+
+  if(!data) return null;
+
+  const b1 = data.desvio_individual||[];
+  const b2 = data.clusters_geograficos||[];
+  const b3 = data.casos_outlier||[];
+  const SEV_COLOR = {alta:B.red, media:B.yellow};
 
   return (
-    <div style={{maxWidth:tab==="avanzada"?1100:800,padding:"0 0 40px"}}>
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <Dot c={B.green} pulse s={7}/>
+          <span style={{fontSize:9,color:B.green,fontWeight:700,letterSpacing:".1em"}}>MONITOREO ACTIVO · SE ACTUALIZA A DIARIO</span>
+        </div>
+        <Bb label="↻" onClick={cargar} small ghost color={B.orange}/>
+      </div>
+      <div style={{fontSize:10,color:B.t3,marginBottom:20}}>
+        {esRegional ? `Equipo: ${EMPRESAS.find(e=>e.codigo===equipoSel)?.nombre||equipoSel}` : "Todos los equipos"}
+        {" · "}Sin ruido innecesario: solo aparece acá lo que realmente se aparta de lo esperado.
+      </div>
+
+      {/* B1 */}
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
+        ◈ 1 · DESVÍO INDIVIDUAL — vs el propio promedio de 6 semanas
+      </div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:20}}>
+        {b1.length>0 ? (
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {b1.map((a,i)=>(
+              <div key={i} style={{display:"flex",gap:10,alignItems:"flex-start",
+                padding:"10px 12px",background:a.severidad==="alta"?B.redDim:B.yellowDim,
+                borderLeft:`3px solid ${SEV_COLOR[a.severidad]||B.t3}`}}>
+                <span style={{fontSize:16,flexShrink:0}}>{a.severidad==="alta"?"🔴":"🟡"}</span>
+                <span style={{fontSize:12,color:B.t1,lineHeight:1.5}}>{a.mensaje}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:20}}>✓ Sin desvíos relevantes hoy</div>
+        )}
+      </div>
+
+      {/* B2 — solo Director, es geográfico sin dueño de equipo */}
+      {esDirector && (
+        <>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
+            ◈ 2 · CLUSTERS GEOGRÁFICOS/TEMPORALES
+          </div>
+          <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:20}}>
+            {b2.length>0 ? (
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {b2.map((a,i)=>(
+                  <div key={i} style={{padding:"10px 12px",background:a.severidad==="alta"?B.redDim:B.yellowDim,
+                    borderLeft:`3px solid ${SEV_COLOR[a.severidad]||B.t3}`,fontSize:12,color:B.t1,lineHeight:1.6}}>
+                    {a.mensaje}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:20}}>✓ Sin picos anormales detectados</div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* B3 */}
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
+        ◈ 3 · CASOS OUTLIER — candidatos a revisión manual
+      </div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
+        {b3.length>0 ? (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {b3.map((o,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                padding:"8px 10px",background:B.deep,fontSize:12}}>
+                <span style={{color:B.t1}}>{o.razon_social} <span style={{color:B.t3}}>· {TIPO_LABEL[o.tipo_proceso]||o.tipo_proceso}</span></span>
+                <span style={{fontFamily:"'Share Tech Mono',monospace",color:B.red,fontWeight:700}}>
+                  {o.tiempo_dias}d ({o.veces_promedio}x el promedio)
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:20}}>✓ Sin casos atípicos</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── ANÁLISIS PREDICTIVO — Bloque C (Fase 1) ─────────────────
+const AnalisisPredictivo = ({toast, perfil}) => {
+  const [eventos, setEventos] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(()=>{
+    supabase.from("calendario_eventos").select("*").eq("activo",true)
+      .order("fecha").then(({data})=>{ setEventos(data||[]); setLoading(false); });
+  },[]);
+
+  const hoy = new Date();
+  const proximos = eventos.filter(e=>{
+    const f = new Date(e.fecha+"T12:00:00");
+    const diff = (f - hoy) / 86400000;
+    return diff >= -1 && diff <= 60;
+  });
+
+  const IMPACTO_COLOR = {alto:B.red, medio:B.yellow, bajo:B.t2};
+
+  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}><Spin s={36}/></div>;
+
+  return (
+    <div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,borderLeft:`3px solid ${B.yellow}`,
+        padding:16,marginBottom:20,display:"flex",gap:12,alignItems:"flex-start"}}>
+        <span style={{fontSize:20}}>ℹ</span>
+        <div style={{fontSize:12,color:B.t2,lineHeight:1.6}}>
+          <b style={{color:B.yellow}}>Confianza: BAJA</b> — el modelo predictivo necesita varias semanas de
+          historia real para ser confiable. Por ahora esta pestaña muestra el calendario de eventos que
+          va a usar el modelo cuando tengamos suficientes datos. La proyección de demanda se habilita
+          automáticamente a medida que se acumula historia operativa.
+        </div>
+      </div>
+
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
+        ◈ CALENDARIO DE EVENTOS COMERCIALES — PRÓXIMOS 60 DÍAS
+      </div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
+        {proximos.length>0 ? (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {proximos.map(e=>{
+              const f = new Date(e.fecha+"T12:00:00");
+              return (
+                <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"10px 12px",background:B.deep,borderLeft:`3px solid ${IMPACTO_COLOR[e.impacto_esperado]||B.t3}`}}>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:600,color:B.t1}}>{e.nombre}</div>
+                    <div style={{fontSize:10,color:B.t3}}>{f.toLocaleDateString("es-UY",{weekday:"long",day:"numeric",month:"long"})}</div>
+                  </div>
+                  <span style={{fontSize:9,fontWeight:700,textTransform:"uppercase",
+                    color:IMPACTO_COLOR[e.impacto_esperado]||B.t3}}>{e.impacto_esperado}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:20}}>Sin eventos próximos cargados</div>
+        )}
+      </div>
+
+      <div style={{fontSize:9,color:B.t3,marginTop:14,padding:"0 2px",lineHeight:1.6}}>
+        El calendario completo (todo el año) es editable desde CONFIG → Calendario de Eventos.
+      </div>
+    </div>
+  );
+};
+
+
+const Analitica = ({ user, perfil, toast }) => {
+  const [tab, setTab] = useState("descriptiva"); // descriptiva | proactiva | predictiva
+
+  return (
+    <div style={{maxWidth:1100,padding:"0 0 40px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
         <div>
           <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MÓDULO DE</div>
@@ -7813,91 +8014,14 @@ const Analitica = ({ user, perfil, toast }) => {
 
       {/* Tabs */}
       <div style={{display:"flex",gap:0,marginBottom:20,borderBottom:`1px solid ${B.border}`,flexWrap:"wrap"}}>
-        <button className={`tab-btn ${tab==="basica"?"on":""}`} onClick={()=>setTab("basica")}>ANÁLISIS BÁSICO</button>
-        <button className={`tab-btn ${tab==="avanzada"?"on":""}`} onClick={()=>setTab("avanzada")}>◈ ANÁLISIS AVANZADO</button>
+        <button className={`tab-btn ${tab==="descriptiva"?"on":""}`} onClick={()=>setTab("descriptiva")}>◈ ANÁLISIS DESCRIPTIVO</button>
+        <button className={`tab-btn ${tab==="proactiva"?"on":""}`} onClick={()=>setTab("proactiva")}>⚡ ANÁLISIS PROACTIVO</button>
+        <button className={`tab-btn ${tab==="predictiva"?"on":""}`} onClick={()=>setTab("predictiva")}>📈 ANÁLISIS PREDICTIVO</button>
       </div>
 
-      {tab==="avanzada" ? <RadiografiaOperativa toast={toast} perfil={perfil}/> : (
-      loading ? <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}><Spin s={36}/></div> : <>
-
-      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}>
-        <div style={{display:"flex",gap:8}}>
-          {[["7d","7 días"],["30d","30 días"],["90d","90 días"]].map(([v,l])=>(
-            <button key={v} onClick={()=>setRango(v)}
-              style={{padding:"8px 14px",background:rango===v?B.orangeDim:B.deep,
-                border:`1px solid ${rango===v?B.orange:B.border}`,
-                color:rango===v?B.orange:B.t2,cursor:"pointer",fontSize:12,fontWeight:700,borderRadius:2}}>
-              {l}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* KPIs principales */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:20}}>
-        {[
-          {label:"CASOS TOTALES",   val:casos.length,        color:B.blue,   icono:"📋"},
-          {label:"FINALIZADOS",     val:finalizados.length,  color:B.green,  icono:"✅"},
-          {label:"SLA CUMPLIDO",    val:`${slaPct}%`,        color:slaPct>=90?B.green:B.red, icono:"⏱"},
-          {label:"TASA RESOLUCIÓN", val:`${resPct}%`,        color:resPct>=80?B.green:B.orange, icono:"🔧"},
-          {label:"EN CURSO",        val:enCurso.length,      color:B.yellow, icono:"⚡"},
-          {label:"CANCELADOS",      val:cancelados.length,   color:B.red,    icono:"✗"},
-        ].map(k=>(
-          <div key={k.label} style={{background:B.card,border:`1px solid ${B.border}`,
-            borderLeft:`3px solid ${k.color}`,padding:"14px 16px"}}>
-            <div style={{fontSize:10,color:B.t3,fontWeight:700,letterSpacing:".08em",marginBottom:6}}>
-              {k.icono} {k.label}
-            </div>
-            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:26,fontWeight:900,color:k.color}}>
-              {k.val}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Por tipo de proceso */}
-      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
-        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ POR TIPO DE PROCESO</div>
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {porTipo.filter(t=>t.total>0).map(t=>(
-            <div key={t.nombre}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <span style={{fontSize:13,color:B.t1}}>{t.icono} {t.nombre}</span>
-                <span style={{fontSize:12,color:t.color,fontWeight:700}}>{t.fin}/{t.total}</span>
-              </div>
-              <div style={{height:6,background:B.deep,borderRadius:3}}>
-                <div style={{height:6,width:t.total?`${Math.round(t.fin/t.total*100)}%`:"0%",
-                  background:t.color,borderRadius:3,transition:"width .5s"}}/>
-              </div>
-            </div>
-          ))}
-          {porTipo.every(t=>t.total===0)&&(
-            <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:20}}>Sin datos para el período seleccionado</div>
-          )}
-        </div>
-      </div>
-
-      {/* Por empresa */}
-      {porEmpresa.length>0&&(
-        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
-          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:14}}>◈ POR EMPRESA</div>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {porEmpresa.map(e=>(
-              <div key={e.nombre}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                  <span style={{fontSize:13,color:e.color,fontWeight:600}}>{e.nombre}</span>
-                  <span style={{fontSize:12,color:B.t2}}>{e.fin}/{e.total} finalizados</span>
-                </div>
-                <div style={{height:6,background:B.deep,borderRadius:3}}>
-                  <div style={{height:6,width:e.total?`${Math.round(e.fin/e.total*100)}%`:"0%",
-                    background:e.color,borderRadius:3,transition:"width .5s"}}/>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      </>)}
+      {tab==="descriptiva" && <RadiografiaOperativa toast={toast} perfil={perfil}/>}
+      {tab==="proactiva" && <AnalisisProactivo toast={toast} perfil={perfil}/>}
+      {tab==="predictiva" && <AnalisisPredictivo toast={toast} perfil={perfil}/>}
     </div>
   );
 };
@@ -8458,7 +8582,7 @@ export default function App(){
 
   return(
     <div className="app-root" style={{color:B.t1,fontFamily:"'Rajdhani',sans-serif"}}>
-      <Ticker casos={casos}/>
+      <Ticker casos={casos} perfil={perfil}/>
       <div className="app-shell">
         <Sidebar view={view} setView={v=>{setViewPersist(v);setCasoDetalle(null);}} user={user} onLogout={async()=>{
           setCasos([]); setPerfil(null); setCasoDetalle(null);
