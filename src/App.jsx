@@ -7609,6 +7609,66 @@ const RadiografiaOperativa = ({toast, perfil}) => {
           </div>
         </>
       )}
+
+      {/* ── BLOQUE 8: Análisis semanal de comentarios (IA) — Director/Regional ── */}
+      {(esDirector||esRegional) && (
+        <>
+          <div style={{marginTop:24,marginBottom:10}}>
+            <span style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em"}}>
+              ◈ 8 · PATRONES DETECTADOS EN COMENTARIOS — ANÁLISIS SEMANAL (IA)
+            </span>
+          </div>
+          <div style={{fontSize:11,color:B.t2,marginBottom:10,lineHeight:1.6}}>
+            Lee automáticamente los comentarios de cierre de la semana y detecta los problemas más
+            frecuentes por tipo de proceso, con una acción correctiva sugerida. Se actualiza un tipo
+            de proceso por día (lun: Servicio Técnico · mar: Instalación · mié: Retiro · jue: Visita Proactiva).
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fit,minmax(280px,1fr))",gap:10}}>
+            {TIPOS_PROCESO.map(tp=>{
+              const an = (data.analisis_comentarios||{})[tp.codigo];
+              const color = TIPO_COLOR[tp.codigo];
+              return (
+                <div key={tp.codigo} style={{background:B.card,border:`1px solid ${B.border}`,
+                  borderTop:`2px solid ${color}`,padding:14}}>
+                  <div style={{fontSize:11,fontWeight:700,color,marginBottom:8}}>{TIPO_LABEL[tp.codigo]}</div>
+                  {!an ? (
+                    <div style={{fontSize:11,color:B.t3,lineHeight:1.6}}>
+                      Todavía no corrió el análisis para este proceso. Se genera automáticamente
+                      su primer {"día"} programado.
+                    </div>
+                  ) : an.problemas?.length>0 ? (
+                    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                      {an.problemas.map((p,i)=>{
+                        const freqColor = p.frecuencia==="alta"?B.red:p.frecuencia==="media"?B.yellow:B.t2;
+                        return (
+                          <div key={i} style={{paddingBottom:10,borderBottom:i<an.problemas.length-1?`1px solid ${B.border}`:"none"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",gap:6,marginBottom:3}}>
+                              <span style={{fontSize:12,fontWeight:600,color:B.t1}}>{p.problema}</span>
+                              <span style={{fontSize:8,color:freqColor,fontWeight:700,flexShrink:0,
+                                textTransform:"uppercase"}}>{p.frecuencia}</span>
+                            </div>
+                            <div style={{fontSize:11,color:B.t2,lineHeight:1.5}}>
+                              💡 {p.accion_sugerida}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div style={{fontSize:9,color:B.t3,marginTop:2}}>
+                        {an.casos_analizados} casos analizados · {an.generado_en ? new Date(an.generado_en).toLocaleDateString("es-UY") : ""}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{fontSize:11,color:B.t3,lineHeight:1.6}}>
+                      ✓ Sin patrones problemáticos detectados esta semana
+                      {an.casos_analizados!=null && <div style={{fontSize:9,marginTop:4}}>{an.casos_analizados} casos analizados</div>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 };
