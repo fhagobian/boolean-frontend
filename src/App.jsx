@@ -283,6 +283,30 @@ const cargarSlaDias = async () => {
 };
 const invalidarSlaCache = () => { SLA_CACHE = null; };
 
+// ─── NPS: config cacheada + decisión de muestreo ────────────
+let NPS_CONFIG_CACHE = null;
+const cargarConfigNPS = async () => {
+  if(NPS_CONFIG_CACHE) return NPS_CONFIG_CACHE;
+  try{
+    const {data} = await supabase.from("config_encuestas_nps").select("*").eq("id",1).single();
+    NPS_CONFIG_CACHE = data || {activa:false};
+  }catch{ NPS_CONFIG_CACHE = {activa:false}; }
+  return NPS_CONFIG_CACHE;
+};
+const invalidarConfigNPSCache = () => { NPS_CONFIG_CACHE = null; };
+
+// Decide si ESTE caso entra al sorteo de encuesta NPS. Se llama
+// después de un cierre EXITOSO — nunca antes, nunca si no resolvió.
+const entraAlSorteoNPS = async () => {
+  const cfg = await cargarConfigNPS();
+  if(!cfg?.activa) return false;
+  const hoy = new Date().toISOString().slice(0,10);
+  if(cfg.fecha_desde && hoy < cfg.fecha_desde) return false;
+  if(cfg.fecha_hasta && hoy > cfg.fecha_hasta) return false;
+  const pct = cfg.porcentaje_muestra ?? 10;
+  return Math.random() * 100 < pct;
+};
+
 // Calcula días hábiles restantes hasta un deadline
 const diasHabilesRestantes = (deadline, feriadosSet) => {
   if(!deadline) return null;
@@ -3678,6 +3702,8 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
   const [showPausar,setShowPausar]     = useState(false);
   const [showCancelar,setShowCancelar] = useState(false);
   const [showFinalizar,setShowFinalizar] = useState(false);
+  const [showNPSPrompt, setShowNPSPrompt] = useState(false);
+  const [npsGuardando, setNpsGuardando] = useState(false);
   const [showRecoord,setShowRecoord]   = useState(false);
   const [showEditar,setShowEditar]     = useState(false);
   const [pantallaInstr,setPantallaInstr] = useState(false);
@@ -3947,9 +3973,58 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
         const casActualizado={...caso,...payload};
         if(onUpdate) onUpdate(casActualizado);
         toast("✓ Caso finalizado");
-        onBack();
+        // Sorteo NPS — solo si resolvió exitosamente
+        if(updates.resolvio===true && await entraAlSorteoNPS()){
+          setShowNPSPrompt(true);
+        } else {
+          onBack();
+        }
       }}/>}
       {encuestaActiva&&<ModalEncuestaConfig encuesta={encuestaActiva.encuesta} caso={caso} user={user} onClose={()=>setEncuestaActiva(null)} onSave={guardarEncuestaConfig}/>}
+      {showNPSPrompt&&(
+        <div style={{position:"fixed",inset:0,background:"#000D",zIndex:2000,
+          display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:B.panel,border:`1px solid ${B.border}`,borderTop:`3px solid ${B.teal}`,
+            maxWidth:400,width:"100%",padding:28}}>
+            <div style={{fontSize:32,textAlign:"center",marginBottom:10}}>⭐</div>
+            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:15,fontWeight:900,
+              textAlign:"center",marginBottom:8}}>ENCUESTA DE SATISFACCIÓN</div>
+            <div style={{fontSize:12,color:B.t2,textAlign:"center",lineHeight:1.6,marginBottom:20}}>
+              Este caso fue seleccionado para encuesta al cliente.<br/>
+              Ingresá el celular de quien te atendió para enviarle una breve consulta por WhatsApp.
+            </div>
+            <input className="field" type="tel" id="nps-telefono-input"
+              placeholder="Ej: 099 123 456" style={{fontSize:16,marginBottom:16,textAlign:"center"}}/>
+            <Bb label="ENVIAR ENCUESTA" full color={B.teal} saving={npsGuardando} onClick={async()=>{
+              const tel = document.getElementById("nps-telefono-input")?.value?.trim();
+              if(!tel){ toast("Ingresá un número de celular"); return; }
+              setNpsGuardando(true);
+              try{
+                const res = await fetch(`${ANALYTICS_API_URL}/encuestas-nps/enviar`,{
+                  method:"POST",
+                  headers:{"Content-Type":"application/json",Authorization:`Bearer ${ANALYTICS_API_SECRET}`},
+                  body:JSON.stringify({caso_id:String(caso.id),tecnico_id:user.id,telefono:tel}),
+                });
+                if(res.ok){ toast("✓ Encuesta enviada por WhatsApp"); }
+                else{
+                  const err = await res.json().catch(()=>({}));
+                  toast(err.detail||"No se pudo enviar la encuesta");
+                }
+              }catch{
+                toast("No se pudo enviar la encuesta — revisá la conexión");
+              }
+              setNpsGuardando(false);
+              setShowNPSPrompt(false);
+              onBack();
+            }}/>
+            <button onClick={()=>{setShowNPSPrompt(false);onBack();}}
+              style={{background:"none",border:"none",color:B.t3,fontSize:12,
+                width:"100%",textAlign:"center",marginTop:12,cursor:"pointer",padding:8}}>
+              Omitir esta vez
+            </button>
+          </div>
+        </div>
+      )}
       {showPausar&&<OverlayPausar caso={caso} onVolver={()=>setShowPausar(false)} onGuardar={async(txt)=>{await pausar(txt);setShowPausar(false);onBack();}}/>}
       {showCancelar&&<OverlayCancelar caso={caso} onVolver={()=>setShowCancelar(false)} onGuardar={async(txt)=>{await cancelar(txt);setShowCancelar(false);onBack();}}/>}
       {showRecoord&&<OverlayRecoordinar caso={caso} onVolver={()=>setShowRecoord(false)} onGuardar={async(data)=>{await recoordinar(data);setShowRecoord(false);onBack();}}/>}
@@ -8234,7 +8309,158 @@ const ConfigNotificaciones = ({ user, minutosAntes, setMinutosAntes, toast }) =>
   );
 };
 
-const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
+// ─── NPS — panel del Director (Config → ⭐ NPS) ──────────────
+const GestorNPS = ({toast}) => {
+  const [cfg, setCfg] = useState({
+    activa:false, fecha_desde:"", fecha_hasta:"",
+    porcentaje_muestra:10, dias_antifraude_mismo_telefono:60,
+  });
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const cargar = async () => {
+    setLoading(true);
+    const {data} = await supabase.from("config_encuestas_nps").select("*").eq("id",1).single();
+    if(data) setCfg({
+      activa: !!data.activa,
+      fecha_desde: data.fecha_desde||"",
+      fecha_hasta: data.fecha_hasta||"",
+      porcentaje_muestra: data.porcentaje_muestra??10,
+      dias_antifraude_mismo_telefono: data.dias_antifraude_mismo_telefono??60,
+    });
+    const {data:envios} = await supabase.from("encuestas_nps").select("estado,puntaje");
+    if(envios){
+      const respondidas = envios.filter(e=>e.estado==="respondida");
+      const puntajes = respondidas.map(e=>e.puntaje).filter(p=>p!=null);
+      setStats({
+        total: envios.length,
+        enviadas: envios.filter(e=>e.estado==="enviada"||e.estado==="respondida").length,
+        respondidas: respondidas.length,
+        bloqueadas: envios.filter(e=>e.estado==="bloqueada_antifraude").length,
+        promedio: puntajes.length ? (puntajes.reduce((a,b)=>a+b,0)/puntajes.length).toFixed(1) : null,
+      });
+    }
+    setLoading(false);
+  };
+
+  useEffect(()=>{ cargar(); },[]);
+
+  const guardar = async () => {
+    if(cfg.activa && (!cfg.fecha_desde||!cfg.fecha_hasta)){
+      toast("Completá fecha desde y hasta para activar el muestreo"); return;
+    }
+    if(cfg.activa && cfg.fecha_desde > cfg.fecha_hasta){
+      toast("La fecha desde no puede ser posterior a la fecha hasta"); return;
+    }
+    setSaving(true);
+    const {error} = await supabase.from("config_encuestas_nps").update({
+      activa: cfg.activa,
+      fecha_desde: cfg.fecha_desde||null,
+      fecha_hasta: cfg.fecha_hasta||null,
+      porcentaje_muestra: Number(cfg.porcentaje_muestra)||10,
+      dias_antifraude_mismo_telefono: Number(cfg.dias_antifraude_mismo_telefono)||60,
+      updated_by: "director", updated_at: new Date().toISOString(),
+    }).eq("id",1);
+    setSaving(false);
+    if(error){ toast("Error: "+error.message); return; }
+    invalidarConfigNPSCache();
+    toast("✓ Configuración de encuestas NPS guardada");
+  };
+
+  if(loading) return <div style={{display:"flex",justifyContent:"center",padding:40}}><Spin s={30}/></div>;
+
+  return (
+    <div style={{maxWidth:560}}>
+      <div style={{fontSize:11,color:B.t2,marginBottom:20,lineHeight:1.6}}>
+        Cuando está activo, un porcentaje de los casos <b style={{color:B.t1}}>finalizados exitosamente</b> por
+        día le piden al técnico el celular del cliente para enviarle una breve encuesta de satisfacción
+        (0 a 10 + comentario) por WhatsApp.
+      </div>
+
+      {/* Toggle activo/inactivo */}
+      <label style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer",
+        padding:"14px 16px",background:B.card,border:`1px solid ${B.border}`,marginBottom:16}}>
+        <input type="checkbox" checked={cfg.activa}
+          onChange={e=>setCfg(c=>({...c,activa:e.target.checked}))}
+          style={{width:18,height:18,accentColor:B.teal}}/>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:cfg.activa?B.teal:B.t2}}>
+            {cfg.activa?"Muestreo ACTIVO":"Muestreo INACTIVO"}
+          </div>
+          <div style={{fontSize:10,color:B.t3}}>Los técnicos solo ven el prompt cuando esto está activo</div>
+        </div>
+      </label>
+
+      {/* Rango de fechas */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+        <div><FL label="Desde"/>
+          <input type="date" className="field" value={cfg.fecha_desde}
+            onChange={e=>setCfg(c=>({...c,fecha_desde:e.target.value}))}/></div>
+        <div><FL label="Hasta"/>
+          <input type="date" className="field" value={cfg.fecha_hasta}
+            onChange={e=>setCfg(c=>({...c,fecha_hasta:e.target.value}))}/></div>
+      </div>
+
+      {/* % muestra */}
+      <div style={{marginBottom:16}}>
+        <FL label="% de casos exitosos que entran al sorteo cada día"/>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <input type="range" min="1" max="100" value={cfg.porcentaje_muestra}
+            onChange={e=>setCfg(c=>({...c,porcentaje_muestra:e.target.value}))}
+            style={{flex:1,accentColor:B.teal}}/>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900,
+            color:B.teal,minWidth:50,textAlign:"right"}}>{cfg.porcentaje_muestra}%</div>
+        </div>
+      </div>
+
+      {/* Antifraude */}
+      <div style={{marginBottom:24}}>
+        <FL label="Días de bloqueo antifraude (mismo celular)"/>
+        <input type="number" min="1" className="field" value={cfg.dias_antifraude_mismo_telefono}
+          onChange={e=>setCfg(c=>({...c,dias_antifraude_mismo_telefono:e.target.value}))}
+          style={{maxWidth:120}}/>
+        <div style={{fontSize:10,color:B.t3,marginTop:4}}>
+          Un mismo número no puede recibir otra encuesta dentro de esta ventana — evita que un
+          técnico "confirme" su propio número repetidamente.
+        </div>
+      </div>
+
+      <Bb label="GUARDAR CONFIGURACIÓN" onClick={guardar} saving={saving} full color={B.teal}/>
+
+      {/* Stats */}
+      {stats&&(
+        <div style={{marginTop:32}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:12}}>
+            ◈ RESUMEN
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+            <div style={{background:B.card,border:`1px solid ${B.border}`,padding:"12px 10px",textAlign:"center"}}>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:B.t1}}>{stats.total}</div>
+              <div style={{fontSize:9,color:B.t3}}>enviadas total</div>
+            </div>
+            <div style={{background:B.card,border:`1px solid ${B.border}`,padding:"12px 10px",textAlign:"center"}}>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:B.green}}>{stats.respondidas}</div>
+              <div style={{fontSize:9,color:B.t3}}>respondidas</div>
+            </div>
+            <div style={{background:B.card,border:`1px solid ${B.border}`,padding:"12px 10px",textAlign:"center"}}>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:B.amber}}>{stats.promedio??"—"}</div>
+              <div style={{fontSize:9,color:B.t3}}>promedio NPS</div>
+            </div>
+            <div style={{background:B.card,border:`1px solid ${B.border}`,padding:"12px 10px",textAlign:"center"}}>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:B.red}}>{stats.bloqueadas}</div>
+              <div style={{fontSize:9,color:B.t3}}>bloqueadas (antifraude)</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+const Config=({user,perfil,toast,minutosAntes,setMinutosAntes})=>{
+  const esDirector = perfil?.rol==="DIRECTOR";
   const [tab,setTab]=useState("notificaciones");
   const [procesos,setProcesos]=useState(TIPOS_PROCESO.map(p=>({...p,sla:SLA_DIAS_HABILES[p.codigo]||3})));
   // Cargar SLA reales (config del Director) al abrir
@@ -8256,6 +8482,7 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
   const TABS=[
     {id:"notificaciones",label:"🔔 NOTIFICACIONES"},
     {id:"encuestas",label:"📋 ENCUESTAS"},
+    ...(esDirector?[{id:"nps",label:"⭐ NPS"}]:[]),
     {id:"motivos",label:"💬 MOTIVOS"},
     {id:"feriados",label:"📅 FERIADOS"},
     {id:"procesos",label:"PROCESOS & SLA"},
@@ -8279,6 +8506,9 @@ const Config=({user,toast,minutosAntes,setMinutosAntes})=>{
       )}
       {tab==="encuestas"&&(
         <GestorEncuestas user={user} toast={toast}/>
+      )}
+      {tab==="nps"&&esDirector&&(
+        <GestorNPS toast={toast}/>
       )}
       {tab==="motivos"&&(
         <GestorMotivos toast={toast}/>
@@ -8647,7 +8877,7 @@ export default function App(){
           {view==="comunicaciones"&&<Comunicaciones user={user} perfil={perfil} toast={toast} onLeer={()=>setNoLeidosChat(0)}/>}
           {view==="logros"&&<Logros user={user} toast={toast}/>}
           {view==="usuarios"&&<Usuarios user={user} perfil={perfil} toast={toast} casos={casos}/>}
-          {view==="config"&&<Config user={user} toast={toast} minutosAntes={minutosAntes} setMinutosAntes={setMinutosAntes}/>}
+          {view==="config"&&<Config user={user} perfil={perfil} toast={toast} minutosAntes={minutosAntes} setMinutosAntes={setMinutosAntes}/>}
         </main>
       </div>
       {toastMsg&&<Toast msg={toastMsg}/>}
