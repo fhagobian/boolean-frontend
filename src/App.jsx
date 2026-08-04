@@ -7583,7 +7583,7 @@ const RadiografiaOperativa = ({toast, perfil}) => {
       </div>
       <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:20}}>
         {tendencia.length>0 ? (
-          <TendenciaSVG puntos={tendencia}/>
+          <TendenciaSVG puntos={tendencia} vista={vistaTendencia}/>
         ) : (
           <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:30}}>Sin datos suficientes todavía</div>
         )}
@@ -7833,20 +7833,33 @@ const RadiografiaOperativa = ({toast, perfil}) => {
 };
 
 // SVG simple de línea para la tendencia (sin librerías externas)
-const TendenciaSVG = ({puntos}) => {
+const TendenciaSVG = ({puntos, vista}) => {
   const vals = puntos.map(p=>p.sla_cumplido_pct).filter(v=>v!=null);
   if(vals.length===0) return <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:30}}>Sin datos</div>;
-  const w = 600, h = 110, pad = 20;
-  const min = 50, max = 100; // escala fija 50-100% para SLA
+  const w = 600, h = 130, pad = 20;
+  const min = 50, max = 100;
   const xStep = (w-pad*2)/(puntos.length-1||1);
-  const yFor = v => h-20 - ((v-min)/(max-min))*(h-40);
+  const yFor = v => h-40 - ((v-min)/(max-min))*(h-60);
   const pathPts = puntos.map((p,i)=>{
     const x = pad + i*xStep;
     const y = p.sla_cumplido_pct!=null ? yFor(p.sla_cumplido_pct) : null;
-    return {x,y,val:p.sla_cumplido_pct};
+    return {x,y,val:p.sla_cumplido_pct,periodo:p.periodo};
   }).filter(p=>p.y!=null);
   const path = pathPts.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
   const ultimo = pathPts[pathPts.length-1];
+
+  const formatearFecha = (periodo) => {
+    if(!periodo) return "";
+    if(vista==="meses"){
+      const [y,m] = periodo.split("-");
+      const nombres = ["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+      return `${nombres[parseInt(m)]} ${y.slice(2)}`;
+    }
+    const d = new Date(periodo+"T12:00:00");
+    return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}`;
+  };
+  // Mostrar cada N etiquetas para no amontonar si hay muchos puntos
+  const mostrarCada = pathPts.length > 10 ? 2 : 1;
 
   return (
     <svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",height:"auto"}}>
@@ -7859,6 +7872,15 @@ const TendenciaSVG = ({puntos}) => {
       <polyline points={pathPts.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={B.blue} strokeWidth={2.5}/>
       {ultimo && <circle cx={ultimo.x} cy={ultimo.y} r={4} fill={B.blue}/>}
       {ultimo && <text x={ultimo.x-24} y={ultimo.y-10} fontSize={10} fill={B.green} fontWeight="bold">{ultimo.val}%</text>}
+      {/* Marcas de límite de semana/mes en el eje X */}
+      {pathPts.map((p,i)=>(
+        (i%mostrarCada===0 || i===pathPts.length-1) && (
+          <g key={i}>
+            <line x1={p.x} y1={h-38} x2={p.x} y2={h-32} stroke={B.t3} strokeWidth={1}/>
+            <text x={p.x} y={h-18} fontSize={7} fill={B.t3} textAnchor="middle">{formatearFecha(p.periodo)}</text>
+          </g>
+        )
+      ))}
     </svg>
   );
 };
@@ -8008,14 +8030,39 @@ const AnalisisProactivo = ({toast, perfil}) => {
 };
 
 // ─── ANÁLISIS PREDICTIVO — Bloque C (Fase 1) ─────────────────
+const CONFIANZA_COLOR = {alta:B.green, media:B.yellow, baja:B.red};
+const CONFIANZA_LABEL = {alta:"ALTA", media:"MEDIA", baja:"BAJA"};
+
 const AnalisisPredictivo = ({toast, perfil}) => {
   const [eventos, setEventos] = useState([]);
+  const [pred, setPred] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  useEffect(()=>{
-    supabase.from("calendario_eventos").select("*").eq("activo",true)
-      .order("fecha").then(({data})=>{ setEventos(data||[]); setLoading(false); });
-  },[]);
+  const cargar = async () => {
+    setLoading(true); setError(null);
+    try{
+      const {data} = await supabase.from("calendario_eventos").select("*").eq("activo",true).order("fecha");
+      setEventos(data||[]);
+
+      if(ANALYTICS_API_URL){
+        const equipoParam = perfil?.rol==="REGIONAL" ? `?equipo=${perfil.empresa_codigo}` : "";
+        const res = await fetch(`${ANALYTICS_API_URL}/radiografia${equipoParam}`, {
+          headers:{Authorization:`Bearer ${ANALYTICS_API_SECRET}`},
+        });
+        if(res.ok){
+          const json = await res.json();
+          setPred(json.tendencia_historica||null);
+        }
+      }
+    }catch(e){
+      setError(e.message);
+    }finally{
+      setLoading(false);
+    }
+  };
+
+  useEffect(()=>{ cargar(); },[]);
 
   const hoy = new Date();
   const proximos = eventos.filter(e=>{
@@ -8023,23 +8070,81 @@ const AnalisisPredictivo = ({toast, perfil}) => {
     const diff = (f - hoy) / 86400000;
     return diff >= -1 && diff <= 60;
   });
-
   const IMPACTO_COLOR = {alto:B.red, medio:B.yellow, bajo:B.t2};
 
   if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}><Spin s={36}/></div>;
 
+  const conf = pred?.confianza || "baja";
+  const NOMBRES_MES = ["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+
   return (
     <div>
-      <div style={{background:B.card,border:`1px solid ${B.border}`,borderLeft:`3px solid ${B.yellow}`,
-        padding:16,marginBottom:20,display:"flex",gap:12,alignItems:"flex-start"}}>
-        <span style={{fontSize:20}}>ℹ</span>
-        <div style={{fontSize:12,color:B.t2,lineHeight:1.6}}>
-          <b style={{color:B.yellow}}>Confianza: BAJA</b> — el modelo predictivo necesita varias semanas de
-          historia real para ser confiable. Por ahora esta pestaña muestra el calendario de eventos que
-          va a usar el modelo cuando tengamos suficientes datos. La proyección de demanda se habilita
-          automáticamente a medida que se acumula historia operativa.
+      {/* Confianza dinámica — ya no un cartel fijo, refleja los datos reales */}
+      <div style={{background:B.card,border:`1px solid ${B.border}`,borderLeft:`3px solid ${CONFIANZA_COLOR[conf]}`,
+        padding:16,marginBottom:20,display:"flex",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
+        <span style={{fontSize:20}}>{conf==="alta"?"✓":conf==="media"?"◐":"ℹ"}</span>
+        <div style={{fontSize:12,color:B.t2,lineHeight:1.6,flex:1,minWidth:220}}>
+          <b style={{color:CONFIANZA_COLOR[conf]}}>Confianza: {CONFIANZA_LABEL[conf]}</b>
+          {pred?.disponible ? (
+            <> — basado en <b style={{color:B.t1}}>{pred.meses_analizados} meses</b> de historia operativa real.</>
+          ) : (
+            <> — {pred?.motivo || "todavía no hay suficiente historia cargada"}.</>
+          )}
         </div>
+        <Bb label="↻" onClick={cargar} small ghost color={B.orange}/>
       </div>
+
+      {pred?.disponible && (
+        <>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
+            ◈ TENDENCIA HISTÓRICA — VOLUMEN Y SLA POR MES
+          </div>
+          <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:20}}>
+            <div style={{display:"flex",gap:20,marginBottom:16,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:9,color:B.t3,letterSpacing:".08em"}}>VOLUMEN</div>
+                <div style={{fontSize:13,fontWeight:700,
+                  color:pred.tendencia_volumen==="creciente"?B.orange:pred.tendencia_volumen==="decreciente"?B.blue:B.t2}}>
+                  {pred.tendencia_volumen==="creciente"?"📈 Creciente":pred.tendencia_volumen==="decreciente"?"📉 Decreciente":"➡ Estable"}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:B.t3,letterSpacing:".08em"}}>SLA</div>
+                <div style={{fontSize:13,fontWeight:700,
+                  color:pred.tendencia_sla==="mejorando"?B.green:pred.tendencia_sla==="empeorando"?B.red:B.t2}}>
+                  {pred.tendencia_sla==="mejorando"?"↑ Mejorando":pred.tendencia_sla==="empeorando"?"↓ Empeorando":"➡ Estable"}
+                  {pred.sla_actual!=null && ` (${pred.sla_hace_n_meses}% → ${pred.sla_actual}%)`}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:B.t3,letterSpacing:".08em"}}>PROYECCIÓN PRÓXIMO MES</div>
+                <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,fontWeight:900,color:B.purple}}>
+                  ~{pred.proyeccion_proximo_mes} casos
+                </div>
+              </div>
+            </div>
+
+            {/* Mini gráfico de barras del volumen mensual */}
+            <div style={{display:"flex",alignItems:"flex-end",gap:4,height:70,marginBottom:6}}>
+              {pred.puntos.map((p,i)=>{
+                const max = Math.max(...pred.puntos.map(x=>x.total));
+                const alto = Math.max((p.total/max)*100, 4);
+                return (
+                  <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                    <div style={{width:"100%",height:`${alto}%`,background:i===pred.puntos.length-1?B.orange:B.blue,
+                      borderRadius:"2px 2px 0 0",transition:"height .5s"}} title={`${p.total} casos`}/>
+                    <div style={{fontSize:6,color:B.t3}}>{NOMBRES_MES[p.mes]}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{fontSize:9,color:B.t3,marginTop:8}}>
+              Tendencia lineal simple sobre los meses reales — la proyección exacta con estacionalidad
+              (Prophet) es el siguiente paso, una vez validado este análisis base.
+            </div>
+          </div>
+        </>
+      )}
 
       <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em",marginBottom:10}}>
         ◈ CALENDARIO DE EVENTOS COMERCIALES — PRÓXIMOS 60 DÍAS
@@ -8725,7 +8830,7 @@ export default function App(){
     (async()=>{
       const{data:p}=await supabase.from("usuarios").select("*").eq("auth_id",session.user.id).maybeSingle();
       if(p){ setPerfil(p); if(p.minutos_recordatorio) setMinutosAntes(p.minutos_recordatorio); }
-      let query=supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(500);
+      let query=supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(10000);
       if(p?.rol==="TECNICO"){
         query=query.eq("tecnico_id",p.auth_id||p.id)
           .not("estado","in","(FINALIZADO,CANCELADO)");
@@ -8770,7 +8875,7 @@ export default function App(){
   };
 
   const recargarCasos=async()=>{
-    let query=supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(500);
+    let query=supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(10000);
     if(perfil?.rol==="TECNICO"){
       query=query.eq("tecnico_id",perfil.auth_id||perfil.id)
         .not("estado","in","(FINALIZADO,CANCELADO)");
