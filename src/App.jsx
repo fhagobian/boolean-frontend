@@ -7360,6 +7360,27 @@ const TIPO_COLOR = {
   INSTALACION:B.green, SERVICIO_TECNICO:B.blue, RETIRO:B.orange, VISITA_PROACTIVA:B.purple,
 };
 
+const EJEMPLOS_BLOQUE8 = {
+  SERVICIO_TECNICO: [
+    {problema:"Fallas recurrentes de lectura en terminales con más de 3 años de uso",
+     accion_sugerida:"Programar reemplazo preventivo de las unidades más antiguas del parque"},
+    {problema:"Reinicio espontáneo por fuente de alimentación defectuosa",
+     accion_sugerida:"Auditar el lote de fuentes instaladas en 2024 con el proveedor"},
+  ],
+  INSTALACION: [
+    {problema:"Clientes reportan falta de capacitación post-instalación",
+     accion_sugerida:"Estandarizar un checklist de capacitación de 10 minutos al cierre"},
+  ],
+  RETIRO: [
+    {problema:"Accesorios faltantes al momento del retiro (cargador, base)",
+     accion_sugerida:"Confirmar inventario de accesorios con el cliente antes de coordinar visita"},
+  ],
+  VISITA_PROACTIVA: [
+    {problema:"Cables de alimentación con desgaste detectado en visitas de rutina",
+     accion_sugerida:"Incluir reemplazo de cable como parte del kit estándar de visita"},
+  ],
+};
+
 const SimBadge = () => (
   <span style={{fontSize:8,background:"#FFD02022",color:B.yellow,padding:"1px 6px",
     borderRadius:2,fontWeight:700,letterSpacing:".04em",marginLeft:6}}>SIMULADO</span>
@@ -7633,7 +7654,12 @@ const RadiografiaOperativa = ({toast, perfil}) => {
         flexDirection:"column",gap:14}}>
         {zonas.map(z=>{
           const total = z.total_casos||1;
-          const tipos = Object.entries(z.por_tipo||{});
+          // Orden SIEMPRE fijo — no depende de en qué orden llegaron los datos
+          const ORDEN_TIPOS = ["INSTALACION","SERVICIO_TECNICO","RETIRO","VISITA_PROACTIVA","OTRO"];
+          const ABREV = {INSTALACION:"INST",SERVICIO_TECNICO:"ST",RETIRO:"RET",VISITA_PROACTIVA:"VTP",OTRO:"OTRO"};
+          const tipos = ORDEN_TIPOS
+            .filter(tp => (z.por_tipo||{})[tp] > 0)
+            .map(tp => [tp, z.por_tipo[tp]]);
           const coberturaColor = z.cobertura_pct==null ? B.t3
             : z.cobertura_pct>=90 ? B.green : z.cobertura_pct>=60 ? B.yellow : B.red;
           return (
@@ -7644,7 +7670,7 @@ const RadiografiaOperativa = ({toast, perfil}) => {
                   {tipos.map(([tp,n])=>(
                     <span key={tp} style={{fontSize:8,background:`${TIPO_COLOR[tp]||B.t3}22`,
                       color:TIPO_COLOR[tp]||B.t3,padding:"1px 6px"}}>
-                      {tp.slice(0,3)} {n}
+                      {ABREV[tp]||tp.slice(0,4)} {n}
                     </span>
                   ))}
                 </span>
@@ -7791,9 +7817,22 @@ const RadiografiaOperativa = ({toast, perfil}) => {
                   borderTop:`2px solid ${color}`,padding:14}}>
                   <div style={{fontSize:11,fontWeight:700,color,marginBottom:8}}>{TIPO_LABEL[tp.codigo]}</div>
                   {!an ? (
-                    <div style={{fontSize:11,color:B.t3,lineHeight:1.6}}>
-                      Todavía no corrió el análisis para este proceso. Se genera automáticamente
-                      su primer {"día"} programado.
+                    <div>
+                      <div style={{fontSize:10,color:B.t3,lineHeight:1.6,marginBottom:8}}>
+                        Todavía no corrió el análisis real para este proceso — se genera
+                        automáticamente su primer día programado.
+                      </div>
+                      <div style={{border:`1px dashed ${B.t3}55`,padding:"8px 10px"}}>
+                        <div style={{fontSize:8,color:B.t3,fontWeight:700,letterSpacing:".08em",marginBottom:6}}>
+                          EJEMPLO ILUSTRATIVO
+                        </div>
+                        {(EJEMPLOS_BLOQUE8[tp.codigo]||[]).map((ej,i)=>(
+                          <div key={i} style={{marginBottom:i<EJEMPLOS_BLOQUE8[tp.codigo].length-1?8:0,fontStyle:"italic"}}>
+                            <div style={{fontSize:11,color:B.t2}}>{ej.problema}</div>
+                            <div style={{fontSize:10,color:B.t3}}>💡 {ej.accion_sugerida}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ) : an.problemas?.length>0 ? (
                     <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -7977,7 +8016,17 @@ const AnalisisProactivo = ({toast, perfil}) => {
             ))}
           </div>
         ) : (
-          <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:20}}>✓ Sin desvíos relevantes hoy</div>
+          <div>
+            <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:"10px 0"}}>✓ Sin desvíos relevantes hoy</div>
+            <div style={{display:"flex",gap:10,alignItems:"flex-start",padding:"10px 12px",
+              background:"transparent",border:`1px dashed ${B.t3}55`,marginTop:6}}>
+              <span style={{fontSize:16,flexShrink:0,opacity:0.5}}>🔴</span>
+              <span style={{fontSize:12,color:B.t3,lineHeight:1.5,fontStyle:"italic"}}>
+                <b>Ejemplo de cómo se vería una alerta real:</b> "Juan Pérez — tiempo de resolución subió
+                de 1.2 a 2.4 días esta semana (+100% vs su propio promedio)"
+              </span>
+            </div>
+          </div>
         )}
       </div>
 
@@ -7998,7 +8047,15 @@ const AnalisisProactivo = ({toast, perfil}) => {
                 ))}
               </div>
             ) : (
-              <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:20}}>✓ Sin picos anormales detectados</div>
+              <div>
+                <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:"10px 0"}}>✓ Sin picos anormales detectados</div>
+                <div style={{padding:"10px 12px",background:"transparent",border:`1px dashed ${B.t3}55`,
+                  fontSize:12,color:B.t3,lineHeight:1.6,fontStyle:"italic",marginTop:6}}>
+                  <b>Ejemplo de cómo se vería una alerta real:</b> "⚠ 8 casos de Servicio Técnico en
+                  Ciudad de la Costa en los últimos 3 días — 3.2x lo habitual para esa zona. Posible
+                  causa común (corte de luz, lote de hardware, problema de conectividad)."
+                </div>
+              </div>
             )}
           </div>
         </>
