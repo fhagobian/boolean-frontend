@@ -8036,6 +8036,8 @@ const CONFIANZA_LABEL = {alta:"ALTA", media:"MEDIA", baja:"BAJA"};
 const AnalisisPredictivo = ({toast, perfil}) => {
   const [eventos, setEventos] = useState([]);
   const [pred, setPred] = useState(null);
+  const [forecast, setForecast] = useState(null);
+  const [tipoSel, setTipoSel] = useState("TOTAL");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -8046,14 +8048,15 @@ const AnalisisPredictivo = ({toast, perfil}) => {
       setEventos(data||[]);
 
       if(ANALYTICS_API_URL){
-        const equipoParam = perfil?.rol==="REGIONAL" ? `?equipo=${perfil.empresa_codigo}` : "";
-        const res = await fetch(`${ANALYTICS_API_URL}/radiografia${equipoParam}`, {
-          headers:{Authorization:`Bearer ${ANALYTICS_API_SECRET}`},
-        });
-        if(res.ok){
-          const json = await res.json();
-          setPred(json.tendencia_historica||null);
-        }
+        const equipoParam = perfil?.rol==="REGIONAL" ? `equipo=${perfil.empresa_codigo}` : "";
+        const [resTend, resForecast] = await Promise.all([
+          fetch(`${ANALYTICS_API_URL}/radiografia${equipoParam?"?"+equipoParam:""}`, {
+            headers:{Authorization:`Bearer ${ANALYTICS_API_SECRET}`}}),
+          fetch(`${ANALYTICS_API_URL}/prediccion${equipoParam?"?"+equipoParam:""}`, {
+            headers:{Authorization:`Bearer ${ANALYTICS_API_SECRET}`}}),
+        ]);
+        if(resTend.ok){ const j = await resTend.json(); setPred(j.tendencia_historica||null); }
+        if(resForecast.ok){ const j = await resForecast.json(); setForecast(j.forecast||null); }
       }
     }catch(e){
       setError(e.message);
@@ -8139,10 +8142,91 @@ const AnalisisPredictivo = ({toast, perfil}) => {
               })}
             </div>
             <div style={{fontSize:9,color:B.t3,marginTop:8}}>
-              Tendencia lineal simple sobre los meses reales — la proyección exacta con estacionalidad
-              (Prophet) es el siguiente paso, una vez validado este análisis base.
+              Tendencia lineal simple, mes a mes — el panel de abajo (Prophet) ya da la
+              proyección semanal con estacionalidad y bandas de confianza reales.
             </div>
           </div>
+        </>
+      )}
+
+      {/* ── Forecast real con Prophet ── */}
+      {forecast && (
+        <>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+            marginBottom:10,flexWrap:"wrap",gap:8}}>
+            <span style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em"}}>
+              ◈ PROYECCIÓN SEMANAL — PROPHET
+            </span>
+            <select className="field" style={{width:200,fontSize:12,padding:"6px 10px"}}
+              value={tipoSel} onChange={e=>setTipoSel(e.target.value)}>
+              <option value="TOTAL">Todos los procesos</option>
+              {TIPOS_PROCESO.map(t=><option key={t.codigo} value={t.codigo}>{TIPO_LABEL[t.codigo]}</option>)}
+            </select>
+          </div>
+          {(() => {
+            const f = forecast[tipoSel];
+            if(!f?.disponible) return (
+              <div style={{background:B.card,border:`1px solid ${B.border}`,padding:20,
+                textAlign:"center",color:B.t3,fontSize:12}}>
+                {f?.motivo || "Sin datos suficientes para proyectar este proceso todavía"}
+              </div>
+            );
+            const todosPuntos = [...f.historico, ...f.proyeccion];
+            const maxVal = Math.max(...todosPuntos.map(p=>p.max ?? p.valor), 1);
+            const anchoTotal = 560, alto = 90, pad = 10;
+            const step = (anchoTotal-pad*2) / (todosPuntos.length-1 || 1);
+            const yFor = v => alto - (v/maxVal)*(alto-16);
+            const nHist = f.historico.length;
+            return (
+              <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
+                <div style={{display:"flex",gap:20,marginBottom:14,flexWrap:"wrap"}}>
+                  <div>
+                    <div style={{fontSize:9,color:B.t3,letterSpacing:".08em"}}>CONFIANZA</div>
+                    <div style={{fontSize:13,fontWeight:700,color:CONFIANZA_COLOR[f.confianza]}}>
+                      {CONFIANZA_LABEL[f.confianza]}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,color:B.t3,letterSpacing:".08em"}}>HISTORIA USADA</div>
+                    <div style={{fontSize:13,fontWeight:700,color:B.t1}}>{f.semanas_historico} semanas</div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,color:B.t3,letterSpacing:".08em"}}>PRÓXIMA SEMANA</div>
+                    <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,fontWeight:900,color:B.purple}}>
+                      ~{f.proyeccion[0]?.valor} casos
+                    </div>
+                  </div>
+                </div>
+                <svg viewBox={`0 0 ${anchoTotal} ${alto+20}`} style={{width:"100%",height:"auto"}}>
+                  {/* Banda de confianza de la proyección */}
+                  {f.proyeccion.length>0 && (
+                    <polygon
+                      points={
+                        f.proyeccion.map((p,i)=>`${pad+(nHist+i)*step},${yFor(p.max)}`).join(" ")+" "+
+                        [...f.proyeccion].reverse().map((p,i)=>`${pad+(nHist+(f.proyeccion.length-1-i))*step},${yFor(p.min)}`).join(" ")
+                      }
+                      fill={B.purple} opacity="0.15"/>
+                  )}
+                  {/* Línea histórica */}
+                  <polyline
+                    points={f.historico.map((p,i)=>`${pad+i*step},${yFor(p.valor)}`).join(" ")}
+                    fill="none" stroke={B.blue} strokeWidth="2"/>
+                  {/* Línea proyectada */}
+                  <polyline
+                    points={f.proyeccion.map((p,i)=>`${pad+(nHist+i)*step},${yFor(p.valor)}`).join(" ")}
+                    fill="none" stroke={B.purple} strokeWidth="2" strokeDasharray="4,3"/>
+                  {/* Separador hoy */}
+                  <line x1={pad+(nHist-1)*step} y1="0" x2={pad+(nHist-1)*step} y2={alto}
+                    stroke={B.border} strokeWidth="1" strokeDasharray="2,2"/>
+                </svg>
+                <div style={{display:"flex",gap:16,fontSize:9,color:B.t3,marginTop:6}}>
+                  <span><span style={{color:B.blue}}>●</span> Histórico real</span>
+                  <span><span style={{color:B.purple}}>●</span> Proyectado</span>
+                  <span style={{marginLeft:"auto"}}>Franja = banda de confianza (80%)</span>
+                </div>
+              </div>
+            );
+          })()}
         </>
       )}
 
