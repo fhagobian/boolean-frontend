@@ -8037,6 +8037,7 @@ const AnalisisPredictivo = ({toast, perfil}) => {
   const [eventos, setEventos] = useState([]);
   const [pred, setPred] = useState(null);
   const [forecast, setForecast] = useState(null);
+  const [tipoVista, setTipoVista] = useState("proceso"); // proceso | zona
   const [tipoSel, setTipoSel] = useState("TOTAL");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -8155,20 +8156,38 @@ const AnalisisPredictivo = ({toast, perfil}) => {
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
             marginBottom:10,flexWrap:"wrap",gap:8}}>
             <span style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".12em"}}>
-              ◈ PROYECCIÓN SEMANAL — PROPHET
+              ◈ PROYECCIÓN SEMANAL (6 SEMANAS) — PROPHET
             </span>
-            <select className="field" style={{width:200,fontSize:12,padding:"6px 10px"}}
-              value={tipoSel} onChange={e=>setTipoSel(e.target.value)}>
-              <option value="TOTAL">Todos los procesos</option>
-              {TIPOS_PROCESO.map(t=><option key={t.codigo} value={t.codigo}>{TIPO_LABEL[t.codigo]}</option>)}
-            </select>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <div style={{display:"flex",border:`1px solid ${B.border}`}}>
+                {[["proceso","POR PROCESO"],["zona","POR ZONA"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>{setTipoVista(v);setTipoSel(v==="proceso"?"TOTAL":Object.keys(forecast.por_zona||{})[0]||"");}}
+                    style={{background:tipoVista===v?B.orange:B.deep,color:tipoVista===v?"#050507":B.t2,
+                      border:"none",padding:"6px 12px",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              {tipoVista==="proceso" ? (
+                <select className="field" style={{width:180,fontSize:12,padding:"6px 10px"}}
+                  value={tipoSel} onChange={e=>setTipoSel(e.target.value)}>
+                  <option value="TOTAL">Todos los procesos</option>
+                  {TIPOS_PROCESO.map(t=><option key={t.codigo} value={t.codigo}>{TIPO_LABEL[t.codigo]}</option>)}
+                </select>
+              ) : (
+                <select className="field" style={{width:180,fontSize:12,padding:"6px 10px"}}
+                  value={tipoSel} onChange={e=>setTipoSel(e.target.value)}>
+                  {Object.keys(forecast.por_zona||{}).map(z=><option key={z} value={z}>{z}</option>)}
+                </select>
+              )}
+            </div>
           </div>
           {(() => {
-            const f = forecast[tipoSel];
+            const f = tipoVista==="proceso" ? forecast.por_proceso?.[tipoSel] : forecast.por_zona?.[tipoSel];
             if(!f?.disponible) return (
               <div style={{background:B.card,border:`1px solid ${B.border}`,padding:20,
                 textAlign:"center",color:B.t3,fontSize:12}}>
-                {f?.motivo || "Sin datos suficientes para proyectar este proceso todavía"}
+                {f?.motivo || "Sin datos suficientes para proyectar todavía"}
               </div>
             );
             const todosPuntos = [...f.historico, ...f.proyeccion];
