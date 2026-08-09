@@ -7930,9 +7930,13 @@ const AnalisisProactivo = ({toast, perfil}) => {
   const isMobile = useMobile();
   const esRegional = perfil?.rol==="REGIONAL";
   const esDirector = perfil?.rol==="DIRECTOR";
+  const esSupervisor = perfil?.rol==="SUPERVISOR";
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [justificandoId, setJustificandoId] = useState(null);
+  const [textoJustif, setTextoJustif] = useState("");
+  const [guardandoJustif, setGuardandoJustif] = useState(false);
   const equipoSel = esRegional ? (perfil?.empresa_codigo||"") : "";
 
   const cargar = async () => {
@@ -8068,15 +8072,66 @@ const AnalisisProactivo = ({toast, perfil}) => {
       <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16}}>
         {b3.length>0 ? (
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {b3.map((o,i)=>(
-              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                padding:"8px 10px",background:B.deep,fontSize:12}}>
-                <span style={{color:B.t1}}>{o.razon_social} <span style={{color:B.t3}}>· {TIPO_LABEL[o.tipo_proceso]||o.tipo_proceso}</span></span>
-                <span style={{fontFamily:"'Share Tech Mono',monospace",color:B.red,fontWeight:700}}>
-                  {o.tiempo_dias}d ({o.veces_promedio}x el promedio)
-                </span>
-              </div>
-            ))}
+            {b3.map((o,i)=>{
+              const abierto = justificandoId===o.caso_id;
+              return (
+                <div key={i} style={{background:B.deep,padding:"8px 10px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                    fontSize:12,flexWrap:"wrap",gap:6}}>
+                    <span style={{color:B.t1}}>{o.razon_social} <span style={{color:B.t3}}>· {TIPO_LABEL[o.tipo_proceso]||o.tipo_proceso}</span></span>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontFamily:"'Share Tech Mono',monospace",color:B.red,fontWeight:700}}>
+                        {o.tiempo_dias}d ({o.veces_promedio}x el promedio)
+                      </span>
+                      {o.justificado ? (
+                        <span style={{fontSize:9,color:B.green,background:`${B.green}18`,padding:"2px 7px",fontWeight:700}}>
+                          ✓ JUSTIFICADO
+                        </span>
+                      ) : (
+                        <span style={{fontSize:9,color:B.yellow,background:`${B.yellow}18`,padding:"2px 7px",fontWeight:700}}>
+                          ⚠ PENDIENTE
+                        </span>
+                      )}
+                      {esSupervisor && !o.justificado && (
+                        <Bb label={abierto?"CANCELAR":"JUSTIFICAR"} small ghost
+                          color={abierto?B.t3:B.teal}
+                          onClick={()=>{setJustificandoId(abierto?null:o.caso_id);setTextoJustif("");}}/>
+                      )}
+                    </div>
+                  </div>
+                  {o.justificado && o.justificacion && (
+                    <div style={{fontSize:11,color:B.t2,marginTop:6,paddingTop:6,
+                      borderTop:`1px solid ${B.border}`,fontStyle:"italic"}}>
+                      "{o.justificacion}" — {o.justificado_por||"Supervisor"}
+                    </div>
+                  )}
+                  {abierto && (
+                    <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${B.border}`,display:"flex",gap:8}}>
+                      <input className="field" style={{flex:1,fontSize:12,padding:"7px 10px"}}
+                        placeholder="Motivo breve del desvío..."
+                        value={textoJustif} onChange={e=>setTextoJustif(e.target.value)}
+                        maxLength={200}/>
+                      <Bb label="GUARDAR" small color={B.teal} saving={guardandoJustif}
+                        onClick={async()=>{
+                          if(!textoJustif.trim()){ toast("Escribí un motivo breve"); return; }
+                          setGuardandoJustif(true);
+                          const {error} = await supabase.from("justificaciones_outlier").upsert({
+                            caso_id: String(o.caso_id),
+                            supervisor_id: perfil?.id,
+                            supervisor_nombre: `${perfil?.nombre||""} ${perfil?.apellido||""}`.trim(),
+                            justificacion: textoJustif.trim(),
+                          }, {onConflict:"caso_id"});
+                          setGuardandoJustif(false);
+                          if(error){ toast("Error: "+error.message); return; }
+                          toast("✓ Justificación guardada");
+                          setJustificandoId(null);
+                          cargar(); // refresca para traer el estado actualizado
+                        }}/>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div style={{textAlign:"center",color:B.t3,fontSize:12,padding:20}}>✓ Sin casos atípicos</div>
