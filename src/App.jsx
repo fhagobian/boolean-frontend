@@ -5350,8 +5350,9 @@ const calcularRutaORS = async (puntos) => {
   // Sin API key ORS — devuelve ruta aproximada con líneas rectas
   if(puntos.length < 2) return {ok:false};
   try {
-    // Intentar con ORS si hay key en localStorage
-    const orsKey = localStorage.getItem("ors_api_key");
+    // Prioridad: variable de entorno (funciona para todos los usuarios
+    // automáticamente) > localStorage (override manual para pruebas)
+    const orsKey = import.meta.env.VITE_ORS_API_KEY || localStorage.getItem("ors_api_key");
     if(orsKey){
       const coords = puntos.map(p => [p.lng, p.lat]);
       const res = await fetch("https://api.openrouteservice.org/v2/directions/driving-car/geojson", {
