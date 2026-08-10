@@ -1310,11 +1310,23 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
   const isMobile = useMobile();
   const esRolTecnico = perfil?.rol==="TECNICO";
 
+  const [rutaOrdenHoy, setRutaOrdenHoy] = useState([]);
+
   useEffect(()=>{
     supabase.from("usuarios").select("*").eq("rol","TECNICO").eq("activo",true)
       .then(({data})=>setTecnicos(data||[]));
     supabase.from("encuestas_config").select("*").eq("activa",true)
       .then(({data})=>setEncMasivo(data||[]));
+    // El orden que el técnico dejó en RUTA (manual o "Optimizar") se
+    // respeta acá también, para que ambos módulos muestren el mismo
+    // orden de trabajo del día.
+    if(esRolTecnico){
+      const tecId = perfil?.auth_id || perfil?.id;
+      const hoy = new Date().toISOString().split("T")[0];
+      supabase.from("ruta_orden").select("orden_casos")
+        .eq("tecnico_id", tecId).eq("fecha", hoy).maybeSingle()
+        .then(({data})=>setRutaOrdenHoy(data?.orden_casos||[]));
+    }
   },[]);
 
   const matchFiltro = (arr,val) => arr.length===0||arr.includes(val);
@@ -1335,6 +1347,18 @@ const CasosList = ({casos,onSelect,onNew,user,perfil,onRecargar}) => {
              (c.rut||"").toLowerCase().includes(q);
     }
     return true;
+  }).sort((a,b)=>{
+    if(rutaOrdenHoy.length===0) return 0; // sin ruta armada hoy, no reordena nada
+    const ia = rutaOrdenHoy.indexOf(a.id);
+    const ib = rutaOrdenHoy.indexOf(b.id);
+    // Los que están en la ruta van primero, en el orden exacto que dejó
+    // el técnico (manual o vía "Optimizar Ruta"). Los que no están en
+    // la ruta de hoy (recién asignados, de otro día, etc.) quedan
+    // después, sin alterar su orden relativo entre sí.
+    if(ia===-1 && ib===-1) return 0;
+    if(ia===-1) return 1;
+    if(ib===-1) return -1;
+    return ia-ib;
   });
 
   const toggleSel=(id,e)=>{
