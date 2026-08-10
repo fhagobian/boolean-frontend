@@ -7962,7 +7962,7 @@ const AnalisisProactivo = ({toast, perfil}) => {
   const [justificandoId, setJustificandoId] = useState(null);
   const [textoJustif, setTextoJustif] = useState("");
   const [guardandoJustif, setGuardandoJustif] = useState(false);
-  const equipoSel = esRegional ? (perfil?.empresa_codigo||"") : "";
+  const equipoSel = (esRegional||esSupervisor) ? (perfil?.empresa_codigo||"") : "";
 
   const cargar = async () => {
     if(!ANALYTICS_API_URL){
