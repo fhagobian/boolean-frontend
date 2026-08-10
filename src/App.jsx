@@ -635,18 +635,23 @@ const FL = ({label,color=B.t3,req}) => (
   </div>
 );
 
-const Toast = ({msg,type,onClose}) => (
-  <div style={{position:"fixed",bottom:24,right:24,zIndex:9999,background:B.card,
-    border:`1px solid ${type==="success"?B.green:type==="error"?B.red:B.orange}55`,
-    borderLeft:`3px solid ${type==="success"?B.green:type==="error"?B.red:B.orange}`,
-    padding:"11px 16px",display:"flex",alignItems:"center",gap:10,fontSize:13,maxWidth:340,
-    clipPath:"polygon(8px 0%,100% 0%,100% 100%,0% 100%,0% 8px)",
-    boxShadow:"0 8px 32px #00000066",animation:"popIn .3s ease"}}>
-    <span style={{fontSize:16,color:type==="success"?B.green:type==="error"?B.red:B.orange}}>
-      {type==="success"?"✓":type==="error"?"✗":"!"}
-    </span>
-    <span style={{flex:1,color:B.t1,fontWeight:600}}>{msg}</span>
-    <button className="btn" onClick={onClose} style={{background:"none",color:B.t3,fontSize:18,padding:0}}>×</button>
+const ToastStack = ({items, onDismiss}) => (
+  <div style={{position:"fixed",bottom:24,right:24,zIndex:9999,display:"flex",
+    flexDirection:"column-reverse",gap:8}}>
+    {items.map(t=>(
+      <div key={t.id} style={{background:B.card,
+        border:`1px solid ${t.type==="success"?B.green:t.type==="error"?B.red:B.orange}55`,
+        borderLeft:`3px solid ${t.type==="success"?B.green:t.type==="error"?B.red:B.orange}`,
+        padding:"11px 16px",display:"flex",alignItems:"center",gap:10,fontSize:13,maxWidth:340,
+        clipPath:"polygon(8px 0%,100% 0%,100% 100%,0% 100%,0% 8px)",
+        boxShadow:"0 8px 32px #00000066",animation:"popIn .3s ease"}}>
+        <span style={{fontSize:16,color:t.type==="success"?B.green:t.type==="error"?B.red:B.orange}}>
+          {t.type==="success"?"✓":t.type==="error"?"✗":"!"}
+        </span>
+        <span style={{flex:1,color:B.t1,fontWeight:600}}>{t.msg}</span>
+        <button className="btn" onClick={()=>onDismiss(t.id)} style={{background:"none",color:B.t3,fontSize:18,padding:0}}>×</button>
+      </div>
+    ))}
   </div>
 );
 
@@ -681,6 +686,107 @@ const BtnVolver = ({onClick, label="← VOLVER"}) => (
     {label}
   </button>
 );
+
+// ─── NOTIFICACIONES EN TIEMPO REAL (sesión activa) ────────────
+// No es push del sistema operativo (eso necesitaría Firebase/FCM y
+// que la app esté instalada) — son avisos que aparecen mientras la
+// persona está logueada con la app abierta, usando la misma
+// tecnología de tiempo real que ya usa el chat.
+const NotificacionesRealtime = ({perfil, casos, toast, view}) => {
+  const miId = perfil?.auth_id || perfil?.id;
+  const esRolTecnico = perfil?.rol==="TECNICO";
+  const esRolSupervisor = perfil?.rol==="SUPERVISOR";
+  const yaNotificadosSLA = useRef(new Set());
+  const yaNotificadosOutlier = useRef(new Set());
+  const viewRef = useRef(view);
+  useEffect(()=>{ viewRef.current = view; },[view]);
+
+  // ── A) Caso nuevo asignado al técnico ──
+  useEffect(()=>{
+    if(!miId || !esRolTecnico) return;
+    const sub = supabase.channel("notif_casos_asignados")
+      .on("postgres_changes",{event:"UPDATE",schema:"public",table:"casos"},
+        payload=>{
+          const antes = payload.old?.tecnico_id;
+          const ahora = payload.new?.tecnico_id;
+          if(ahora===miId && antes!==miId){
+            toast(`📦 Nuevo caso asignado: ${payload.new.razon_social||"sin nombre"}`, 5000);
+          }
+        }
+      ).subscribe();
+    return ()=>{ supabase.removeChannel(sub); };
+  },[miId, esRolTecnico]);
+
+  // ── B) Mensaje de chat recibido ──
+  useEffect(()=>{
+    if(!miId) return;
+    const sub = supabase.channel("notif_chat_mensajes")
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"mensajes_chat"},
+        payload=>{
+          const m = payload.new;
+          if(!m || m.autor_id===miId) return;
+          if(viewRef.current==="comunicaciones") return; // ya lo está viendo
+          const esParaMi = m.canal_id===`grupo_${perfil?.empresa_codigo}` ||
+                            (m.canal_id||"").includes(miId);
+          if(esParaMi){
+            const preview = (m.texto||"").slice(0,60);
+            toast(`💬 ${m.autor_nombre||"Mensaje"}: ${preview}`, 5000);
+          }
+        }
+      ).subscribe();
+    return ()=>{ supabase.removeChannel(sub); };
+  },[miId, perfil?.empresa_codigo]);
+
+  // ── C) SLA por vencer — 1 día antes, al técnico asignado ──
+  useEffect(()=>{
+    if(!esRolTecnico) return;
+    const revisar = () => {
+      const hoy = new Date();
+      const key = `boolean_sla_notif_${miId}_${hoy.toISOString().slice(0,10)}`;
+      let notifHoy = [];
+      try{ notifHoy = JSON.parse(localStorage.getItem(key)||"[]"); }catch{}
+      (casos||[]).forEach(c=>{
+        if(!c.sla_deadline || yaNotificadosSLA.current.has(c.id) || notifHoy.includes(c.id)) return;
+        const deadline = new Date(c.sla_deadline);
+        const horasRestantes = (deadline - hoy) / 3600000;
+        if(horasRestantes > 0 && horasRestantes <= 24){
+          toast(`⏱ SLA por vencer mañana: ${c.razon_social||"caso"} — ${deadline.toLocaleDateString("es-UY")}`, 6000);
+          yaNotificadosSLA.current.add(c.id);
+          notifHoy.push(c.id);
+          try{ localStorage.setItem(key, JSON.stringify(notifHoy)); }catch{}
+        }
+      });
+    };
+    revisar();
+    const intervalo = setInterval(revisar, 20*60*1000); // cada 20 minutos
+    return ()=>clearInterval(intervalo);
+  },[esRolTecnico, casos, miId]);
+
+  // ── D) Alerta B3 (outlier) — al supervisor correspondiente ──
+  useEffect(()=>{
+    if(!esRolSupervisor || !ANALYTICS_API_URL) return;
+    const revisar = async () => {
+      try{
+        const res = await fetch(`${ANALYTICS_API_URL}/alertas?equipo=${perfil?.empresa_codigo}`, {
+          headers:{Authorization:`Bearer ${ANALYTICS_API_SECRET}`},
+        });
+        if(!res.ok) return;
+        const data = await res.json();
+        (data.casos_outlier||[]).forEach(o=>{
+          if(o.justificado || yaNotificadosOutlier.current.has(o.caso_id)) return;
+          toast(`🔍 Caso atípico requiere tu revisión: ${o.razon_social||"caso"} (${o.veces_promedio}x el promedio)`, 6000);
+          yaNotificadosOutlier.current.add(o.caso_id);
+        });
+      }catch{} // si falla, no interrumpe nada más de la app
+    };
+    const primerChequeo = setTimeout(revisar, 4000); // espera a que cargue la sesión
+    const intervalo = setInterval(revisar, 20*60*1000);
+    return ()=>{ clearTimeout(primerChequeo); clearInterval(intervalo); };
+  },[esRolSupervisor, perfil?.empresa_codigo]);
+
+  return null; // no renderiza nada visible, solo dispara toasts
+};
+
 
 const Ticker = ({casos, perfil}) => {
   const [alertasTicker, setAlertasTicker] = useState([]);
@@ -9017,7 +9123,7 @@ export default function App(){
     setView(v);
     try{ localStorage.setItem("boolean_view",v); }catch{}
   };
-  const [toastMsg,setToastMsg]=useState(null);
+  const [toasts,setToasts]=useState([]);
   const [casoDetalle,setCasoDetalle]=useState(null);
   const [casos,setCasos]=useState([]);
   const [minutosAntes,setMinutosAntes]=useState(30);
@@ -9109,10 +9215,12 @@ export default function App(){
     if(!permitidos.includes(view)) setViewPersist("mision");
   },[perfil,view,casoDetalle]);
 
-  const toast=(msg,dur=3000)=>{
-    setToastMsg(msg);
-    setTimeout(()=>setToastMsg(null),dur);
+  const toast=(msg,dur=3500,type)=>{
+    const id = Date.now()+Math.random();
+    setToasts(prev=>[...prev.slice(-3), {id,msg,type}]); // máximo 4 visibles a la vez
+    setTimeout(()=>setToasts(prev=>prev.filter(t=>t.id!==id)), dur);
   };
+  const dismissToast=(id)=>setToasts(prev=>prev.filter(t=>t.id!==id));
 
   const recargarCasos=async()=>{
     let query=supabase.from("casos").select("*").order("created_at",{ascending:false}).limit(10000);
@@ -9157,6 +9265,7 @@ export default function App(){
 
   return(
     <div className="app-root" style={{color:B.t1,fontFamily:"'Rajdhani',sans-serif"}}>
+      <NotificacionesRealtime perfil={perfil} casos={casos} toast={toast} view={view}/>
       <Ticker casos={casos} perfil={perfil}/>
       <div className="app-shell">
         <Sidebar view={view} setView={v=>{setViewPersist(v);setCasoDetalle(null);}} user={user} onLogout={async()=>{
@@ -9225,7 +9334,7 @@ export default function App(){
           {view==="config"&&<Config user={user} perfil={perfil} toast={toast} minutosAntes={minutosAntes} setMinutosAntes={setMinutosAntes}/>}
         </main>
       </div>
-      {toastMsg&&<Toast msg={toastMsg}/>}
+      {toasts.length>0&&<ToastStack items={toasts} onDismiss={dismissToast}/>}
     </div>
   );
 }
