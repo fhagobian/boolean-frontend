@@ -869,6 +869,7 @@ const Sidebar = ({view,setView,user,onLogout,casos,perfil,noLeidosChat}) => {
     {id:"comunicaciones",icon:"💬", emoji:"💬", label:"CHAT",             roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"], badge:noLeidosChat||0},
     {id:"logros",        icon:"★",  emoji:"🏆", label:"LOGROS",           roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
     {id:"usuarios",      icon:"👥", emoji:"👥", label:"USUARIOS",         roles:["DIRECTOR","REGIONAL"]},
+    {id:"almacenes",     icon:"📦", emoji:"📦", label:"STOCK",            roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
     {id:"config",        icon:"⟲", emoji:"⚙️", label:"CONFIG",           roles:["DIRECTOR"]},
   ];
   const menu=MENU_COMPLETO.filter(m=>m.roles.includes(rol));
@@ -8910,6 +8911,538 @@ const GestorNPS = ({toast}) => {
 };
 
 
+// ─── MÓDULO DE STOCK — Almacenes, Catálogo y Paquetes ─────────
+const ESTADO_PAQUETE_COLOR = {EN_TRANSITO:B.yellow, RECIBIDO:B.green};
+const ESTADO_TERMINAL_LABEL = {
+  ALMACEN:"En almacén", TECNICO:"En técnico", EN_TRANSITO_PAQUETE:"En tránsito",
+  INSTALADA:"Instalada en cliente", A_DEVOLVER:"A devolver (con problema)",
+};
+
+const ModuloAlmacenes = ({user, perfil, toast}) => {
+  const esDirector = perfil?.rol==="DIRECTOR";
+  const esRegional = perfil?.rol==="REGIONAL";
+  const esSupervisor = perfil?.rol==="SUPERVISOR";
+  const [tab, setTab] = useState("almacenes");
+
+  const TABS = [
+    {id:"almacenes", label:"🏬 ALMACENES"},
+    {id:"paquetes", label:"📦 PAQUETES"},
+    ...(esDirector ? [{id:"catalogo", label:"📋 CATÁLOGO"}] : []),
+  ];
+
+  return (
+    <div style={{maxWidth:1000,padding:"0 0 40px"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MÓDULO DE</div>
+        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>STOCK Y LOGÍSTICA</h1>
+      </div>
+
+      <div style={{display:"flex",gap:0,marginBottom:20,borderBottom:`1px solid ${B.border}`,flexWrap:"wrap"}}>
+        {TABS.map(t=>(
+          <button key={t.id} className={`tab-btn ${tab===t.id?"on":""}`} onClick={()=>setTab(t.id)}>{t.label}</button>
+        ))}
+      </div>
+
+      {tab==="catalogo" && esDirector && <TabCatalogo toast={toast}/>}
+      {tab==="almacenes" && <TabAlmacenes toast={toast} perfil={perfil} esDirector={esDirector}/>}
+      {tab==="paquetes" && <TabPaquetes toast={toast} perfil={perfil} esDirector={esDirector} esRegional={esRegional} esSupervisor={esSupervisor}/>}
+    </div>
+  );
+};
+
+// ── TAB CATÁLOGO ────────────────────────────────────────────
+const TabCatalogo = ({toast}) => {
+  const [insumos, setInsumos] = useState([]);
+  const [modelos, setModelos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [nuevoInsumo, setNuevoInsumo] = useState({nombre:"",unidad:"unidad",stock_minimo:3});
+  const [nuevoModelo, setNuevoModelo] = useState("");
+
+  const cargar = async () => {
+    setLoading(true);
+    const [{data:i}, {data:m}] = await Promise.all([
+      supabase.from("catalogo_insumos").select("*").order("nombre"),
+      supabase.from("catalogo_modelos_terminal").select("*").order("nombre"),
+    ]);
+    setInsumos(i||[]); setModelos(m||[]); setLoading(false);
+  };
+  useEffect(()=>{ cargar(); },[]);
+
+  const agregarInsumo = async () => {
+    if(!nuevoInsumo.nombre.trim()){ toast("Escribí un nombre"); return; }
+    const {error} = await supabase.from("catalogo_insumos").insert({
+      nombre: nuevoInsumo.nombre.trim(), unidad: nuevoInsumo.unidad,
+      stock_minimo: Number(nuevoInsumo.stock_minimo)||3,
+    });
+    if(error){ toast("Error: "+error.message); return; }
+    toast("✓ Insumo agregado");
+    setNuevoInsumo({nombre:"",unidad:"unidad",stock_minimo:3});
+    cargar();
+  };
+
+  const agregarModelo = async () => {
+    if(!nuevoModelo.trim()){ toast("Escribí un nombre"); return; }
+    const {error} = await supabase.from("catalogo_modelos_terminal").insert({nombre: nuevoModelo.trim()});
+    if(error){ toast("Error: "+error.message); return; }
+    toast("✓ Modelo agregado");
+    setNuevoModelo("");
+    cargar();
+  };
+
+  const toggleActivo = async (tabla, id, activo) => {
+    await supabase.from(tabla).update({activo:!activo}).eq("id",id);
+    cargar();
+  };
+
+  if(loading) return <div style={{display:"flex",justifyContent:"center",padding:40}}><Spin s={30}/></div>;
+
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+      <div>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>INSUMOS GENÉRICOS</div>
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:14,marginBottom:10}}>
+          <div style={{display:"flex",gap:6,marginBottom:8}}>
+            <input className="field" placeholder="Nombre (ej: Cargador USB-C)" style={{flex:2,fontSize:12,padding:"7px 10px"}}
+              value={nuevoInsumo.nombre} onChange={e=>setNuevoInsumo(v=>({...v,nombre:e.target.value}))}/>
+            <input className="field" placeholder="Unidad" style={{flex:1,fontSize:12,padding:"7px 10px"}}
+              value={nuevoInsumo.unidad} onChange={e=>setNuevoInsumo(v=>({...v,unidad:e.target.value}))}/>
+            <input className="field" type="number" placeholder="Mín." style={{width:60,fontSize:12,padding:"7px 10px"}}
+              value={nuevoInsumo.stock_minimo} onChange={e=>setNuevoInsumo(v=>({...v,stock_minimo:e.target.value}))}/>
+          </div>
+          <Bb label="+ AGREGAR INSUMO" small full color={B.teal} onClick={agregarInsumo}/>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:4}}>
+          {insumos.map(i=>(
+            <div key={i.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+              padding:"8px 12px",background:B.card,border:`1px solid ${B.border}`,opacity:i.activo?1:0.4}}>
+              <span style={{fontSize:12}}>{i.nombre} <span style={{color:B.t3}}>({i.unidad}, mín. {i.stock_minimo})</span></span>
+              <button onClick={()=>toggleActivo("catalogo_insumos",i.id,i.activo)}
+                style={{background:"none",border:"none",color:i.activo?B.green:B.t3,fontSize:11,cursor:"pointer"}}>
+                {i.activo?"✓ Activo":"Inactivo"}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>MODELOS DE TERMINAL</div>
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:14,marginBottom:10}}>
+          <div style={{display:"flex",gap:6,marginBottom:8}}>
+            <input className="field" placeholder="Nombre (ej: Ingenico Move 5000)" style={{flex:1,fontSize:12,padding:"7px 10px"}}
+              value={nuevoModelo} onChange={e=>setNuevoModelo(e.target.value)}/>
+          </div>
+          <Bb label="+ AGREGAR MODELO" small full color={B.teal} onClick={agregarModelo}/>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:4}}>
+          {modelos.map(m=>(
+            <div key={m.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+              padding:"8px 12px",background:B.card,border:`1px solid ${B.border}`,opacity:m.activo?1:0.4}}>
+              <span style={{fontSize:12}}>{m.nombre}</span>
+              <button onClick={()=>toggleActivo("catalogo_modelos_terminal",m.id,m.activo)}
+                style={{background:"none",border:"none",color:m.activo?B.green:B.t3,fontSize:11,cursor:"pointer"}}>
+                {m.activo?"✓ Activo":"Inactivo"}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── TAB ALMACENES ───────────────────────────────────────────
+const TabAlmacenes = ({toast, perfil, esDirector}) => {
+  const [almacenes, setAlmacenes] = useState([]);
+  const [supervisores, setSupervisores] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showNuevo, setShowNuevo] = useState(false);
+  const [verDetalle, setVerDetalle] = useState(null);
+  const [nuevo, setNuevo] = useState({propietario:"",departamento:"",localidad:"",direccion:"",telefono:"",responsable_id:""});
+
+  const cargar = async () => {
+    setLoading(true);
+    const [{data:a}, {data:s}] = await Promise.all([
+      supabase.from("almacenes").select("*").order("tipo").order("propietario"),
+      supabase.from("usuarios").select("id,nombre,apellido,rol").in("rol",["SUPERVISOR","REGIONAL"]),
+    ]);
+    setAlmacenes(a||[]); setSupervisores(s||[]); setLoading(false);
+  };
+  useEffect(()=>{ cargar(); },[]);
+
+  const crearAlmacen = async () => {
+    if(!nuevo.propietario||!nuevo.departamento){ toast("Completá al menos propietario y departamento"); return; }
+    const resp = supervisores.find(s=>s.id===nuevo.responsable_id);
+    const {error} = await supabase.from("almacenes").insert({
+      tipo:"EQUIPO", propietario:nuevo.propietario, departamento:nuevo.departamento,
+      localidad:nuevo.localidad, direccion:nuevo.direccion, telefono:nuevo.telefono,
+      responsable_id: nuevo.responsable_id||null,
+      responsable_nombre: resp?`${resp.nombre} ${resp.apellido}`:null,
+    });
+    if(error){ toast("Error: "+error.message); return; }
+    toast("✓ Almacén creado");
+    setShowNuevo(false);
+    setNuevo({propietario:"",departamento:"",localidad:"",direccion:"",telefono:"",responsable_id:""});
+    cargar();
+  };
+
+  if(loading) return <div style={{display:"flex",justifyContent:"center",padding:40}}><Spin s={30}/></div>;
+
+  if(verDetalle) return <DetalleAlmacen almacen={verDetalle} onVolver={()=>setVerDetalle(null)} toast={toast}/>;
+
+  return (
+    <div>
+      {esDirector && (
+        <div style={{marginBottom:16}}>
+          <Bb label={showNuevo?"CANCELAR":"+ NUEVO ALMACÉN DE EQUIPO"} small
+            color={showNuevo?B.t3:B.orange} onClick={()=>setShowNuevo(v=>!v)}/>
+        </div>
+      )}
+      {showNuevo && (
+        <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div><FL label="Propietario (equipo)"/>
+              <select className="field" value={nuevo.propietario} onChange={e=>setNuevo(v=>({...v,propietario:e.target.value}))}>
+                <option value="">Elegir...</option>
+                {EMPRESAS.map(e=><option key={e.codigo} value={e.codigo}>{e.nombre}</option>)}
+              </select></div>
+            <div><FL label="Departamento"/>
+              <select className="field" value={nuevo.departamento} onChange={e=>setNuevo(v=>({...v,departamento:e.target.value}))}>
+                <option value="">Elegir...</option>
+                {DEPARTAMENTOS_UY.map(d=><option key={d} value={d}>{d}</option>)}
+              </select></div>
+            <div><FL label="Localidad"/>
+              <input className="field" value={nuevo.localidad} onChange={e=>setNuevo(v=>({...v,localidad:e.target.value}))}/></div>
+            <div><FL label="Teléfono"/>
+              <input className="field" value={nuevo.telefono} onChange={e=>setNuevo(v=>({...v,telefono:e.target.value}))}/></div>
+            <div style={{gridColumn:"span 2"}}><FL label="Dirección"/>
+              <input className="field" value={nuevo.direccion} onChange={e=>setNuevo(v=>({...v,direccion:e.target.value}))}/></div>
+            <div style={{gridColumn:"span 2"}}><FL label="Responsable"/>
+              <select className="field" value={nuevo.responsable_id} onChange={e=>setNuevo(v=>({...v,responsable_id:e.target.value}))}>
+                <option value="">Elegir supervisor o regional...</option>
+                {supervisores.map(s=><option key={s.id} value={s.id}>{s.nombre} {s.apellido} ({s.rol})</option>)}
+              </select></div>
+          </div>
+          <Bb label="GUARDAR ALMACÉN" color={B.green} onClick={crearAlmacen}/>
+        </div>
+      )}
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
+        {almacenes.map(a=>(
+          <div key={a.id} onClick={()=>setVerDetalle(a)} style={{background:B.card,border:`1px solid ${B.border}`,
+            borderTop:`3px solid ${a.tipo==="CENTRAL"?B.purple:B.orange}`,padding:16,cursor:"pointer",transition:"transform .15s"}}
+            onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"}
+            onMouseLeave={e=>e.currentTarget.style.transform="none"}>
+            <div style={{fontSize:9,color:B.t3,letterSpacing:".08em",marginBottom:4}}>
+              {a.tipo==="CENTRAL"?"ALMACÉN CENTRAL":"ALMACÉN DE EQUIPO"}
+            </div>
+            <div style={{fontSize:14,fontWeight:700,color:B.t1}}>{a.propietario}</div>
+            {a.departamento && <div style={{fontSize:11,color:B.t2,marginTop:2}}>📍 {a.departamento}{a.localidad?` — ${a.localidad}`:""}</div>}
+            {a.direccion && <div style={{fontSize:10,color:B.t3,marginTop:4}}>{a.direccion}</div>}
+            {a.responsable_nombre && <div style={{fontSize:10,color:B.t3,marginTop:2}}>👤 {a.responsable_nombre}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const DetalleAlmacen = ({almacen, onVolver, toast}) => {
+  const [insumos, setInsumos] = useState([]);
+  const [terminales, setTerminales] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(()=>{
+    Promise.all([
+      supabase.from("stock_insumos").select("*, catalogo_insumos(nombre,unidad)").eq("almacen_id",almacen.id),
+      supabase.from("terminales").select("*, catalogo_modelos_terminal(nombre)").eq("almacen_id",almacen.id),
+    ]).then(([{data:i},{data:t}])=>{
+      setInsumos(i||[]); setTerminales(t||[]); setLoading(false);
+    });
+  },[almacen.id]);
+
+  if(loading) return <div style={{display:"flex",justifyContent:"center",padding:40}}><Spin s={30}/></div>;
+
+  return (
+    <div>
+      <Bb label="← VOLVER" small ghost color={B.t3} onClick={onVolver}/>
+      <h3 style={{fontSize:16,fontWeight:700,margin:"16px 0 4px"}}>{almacen.propietario}</h3>
+      <div style={{fontSize:11,color:B.t3,marginBottom:20}}>{almacen.departamento} {almacen.localidad?`— ${almacen.localidad}`:""}</div>
+
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>INSUMOS EN STOCK</div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:14,marginBottom:20}}>
+        {insumos.length>0 ? insumos.map(i=>(
+          <div key={i.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",
+            borderBottom:`1px solid ${B.border}`,fontSize:12}}>
+            <span>{i.catalogo_insumos?.nombre}</span>
+            <span style={{fontFamily:"'Share Tech Mono',monospace",color:i.cantidad<=3?B.red:B.t1}}>
+              {i.cantidad} {i.catalogo_insumos?.unidad}
+            </span>
+          </div>
+        )) : <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:10}}>Sin insumos</div>}
+      </div>
+
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>TERMINALES EN STOCK</div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:14}}>
+        {terminales.length>0 ? terminales.map(t=>(
+          <div key={t.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",
+            borderBottom:`1px solid ${B.border}`,fontSize:12}}>
+            <span>{t.catalogo_modelos_terminal?.nombre} <span style={{color:B.t3}}>· S/N {t.numero_serie}</span></span>
+            <span style={{color:B.green}}>{ESTADO_TERMINAL_LABEL[t.estado]}</span>
+          </div>
+        )) : <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:10}}>Sin terminales</div>}
+      </div>
+    </div>
+  );
+};
+
+
+// ── TAB PAQUETES ────────────────────────────────────────────
+const TabPaquetes = ({toast, perfil, esDirector, esRegional, esSupervisor}) => {
+  const [paquetes, setPaquetes] = useState([]);
+  const [almacenes, setAlmacenes] = useState([]);
+  const [insumosCat, setInsumosCat] = useState([]);
+  const [terminalesCentral, setTerminalesCentral] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showNuevo, setShowNuevo] = useState(false);
+  const [confirmando, setConfirmando] = useState(null);
+
+  const cargar = async () => {
+    setLoading(true);
+    const [{data:p},{data:a},{data:ic}] = await Promise.all([
+      supabase.from("paquetes").select("*, almacenes:almacen_destino_id(propietario,departamento,responsable_id)")
+        .order("enviado_at",{ascending:false}),
+      supabase.from("almacenes").select("*"),
+      supabase.from("catalogo_insumos").select("*").eq("activo",true),
+    ]);
+    setPaquetes(p||[]); setAlmacenes(a||[]); setInsumosCat(ic||[]);
+    const central = (a||[]).find(x=>x.tipo==="CENTRAL");
+    if(central){
+      const {data:t} = await supabase.from("terminales").select("*, catalogo_modelos_terminal(nombre)")
+        .eq("almacen_id",central.id).eq("estado","ALMACEN");
+      setTerminalesCentral(t||[]);
+    }
+    setLoading(false);
+  };
+  useEffect(()=>{ cargar(); },[]);
+
+  const puedeConfirmar = (paq) => {
+    if(paq.estado!=="EN_TRANSITO") return false;
+    if(!esRegional && !esSupervisor) return false;
+    const alm = almacenes.find(a=>a.id===paq.almacen_destino_id);
+    return alm?.propietario===perfil?.empresa_codigo;
+  };
+
+  const confirmarRecepcion = async (paq) => {
+    setConfirmando(paq.id);
+    const {error} = await supabase.rpc("confirmar_paquete",{
+      p_paquete_id: paq.id, p_confirmador_id: perfil?.id,
+      p_confirmador_nombre: `${perfil?.nombre||""} ${perfil?.apellido||""}`.trim(),
+    });
+    setConfirmando(null);
+    if(error){ toast("Error: "+error.message); return; }
+    toast("✓ Paquete confirmado — stock actualizado en tu almacén");
+    cargar();
+  };
+
+  if(loading) return <div style={{display:"flex",justifyContent:"center",padding:40}}><Spin s={30}/></div>;
+
+  return (
+    <div>
+      {esDirector && (
+        <div style={{marginBottom:16}}>
+          <Bb label={showNuevo?"CANCELAR":"+ ENVIAR PAQUETE"} small color={showNuevo?B.t3:B.orange} onClick={()=>setShowNuevo(v=>!v)}/>
+        </div>
+      )}
+      {showNuevo && (
+        <FormNuevoPaquete almacenes={almacenes} insumosCat={insumosCat} terminalesCentral={terminalesCentral}
+          perfil={perfil} toast={toast} onDone={()=>{setShowNuevo(false);cargar();}}/>
+      )}
+
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {paquetes.map(p=>(
+          <div key={p.id} style={{background:B.card,border:`1px solid ${B.border}`,
+            borderLeft:`3px solid ${ESTADO_PAQUETE_COLOR[p.estado]}`,padding:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+              <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                {p.foto_url && <img src={p.foto_url} alt="" style={{width:48,height:48,objectFit:"cover",borderRadius:2}}/>}
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,fontFamily:"'Share Tech Mono',monospace",color:B.orange}}>
+                    📦 {p.numero_rastreo}
+                  </div>
+                  <div style={{fontSize:11,color:B.t2,marginTop:2}}>
+                    → {p.almacenes?.propietario} ({p.almacenes?.departamento})
+                  </div>
+                  <div style={{fontSize:9,color:B.t3,marginTop:2}}>
+                    Enviado {new Date(p.enviado_at).toLocaleDateString("es-UY")} por {p.enviado_por_nombre||"—"}
+                  </div>
+                </div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
+                <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",
+                  background:`${ESTADO_PAQUETE_COLOR[p.estado]}22`,color:ESTADO_PAQUETE_COLOR[p.estado]}}>
+                  {p.estado==="EN_TRANSITO"?"🚚 EN TRÁNSITO":"✓ RECIBIDO"}
+                </span>
+                {puedeConfirmar(p) && (
+                  <Bb label="CONFIRMAR RECEPCIÓN" small color={B.green} saving={confirmando===p.id}
+                    onClick={()=>confirmarRecepcion(p)}/>
+                )}
+                {p.estado==="RECIBIDO" && p.recibido_por_nombre && (
+                  <span style={{fontSize:9,color:B.t3}}>por {p.recibido_por_nombre}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+        {paquetes.length===0 && <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:30}}>Sin paquetes enviados todavía</div>}
+      </div>
+    </div>
+  );
+};
+
+const FormNuevoPaquete = ({almacenes, insumosCat, terminalesCentral, perfil, toast, onDone}) => {
+  const [rastreo, setRastreo] = useState("");
+  const [destino, setDestino] = useState("");
+  const [foto, setFoto] = useState(null);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
+  const [items, setItems] = useState([]); // {tipo, insumo_id?, cantidad?, terminal_id?}
+  const [tipoNuevo, setTipoNuevo] = useState("INSUMO");
+  const [insumoSel, setInsumoSel] = useState("");
+  const [cantidadSel, setCantidadSel] = useState(1);
+  const [terminalSel, setTerminalSel] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const almacenesEquipo = almacenes.filter(a=>a.tipo==="EQUIPO");
+  const terminalesDisponibles = terminalesCentral.filter(t=>!items.some(i=>i.terminal_id===t.id));
+
+  const agregarItem = () => {
+    if(tipoNuevo==="INSUMO"){
+      if(!insumoSel){ toast("Elegí un insumo"); return; }
+      setItems(v=>[...v, {tipo:"INSUMO", insumo_id:Number(insumoSel), cantidad:Number(cantidadSel)||1,
+        _nombre: insumosCat.find(i=>i.id===Number(insumoSel))?.nombre}]);
+      setInsumoSel(""); setCantidadSel(1);
+    } else {
+      if(!terminalSel){ toast("Elegí una terminal"); return; }
+      const t = terminalesCentral.find(t=>t.id===Number(terminalSel));
+      setItems(v=>[...v, {tipo:"TERMINAL", terminal_id:Number(terminalSel),
+        _nombre:`${t?.catalogo_modelos_terminal?.nombre} · S/N ${t?.numero_serie}`}]);
+      setTerminalSel("");
+    }
+  };
+
+  const quitarItem = (idx) => setItems(v=>v.filter((_,i)=>i!==idx));
+
+  const subirFoto = async (file) => {
+    setSubiendoFoto(true);
+    try{
+      const ext = file.name.split(".").pop();
+      const path = `paquetes/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const {error} = await supabase.storage.from("boolean-adjuntos").upload(path, file, {upsert:false});
+      if(error) throw error;
+      const {data} = supabase.storage.from("boolean-adjuntos").getPublicUrl(path);
+      setFoto(data.publicUrl);
+      toast("✓ Foto cargada");
+    }catch(e){ toast("Error al subir foto: "+e.message); }
+    setSubiendoFoto(false);
+  };
+
+  const enviarPaquete = async () => {
+    if(!rastreo.trim()){ toast("Ingresá un número de rastreo"); return; }
+    if(!destino){ toast("Elegí el almacén de destino"); return; }
+    if(items.length===0){ toast("Agregá al menos un ítem"); return; }
+    setGuardando(true);
+
+    const central = almacenes.find(a=>a.tipo==="CENTRAL");
+    const {data:paq, error} = await supabase.from("paquetes").insert({
+      numero_rastreo: rastreo.trim(), foto_url: foto,
+      almacen_origen_id: central?.id, almacen_destino_id: Number(destino),
+      enviado_por: perfil?.id, enviado_por_nombre: `${perfil?.nombre||""} ${perfil?.apellido||""}`.trim(),
+    }).select().single();
+
+    if(error){ toast("Error: "+error.message); setGuardando(false); return; }
+
+    const filas = items.map(it=>({
+      paquete_id: paq.id, tipo: it.tipo,
+      insumo_id: it.insumo_id||null, cantidad: it.cantidad||null, terminal_id: it.terminal_id||null,
+    }));
+    await supabase.from("paquete_items").insert(filas);
+
+    // Marcar terminales incluidas como EN_TRANSITO_PAQUETE
+    const terminalIds = items.filter(i=>i.tipo==="TERMINAL").map(i=>i.terminal_id);
+    if(terminalIds.length>0){
+      await supabase.from("terminales").update({estado:"EN_TRANSITO_PAQUETE"}).in("id",terminalIds);
+    }
+
+    setGuardando(false);
+    toast("✓ Paquete enviado");
+    onDone();
+  };
+
+  return (
+    <div style={{background:B.card,border:`1px solid ${B.border}`,padding:16,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        <div><FL label="Número de rastreo"/>
+          <input className="field" placeholder="TRACK-2026-0001" value={rastreo} onChange={e=>setRastreo(e.target.value)}/></div>
+        <div><FL label="Almacén destino"/>
+          <select className="field" value={destino} onChange={e=>setDestino(e.target.value)}>
+            <option value="">Elegir...</option>
+            {almacenesEquipo.map(a=><option key={a.id} value={a.id}>{a.propietario} — {a.departamento}</option>)}
+          </select></div>
+      </div>
+
+      <FL label="Foto del paquete"/>
+      <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:14}}>
+        {foto && <img src={foto} alt="" style={{width:56,height:56,objectFit:"cover",borderRadius:2}}/>}
+        <input type="file" accept="image/*" disabled={subiendoFoto}
+          onChange={e=>e.target.files[0]&&subirFoto(e.target.files[0])}
+          style={{fontSize:11,color:B.t2}}/>
+        {subiendoFoto && <Spin s={16}/>}
+      </div>
+
+      <FL label="Ítems del paquete"/>
+      <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+        <select className="field" style={{width:110}} value={tipoNuevo} onChange={e=>setTipoNuevo(e.target.value)}>
+          <option value="INSUMO">Insumo</option>
+          <option value="TERMINAL">Terminal</option>
+        </select>
+        {tipoNuevo==="INSUMO" ? (
+          <>
+            <select className="field" style={{flex:1}} value={insumoSel} onChange={e=>setInsumoSel(e.target.value)}>
+              <option value="">Elegir insumo...</option>
+              {insumosCat.map(i=><option key={i.id} value={i.id}>{i.nombre}</option>)}
+            </select>
+            <input className="field" type="number" min="1" style={{width:70}} value={cantidadSel}
+              onChange={e=>setCantidadSel(e.target.value)}/>
+          </>
+        ) : (
+          <select className="field" style={{flex:1}} value={terminalSel} onChange={e=>setTerminalSel(e.target.value)}>
+            <option value="">Elegir terminal disponible en central...</option>
+            {terminalesDisponibles.map(t=>(
+              <option key={t.id} value={t.id}>{t.catalogo_modelos_terminal?.nombre} · S/N {t.numero_serie}</option>
+            ))}
+          </select>
+        )}
+        <Bb label="+" small color={B.teal} onClick={agregarItem}/>
+      </div>
+
+      {items.length>0 && (
+        <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>
+          {items.map((it,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+              padding:"6px 10px",background:B.deep,fontSize:11}}>
+              <span>{it.tipo==="INSUMO"?`${it.cantidad}x `:""}{it._nombre}</span>
+              <button onClick={()=>quitarItem(i)} style={{background:"none",border:"none",color:B.red,cursor:"pointer"}}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Bb label="ENVIAR PAQUETE" color={B.orange} saving={guardando} onClick={enviarPaquete}/>
+    </div>
+  );
+};
+
+
 const Config=({user,perfil,toast,minutosAntes,setMinutosAntes})=>{
   const esDirector = perfil?.rol==="DIRECTOR";
   const [tab,setTab]=useState("notificaciones");
@@ -9206,9 +9739,9 @@ export default function App(){
     if(!perfil) return;
     if(casoDetalle) return; // no redirigir si hay un caso abierto
     const PERMISOS={
-      DIRECTOR:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","config","detalle"],
-      REGIONAL:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","detalle"],
-      SUPERVISOR: ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","detalle"],
+      DIRECTOR:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","almacenes","config","detalle"],
+      REGIONAL:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","almacenes","detalle"],
+      SUPERVISOR: ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","almacenes","detalle"],
       TECNICO:    ["mision","ruta","casos","comunicaciones","logros","detalle"],
     };
     const permitidos=PERMISOS[perfil.rol]||PERMISOS.DIRECTOR;
@@ -9256,9 +9789,9 @@ export default function App(){
   const user=session.user;
   const rol=perfil?.rol||"DIRECTOR";
   const PERMISOS={
-    DIRECTOR:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","config","detalle"],
-    REGIONAL:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","detalle"],
-    SUPERVISOR: ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","detalle"],
+    DIRECTOR:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","almacenes","config","detalle"],
+    REGIONAL:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","almacenes","detalle"],
+    SUPERVISOR: ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","almacenes","detalle"],
     TECNICO:    ["mision","ruta","casos","comunicaciones","logros","detalle"],
   };
   const puedeVer=(v)=>(PERMISOS[rol]||PERMISOS.DIRECTOR).includes(v);
@@ -9331,6 +9864,7 @@ export default function App(){
           {view==="comunicaciones"&&<Comunicaciones user={user} perfil={perfil} toast={toast} onLeer={()=>setNoLeidosChat(0)}/>}
           {view==="logros"&&<Logros user={user} toast={toast}/>}
           {view==="usuarios"&&<Usuarios user={user} perfil={perfil} toast={toast} casos={casos}/>}
+          {view==="almacenes"&&<ModuloAlmacenes user={user} perfil={perfil} toast={toast}/>}
           {view==="config"&&<Config user={user} perfil={perfil} toast={toast} minutosAntes={minutosAntes} setMinutosAntes={setMinutosAntes}/>}
         </main>
       </div>
