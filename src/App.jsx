@@ -869,7 +869,7 @@ const Sidebar = ({view,setView,user,onLogout,casos,perfil,noLeidosChat}) => {
     {id:"comunicaciones",icon:"💬", emoji:"💬", label:"CHAT",             roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"], badge:noLeidosChat||0},
     {id:"logros",        icon:"★",  emoji:"🏆", label:"LOGROS",           roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
     {id:"usuarios",      icon:"👥", emoji:"👥", label:"USUARIOS",         roles:["DIRECTOR","REGIONAL"]},
-    {id:"almacenes",     icon:"📦", emoji:"📦", label:"STOCK",            roles:["DIRECTOR","REGIONAL","SUPERVISOR"]},
+    {id:"almacenes",     icon:"📦", emoji:"📦", label:"STOCK",            roles:["DIRECTOR","REGIONAL","SUPERVISOR","TECNICO"]},
     {id:"config",        icon:"⟲", emoji:"⚙️", label:"CONFIG",           roles:["DIRECTOR"]},
   ];
   const menu=MENU_COMPLETO.filter(m=>m.roles.includes(rol));
@@ -4066,7 +4066,7 @@ const CasoDetalle=({caso:casoInit,user,onBack,toast,perfil,onUpdate})=>{
         }}
       />}
       {showCierre&&<ModalCierre caso={caso} user={user} onClose={()=>setShowCierre(false)} onGuardar={guardarCierre}/>}
-      {showFinalizar&&<OverlayFinalizar caso={caso} onVolver={()=>setShowFinalizar(false)} onGuardar={async(updates, extras)=>{
+      {showFinalizar&&<OverlayFinalizar caso={caso} user={user} onVolver={()=>setShowFinalizar(false)} onGuardar={async(updates, extras)=>{
         const h=[...(caso.historial||[]),{id:Date.now(),tipo:"FINALIZACION",
           texto:`FINALIZADO — ${updates.resolvio?"Resuelto":"No resuelto"}${updates.cierre_modelo_terminal?` · Modelo: ${updates.cierre_modelo_terminal}`:""}${updates.cierre_serie_terminal?` · Serie: ${updates.cierre_serie_terminal}`:""}`,
           usuario:user.email,ts:new Date().toISOString()}];
@@ -4681,7 +4681,7 @@ const OverlayRecoordinar = ({ caso, onVolver, onGuardar }) => {
 };
 
 // ─── OVERLAY FINALIZAR — hasta 7 pasos ──────────────────────
-const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
+const OverlayFinalizar = ({ caso, user, onVolver, onGuardar }) => {
   const tipo = caso.tipo_proceso?.toUpperCase();
   const esST  = ["SERVICIO_TECNICO","SOPORTE"].includes(tipo);
   const esINS = tipo === "INSTALACION";
@@ -4878,6 +4878,16 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
     const [obs,setObs] = useState("");
     const [showScan,setScan] = useState(false);
     const [saving,setSaving] = useState(false);
+    const [stockTerminales,setStockTerminales] = useState([]);
+    const [terminalSel,setTerminalSel] = useState(null); // objeto terminal elegida del stock
+    const [cargaManual,setCargaManual] = useState(false); // "no está en mi stock" — fallback
+
+    useEffect(()=>{
+      if(!user?.id) return;
+      supabase.from("terminales").select("*, catalogo_modelos_terminal(nombre)")
+        .eq("tecnico_id", user.id).eq("estado","TECNICO")
+        .then(({data})=>setStockTerminales(data||[]));
+    },[]);
 
     const PRUEBAS_LIST = [
       {id:"venta",     label:"Prueba de Venta exitosa"},
@@ -4889,12 +4899,22 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
 
     const guardar = async() => {
       setSaving(true);
+      const modeloFinal = terminalSel ? terminalSel.catalogo_modelos_terminal?.nombre : modelo;
+      const serieFinal = terminalSel ? terminalSel.numero_serie : serie;
+      if(terminalSel){
+        await supabase.from("terminales").update({
+          estado:"INSTALADA", tecnico_id:null, caso_id:String(caso.id), updated_at:new Date().toISOString(),
+        }).eq("id", terminalSel.id);
+        await supabase.from("consumo_terminales").insert({
+          terminal_id: terminalSel.id, caso_id:String(caso.id), tecnico_id:user?.id, tipo_operacion:"INSTALADA",
+        });
+      }
       await onGuardar({
         estado:"FINALIZADO",
         resolvio: completa===true,
         cierre_completado: completa===true,
-        cierre_modelo_terminal: modelo,
-        cierre_serie_terminal: serie,
+        cierre_modelo_terminal: modeloFinal,
+        cierre_serie_terminal: serieFinal,
         cierre_descripcion_problema: completa===false ? obs : "Instalación completa con pruebas exitosas",
         cierre_at: new Date().toISOString(),
         ...(completa===false ? {obs_supervisor: obs} : {}),
@@ -4957,45 +4977,85 @@ const OverlayFinalizar = ({ caso, onVolver, onGuardar }) => {
       </PantallaAccion>
     );
 
-    // Si SÍ → modelo y serie
+    // Si SÍ → terminal instalada (del stock, o carga manual de respaldo)
     if(paso===3 && completa===true) return (
       <>
         {showScan&&<EscanerBarras onScan={v=>{setSerie(v);setScan(false);}} onClose={()=>setScan(false)}/>}
-        <PantallaAccion color={B.green} icono="🖥️" titulo="DATOS DEL EQUIPO"
+        <PantallaAccion color={B.green} icono="🖥️" titulo="TERMINAL INSTALADA"
           subtitulo={caso.razon_social} pasoActual={3} totalPasos={3}
-          botonLabel="✓ FINALIZAR INSTALACIÓN" botonDisabled={!modelo||!serie.trim()}
+          botonLabel="✓ FINALIZAR INSTALACIÓN"
+          botonDisabled={cargaManual ? (!modelo||!serie.trim()) : !terminalSel}
           saving={saving} onVolver={()=>setPaso(2)} onBoton={guardar}>
-          <div style={{display:"flex",flexDirection:"column",gap:20}}>
+          {!cargaManual ? (
             <div>
-              <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:12}}>Modelo instalado</div>
-              <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {MODELOS_TERMINAL.map(m=>(
-                  <button key={m} onClick={()=>setModelo(m)}
-                    style={{padding:"16px 18px",border:`2px solid ${modelo===m?B.green:"#2a2a2a"}`,
-                      background:modelo===m?"#001a0a":"#0e0e14",color:modelo===m?B.green:"#ccc",
-                      cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:14,
-                      fontSize:15,fontWeight:modelo===m?700:400,transition:"all .15s"}}>
-                    <span style={{fontSize:20}}>{modelo===m?"◉":"○"}</span>{m}
-                  </button>
-                ))}
+              <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:12}}>
+                Elegí de tu stock cuál instalaste:
               </div>
-            </div>
-            <div>
-              <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:10}}>Serie del equipo</div>
-              <button onClick={()=>setScan(true)}
-                style={{width:"100%",padding:"18px 0",marginBottom:12,background:"#001a33",
-                  border:`2px solid ${B.blue}`,color:B.blue,cursor:"pointer",fontSize:16,fontWeight:700,
-                  borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",gap:12}}>
-                <span style={{fontSize:28}}>📷</span> ESCANEAR
+              {stockTerminales.length>0 ? (
+                <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+                  {stockTerminales.map(t=>(
+                    <button key={t.id} onClick={()=>setTerminalSel(t)}
+                      style={{padding:"16px 18px",border:`2px solid ${terminalSel?.id===t.id?B.green:"#2a2a2a"}`,
+                        background:terminalSel?.id===t.id?"#001a0a":"#0e0e14",
+                        color:terminalSel?.id===t.id?B.green:"#ccc",
+                        cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:14,
+                        fontSize:14,textAlign:"left",transition:"all .15s"}}>
+                      <span style={{fontSize:20,flexShrink:0}}>{terminalSel?.id===t.id?"◉":"○"}</span>
+                      <span>
+                        <b>{t.catalogo_modelos_terminal?.nombre}</b>
+                        <div style={{fontSize:12,color:"#888"}}>S/N {t.numero_serie}</div>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div style={{fontSize:13,color:"#888",marginBottom:16,lineHeight:1.6}}>
+                  No tenés terminales en tu stock todavía.
+                </div>
+              )}
+              <button onClick={()=>setCargaManual(true)}
+                style={{background:"none",border:"none",color:B.blue,fontSize:12,cursor:"pointer",padding:6}}>
+                No está en mi stock — cargar manualmente
               </button>
+            </div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:20}}>
+              <button onClick={()=>setCargaManual(false)}
+                style={{background:"none",border:"none",color:B.blue,fontSize:12,cursor:"pointer",
+                  padding:0,textAlign:"left",marginBottom:-8}}>
+                ← Volver a elegir de mi stock
+              </button>
+              <div>
+                <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:12}}>Modelo instalado</div>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {MODELOS_TERMINAL.map(m=>(
+                    <button key={m} onClick={()=>setModelo(m)}
+                      style={{padding:"16px 18px",border:`2px solid ${modelo===m?B.green:"#2a2a2a"}`,
+                        background:modelo===m?"#001a0a":"#0e0e14",color:modelo===m?B.green:"#ccc",
+                        cursor:"pointer",borderRadius:2,display:"flex",alignItems:"center",gap:14,
+                        fontSize:15,fontWeight:modelo===m?700:400,transition:"all .15s"}}>
+                      <span style={{fontSize:20}}>{modelo===m?"◉":"○"}</span>{m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:15,fontWeight:700,color:"#ccc",marginBottom:10}}>Serie del equipo</div>
+                <button onClick={()=>setScan(true)}
+                  style={{width:"100%",padding:"18px 0",marginBottom:12,background:"#001a33",
+                    border:`2px solid ${B.blue}`,color:B.blue,cursor:"pointer",fontSize:16,fontWeight:700,
+                    borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",gap:12}}>
+                  <span style={{fontSize:28}}>📷</span> ESCANEAR
+                </button>
               <input className="field" placeholder="O escribí la serie..."
                 value={serie} onChange={e=>setSerie(e.target.value)}
                 style={{fontSize:18,padding:"16px",textAlign:"center",letterSpacing:".08em"}}/>
               {serie&&<div style={{marginTop:10,padding:"12px",background:"#001a0a",
                 border:`1px solid ${B.green}44`,fontSize:15,color:B.green,textAlign:"center",borderRadius:2}}>
                 ✓ <strong>{serie}</strong></div>}
+              </div>
             </div>
-          </div>
+          )}
         </PantallaAccion>
       </>
     );
@@ -8922,11 +8982,15 @@ const ModuloAlmacenes = ({user, perfil, toast}) => {
   const esDirector = perfil?.rol==="DIRECTOR";
   const esRegional = perfil?.rol==="REGIONAL";
   const esSupervisor = perfil?.rol==="SUPERVISOR";
+  const esTecnico = perfil?.rol==="TECNICO";
   const [tab, setTab] = useState("almacenes");
+
+  if(esTecnico) return <MiStockTecnico perfil={perfil} toast={toast}/>;
 
   const TABS = [
     {id:"almacenes", label:"🏬 ALMACENES"},
     {id:"paquetes", label:"📦 PAQUETES"},
+    {id:"devoluciones", label:"↩ DEVOLUCIONES"},
     ...(esDirector ? [{id:"catalogo", label:"📋 CATÁLOGO"}] : []),
   ];
 
@@ -8946,6 +9010,7 @@ const ModuloAlmacenes = ({user, perfil, toast}) => {
       {tab==="catalogo" && esDirector && <TabCatalogo toast={toast}/>}
       {tab==="almacenes" && <TabAlmacenes toast={toast} perfil={perfil} esDirector={esDirector}/>}
       {tab==="paquetes" && <TabPaquetes toast={toast} perfil={perfil} esDirector={esDirector} esRegional={esRegional} esSupervisor={esSupervisor}/>}
+      {tab==="devoluciones" && <TabDevoluciones toast={toast} perfil={perfil} esDirector={esDirector}/>}
     </div>
   );
 };
@@ -9443,6 +9508,215 @@ const FormNuevoPaquete = ({almacenes, insumosCat, terminalesCentral, perfil, toa
 };
 
 
+// ── MI STOCK — vista del Técnico ────────────────────────────
+const MiStockTecnico = ({perfil, toast}) => {
+  const [insumos, setInsumos] = useState([]);
+  const [terminales, setTerminales] = useState([]);
+  const [transferPendientes, setTransferPendientes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [confirmando, setConfirmando] = useState(null);
+  const [devolviendo, setDevolviendo] = useState(null);
+  const [motivoDevol, setMotivoDevol] = useState("");
+
+  const miId = perfil?.auth_id || perfil?.id;
+
+  const cargar = async () => {
+    setLoading(true);
+    const [{data:i},{data:t},{data:tr}] = await Promise.all([
+      supabase.from("stock_insumos").select("*, catalogo_insumos(nombre,unidad,stock_minimo)").eq("tecnico_id",miId),
+      supabase.from("terminales").select("*, catalogo_modelos_terminal(nombre)").eq("tecnico_id",miId).in("estado",["TECNICO","A_DEVOLVER"]),
+      supabase.from("transferencias").select("*, almacenes:almacen_origen_id(propietario,departamento)")
+        .eq("tecnico_destino_id",miId).eq("estado","PENDIENTE"),
+    ]);
+    setInsumos(i||[]); setTerminales(t||[]); setTransferPendientes(tr||[]);
+    setLoading(false);
+  };
+  useEffect(()=>{ if(miId) cargar(); },[miId]);
+
+  const confirmarTransferencia = async (tr) => {
+    setConfirmando(tr.id);
+    const {error} = await supabase.rpc("confirmar_transferencia",{
+      p_transferencia_id: tr.id, p_confirmador_id: miId,
+    });
+    setConfirmando(null);
+    if(error){ toast("Error: "+error.message); return; }
+    toast("✓ Transferencia confirmada — ya la tenés en tu stock");
+    cargar();
+  };
+
+  const confirmarDevolucion = async (terminal) => {
+    if(!motivoDevol.trim()){ toast("Describí brevemente el problema"); return; }
+    const {error:e1} = await supabase.from("terminales").update({
+      estado:"A_DEVOLVER", problema_reportado: motivoDevol.trim(), updated_at: new Date().toISOString(),
+    }).eq("id",terminal.id);
+    if(e1){ toast("Error: "+e1.message); return; }
+    await supabase.from("consumo_terminales").insert({
+      terminal_id: terminal.id, tecnico_id: miId,
+      tipo_operacion:"DEVUELTA_CON_PROBLEMA", problema_reportado: motivoDevol.trim(),
+    });
+    toast("✓ Terminal marcada a devolver — tu Supervisor la va a recoger");
+    setDevolviendo(null); setMotivoDevol("");
+    cargar();
+  };
+
+  if(loading) return <div style={{display:"flex",justifyContent:"center",padding:40}}><Spin s={30}/></div>;
+
+  return (
+    <div style={{maxWidth:700,padding:"0 0 40px"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:9,color:B.t3,fontWeight:700,letterSpacing:".18em"}}>MI</div>
+        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:900}}>STOCK</h1>
+      </div>
+
+      {/* Transferencias pendientes de confirmar */}
+      {transferPendientes.length>0 && (
+        <div style={{marginBottom:24}}>
+          <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>
+            ⏳ TRANSFERENCIAS PENDIENTES DE CONFIRMAR
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {transferPendientes.map(tr=>(
+              <div key={tr.id} style={{background:B.yellowDim,border:`1px solid ${B.yellow}44`,
+                borderLeft:`3px solid ${B.yellow}`,padding:14,display:"flex",justifyContent:"space-between",
+                alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:B.t1}}>
+                    Desde {tr.almacenes?.propietario} ({tr.almacenes?.departamento})
+                  </div>
+                  <div style={{fontSize:10,color:B.t3,marginTop:2}}>
+                    Enviado por {tr.enviado_por_nombre} — {new Date(tr.created_at).toLocaleDateString("es-UY")}
+                  </div>
+                </div>
+                <Bb label="CONFIRMAR RECEPCIÓN" small color={B.green} saving={confirmando===tr.id}
+                  onClick={()=>confirmarTransferencia(tr)}/>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Insumos */}
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>MIS INSUMOS</div>
+      <div style={{background:B.card,border:`1px solid ${B.border}`,padding:14,marginBottom:24}}>
+        {insumos.length>0 ? insumos.map(i=>(
+          <div key={i.id} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",
+            borderBottom:`1px solid ${B.border}`,fontSize:12}}>
+            <span>{i.catalogo_insumos?.nombre}</span>
+            <span style={{fontFamily:"'Share Tech Mono',monospace",
+              color:i.cantidad<=(i.catalogo_insumos?.stock_minimo||3)?B.red:B.t1}}>
+              {i.cantidad} {i.catalogo_insumos?.unidad}
+            </span>
+          </div>
+        )) : <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:10}}>Sin insumos en tu stock</div>}
+      </div>
+
+      {/* Terminales */}
+      <div style={{fontSize:10,color:B.orange,fontWeight:700,letterSpacing:".1em",marginBottom:10}}>MIS TERMINALES</div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {terminales.length>0 ? terminales.map(t=>(
+          <div key={t.id} style={{background:B.card,border:`1px solid ${B.border}`,
+            borderLeft:`3px solid ${t.estado==="A_DEVOLVER"?B.red:B.green}`,padding:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:700,color:B.t1}}>
+                  {t.catalogo_modelos_terminal?.nombre} <span style={{color:B.t3,fontWeight:400}}>· S/N {t.numero_serie}</span>
+                </div>
+                {t.estado==="A_DEVOLVER" && (
+                  <div style={{fontSize:10,color:B.red,marginTop:3}}>⚠ A devolver — {t.problema_reportado}</div>
+                )}
+              </div>
+              {t.estado==="TECNICO" && devolviendo!==t.id && (
+                <Bb label="MARCAR A DEVOLVER" small ghost color={B.red} onClick={()=>{setDevolviendo(t.id);setMotivoDevol("");}}/>
+              )}
+            </div>
+            {devolviendo===t.id && (
+              <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${B.border}`,display:"flex",gap:8}}>
+                <input className="field" style={{flex:1,fontSize:12,padding:"7px 10px"}}
+                  placeholder="Ej: pantalla rota, puerto de carga roto..."
+                  value={motivoDevol} onChange={e=>setMotivoDevol(e.target.value)} maxLength={150}/>
+                <Bb label="CONFIRMAR" small color={B.red} onClick={()=>confirmarDevolucion(t)}/>
+                <Bb label="CANCELAR" small ghost color={B.t3} onClick={()=>setDevolviendo(null)}/>
+              </div>
+            )}
+          </div>
+        )) : <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:20}}>Sin terminales en tu stock</div>}
+      </div>
+    </div>
+  );
+};
+
+
+// ── TAB DEVOLUCIONES — Supervisor/Regional reciben terminales con problema ──
+const TabDevoluciones = ({toast, perfil, esDirector}) => {
+  const [pendientes, setPendientes] = useState([]);
+  const [almacenes, setAlmacenes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [recibiendo, setRecibiendo] = useState(null);
+
+  const cargar = async () => {
+    setLoading(true);
+    const [{data:tecnicos}, {data:alm}] = await Promise.all([
+      supabase.from("usuarios").select("id,empresa_codigo").eq("rol","TECNICO"),
+      supabase.from("almacenes").select("*").eq("tipo","EQUIPO"),
+    ]);
+    setAlmacenes(alm||[]);
+
+    // Filtra a los técnicos de mi equipo (Director ve todos)
+    const idsRelevantes = esDirector ? null
+      : (tecnicos||[]).filter(t=>t.empresa_codigo===perfil?.empresa_codigo).map(t=>t.id);
+
+    let q = supabase.from("terminales").select("*, catalogo_modelos_terminal(nombre)").eq("estado","A_DEVOLVER");
+    if(idsRelevantes) q = q.in("tecnico_id", idsRelevantes.length?idsRelevantes:["__ninguno__"]);
+    const {data:t} = await q;
+    setPendientes(t||[]);
+    setLoading(false);
+  };
+  useEffect(()=>{ cargar(); },[]);
+
+  const recibirDevolucion = async (terminal) => {
+    // Vuelve al almacén de equipo del propio Supervisor/Regional
+    const almacenPropio = almacenes.find(a=>a.propietario===perfil?.empresa_codigo);
+    if(!almacenPropio){ toast("No encontré un almacén de equipo para tu empresa"); return; }
+    setRecibiendo(terminal.id);
+    const {error} = await supabase.from("terminales").update({
+      estado:"ALMACEN", almacen_id: almacenPropio.id, tecnico_id: null, updated_at: new Date().toISOString(),
+    }).eq("id",terminal.id);
+    setRecibiendo(null);
+    if(error){ toast("Error: "+error.message); return; }
+    toast("✓ Terminal recibida en tu almacén — el problema queda registrado para el central");
+    cargar();
+  };
+
+  if(loading) return <div style={{display:"flex",justifyContent:"center",padding:40}}><Spin s={30}/></div>;
+
+  return (
+    <div>
+      <div style={{fontSize:11,color:B.t2,marginBottom:16,lineHeight:1.6}}>
+        Terminales que los técnicos marcaron para devolver por algún problema. Al confirmar que la
+        recibiste, vuelve al stock de tu almacén de equipo — el motivo queda guardado para cuando
+        llegue al almacén central.
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {pendientes.map(t=>(
+          <div key={t.id} style={{background:B.card,border:`1px solid ${B.border}`,borderLeft:`3px solid ${B.red}`,
+            padding:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+            <div>
+              <div style={{fontSize:12,fontWeight:700,color:B.t1}}>
+                {t.catalogo_modelos_terminal?.nombre} <span style={{color:B.t3,fontWeight:400}}>· S/N {t.numero_serie}</span>
+              </div>
+              <div style={{fontSize:11,color:B.red,marginTop:3}}>⚠ {t.problema_reportado}</div>
+            </div>
+            <Bb label="RECIBIR DEVOLUCIÓN" small color={B.teal} saving={recibiendo===t.id}
+              onClick={()=>recibirDevolucion(t)}/>
+          </div>
+        ))}
+        {pendientes.length===0 && <div style={{color:B.t3,fontSize:12,textAlign:"center",padding:30}}>✓ Sin devoluciones pendientes</div>}
+      </div>
+    </div>
+  );
+};
+
+
 const Config=({user,perfil,toast,minutosAntes,setMinutosAntes})=>{
   const esDirector = perfil?.rol==="DIRECTOR";
   const [tab,setTab]=useState("notificaciones");
@@ -9742,7 +10016,7 @@ export default function App(){
       DIRECTOR:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","almacenes","config","detalle"],
       REGIONAL:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","almacenes","detalle"],
       SUPERVISOR: ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","almacenes","detalle"],
-      TECNICO:    ["mision","ruta","casos","comunicaciones","logros","detalle"],
+      TECNICO:    ["mision","ruta","casos","comunicaciones","logros","almacenes","detalle"],
     };
     const permitidos=PERMISOS[perfil.rol]||PERMISOS.DIRECTOR;
     if(!permitidos.includes(view)) setViewPersist("mision");
@@ -9792,7 +10066,7 @@ export default function App(){
     DIRECTOR:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","almacenes","config","detalle"],
     REGIONAL:   ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","usuarios","almacenes","detalle"],
     SUPERVISOR: ["mision","ruta","casos","nuevo","bulk","analitica","comunicaciones","logros","almacenes","detalle"],
-    TECNICO:    ["mision","ruta","casos","comunicaciones","logros","detalle"],
+    TECNICO:    ["mision","ruta","casos","comunicaciones","logros","almacenes","detalle"],
   };
   const puedeVer=(v)=>(PERMISOS[rol]||PERMISOS.DIRECTOR).includes(v);
 
